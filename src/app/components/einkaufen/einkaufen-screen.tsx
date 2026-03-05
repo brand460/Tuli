@@ -13,6 +13,7 @@ import {
   Store,
   ArrowUpDown,
   Settings,
+  ShoppingBag,
 } from "lucide-react";
 import {
   DndContext,
@@ -123,10 +124,39 @@ async function saveStoreSettings(settings: StoreSettingEntry[]): Promise<void> {
   }
 }
 
+async function fetchCustomCategories(): Promise<string[]> {
+  try {
+    const res = await fetch(
+      `${API_BASE}/custom-categories?household_id=${DEV_HOUSEHOLD_ID}`,
+      { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+    );
+    const json = await res.json();
+    return json.categories || [];
+  } catch (err) {
+    console.log("fetchCustomCategories error:", err);
+    return [];
+  }
+}
+
+async function saveCustomCategories(categories: string[]): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/custom-categories`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${publicAnonKey}`,
+      },
+      body: JSON.stringify({ household_id: DEV_HOUSEHOLD_ID, categories }),
+    });
+  } catch (err) {
+    console.log("saveCustomCategories error:", err);
+  }
+}
+
 // ── Store Logo Avatar ──────────────────────────────────────────────
 function StoreLogo({
   store,
-  size = 48,
+  size = 62,
   isSelected,
 }: {
   store: StoreInfo;
@@ -136,6 +166,7 @@ function StoreLogo({
   const [imgError, setImgError] = useState(false);
   const logoUrl = getLogoUrl(store.domain);
   const showLogo = logoUrl && !imgError;
+  const isAlleStore = store.id === "alle";
 
   return (
     <div
@@ -147,20 +178,28 @@ function StoreLogo({
       style={{
         width: size,
         height: size,
-        backgroundColor: showLogo ? "#F3F4F6" : store.bgColor,
-        color: store.color,
+        backgroundColor: isAlleStore ? "#F3F4F6" : (showLogo ? "#F3F4F6" : (imgError ? "#E5E7EB" : store.bgColor)),
       }}
     >
-      {showLogo ? (
+      {isAlleStore ? (
+        <ShoppingBag style={{ width: size * 0.45, height: size * 0.45 }} className="text-gray-500" />
+      ) : store.emoji ? (
+        <span className="select-none" style={{ fontSize: size * 0.45 }}>{store.emoji}</span>
+      ) : showLogo ? (
         <img
           src={logoUrl}
           alt={store.name}
           className="object-contain p-1.5"
-          style={{ width: size * 0.75, height: size * 0.75 }}
+          style={{ width: size * 0.75, height: size * 0.75, imageRendering: "crisp-edges" }}
           onError={() => setImgError(true)}
         />
       ) : (
-        <span className="text-xs font-bold select-none">{store.abbr}</span>
+        <span
+          className="font-bold select-none"
+          style={{ fontSize: size * 0.35, color: imgError ? "#6B7280" : store.color }}
+        >
+          {store.name.charAt(0).toUpperCase()}
+        </span>
       )}
     </div>
   );
@@ -203,25 +242,18 @@ function SortableStoreButton({
       <button
         {...attributes}
         {...listeners}
-        className={`flex flex-col items-center gap-1 touch-none animate-[wiggle_0.3s_ease-in-out_infinite] ${
+        className={`flex items-center justify-center touch-none animate-[wiggle_0.3s_ease-in-out_infinite] ${
           isDragging ? "scale-110 drop-shadow-lg" : ""
         }`}
       >
         <div className="relative">
-          <StoreLogo store={store} size={48} isSelected={isSelected} />
+          <StoreLogo store={store} size={62} isSelected={isSelected} />
           {count > 0 && (
             <span className="absolute -top-1 -right-1 bg-orange-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
               {count}
             </span>
           )}
         </div>
-        <span
-          className={`text-[10px] leading-tight max-w-[52px] truncate ${
-            isSelected ? "text-orange-500 font-semibold" : "text-gray-500"
-          }`}
-        >
-          {store.name}
-        </span>
       </button>
     </div>
   );
@@ -260,6 +292,15 @@ function StoreSelector({
 
   const storeIds = useMemo(() => stores.map((s) => s.id), [stores]);
 
+  const storeModifiers = useMemo(
+    () => [restrictToHorizontalAxis, restrictToParentElement],
+    []
+  );
+  const storeAutoScroll = useMemo(
+    () => ({ threshold: { x: 0.2, y: 0 }, acceleration: 10 }),
+    []
+  );
+
   const handlePointerDown = (storeId: string, e: React.PointerEvent) => {
     if (isReorderMode) return;
     longPressTriggered.current = false;
@@ -297,15 +338,16 @@ function StoreSelector({
   return (
     <div className="bg-white border-b border-gray-100">
       <div
-        className={`flex items-center gap-3 px-4 py-3 scrollbar-hide ${isReorderMode ? 'overflow-hidden' : 'overflow-x-auto'}`}
+        className={`flex items-center gap-4 px-4 py-3 scrollbar-hide ${isReorderMode ? 'overflow-x-auto scroll-smooth' : 'overflow-x-auto'}`}
         style={{ WebkitOverflowScrolling: "touch" }}
       >
         {isReorderMode ? (
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
-            modifiers={[restrictToHorizontalAxis, restrictToParentElement]}
+            modifiers={storeModifiers}
             onDragEnd={onStoreReorderEnd}
+            autoScroll={storeAutoScroll}
           >
             <SortableContext
               items={storeIds}
@@ -335,12 +377,15 @@ function StoreSelector({
                 onPointerUp={handlePointerUp}
                 onPointerLeave={handlePointerLeave}
                 onClick={() => handleClick(store.id)}
-                className="flex flex-col items-center gap-1 flex-shrink-0 transition-all duration-150"
+                onContextMenu={(e) => e.preventDefault()}
+                onTouchStart={(e) => e.preventDefault()}
+                className="flex items-center justify-center flex-shrink-0 transition-all duration-150"
+                style={{ WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none" }}
               >
                 <div className="relative">
                   <StoreLogo
                     store={store}
-                    size={48}
+                    size={62}
                     isSelected={isSelected}
                   />
                   {count > 0 && (
@@ -349,15 +394,6 @@ function StoreSelector({
                     </span>
                   )}
                 </div>
-                <span
-                  className={`text-[10px] leading-tight max-w-[52px] truncate ${
-                    isSelected
-                      ? "text-orange-500 font-semibold"
-                      : "text-gray-500"
-                  }`}
-                >
-                  {store.name}
-                </span>
               </button>
             );
           })
@@ -365,14 +401,11 @@ function StoreSelector({
         {!isReorderMode && (
           <button
             onClick={onAddStore}
-            className="flex flex-col items-center gap-1 flex-shrink-0"
+            className="flex items-center justify-center flex-shrink-0"
           >
-            <div className="w-12 h-12 rounded-full border-2 border-dashed border-gray-200 flex items-center justify-center text-gray-400 hover:border-orange-500 hover:text-orange-500 transition">
-              <Plus className="w-5 h-5" />
+            <div className="rounded-full border-2 border-dashed border-gray-200 flex items-center justify-center text-gray-400 hover:border-orange-500 hover:text-orange-500 transition" style={{ width: 62, height: 62 }}>
+              <Plus className="w-6 h-6" />
             </div>
-            <span className="text-[10px] text-gray-500 leading-tight">
-              Mehr
-            </span>
           </button>
         )}
       </div>
@@ -725,7 +758,9 @@ function CategorySortModal({
   stores,
   initialCategories,
   allKnownCategories,
-  onSave,
+  globalCustomCategories,
+  onAutoSave,
+  onAddGlobalCategory,
   onClose,
 }: {
   storeName: string;
@@ -733,13 +768,25 @@ function CategorySortModal({
   stores: StoreInfo[];
   initialCategories: string[];
   allKnownCategories: string[];
-  onSave: (categories: string[]) => void;
+  globalCustomCategories: string[];
+  onAutoSave: (categories: string[]) => void;
+  onAddGlobalCategory: (name: string) => void;
   onClose: () => void;
 }) {
   const [categories, setCategories] = useState<string[]>(initialCategories);
   const [newCat, setNewCat] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const isFirstRender = useRef(true);
+
+  // Auto-save on every change (skip initial render)
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    onAutoSave(categories);
+  }, [categories]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pointerSensor = useSensor(PointerSensor, {
     activationConstraint: { distance: 5 },
@@ -749,20 +796,32 @@ function CategorySortModal({
   });
   const sensors = useSensors(pointerSensor, touchSensor);
 
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const oldIdx = categories.indexOf(active.id as string);
-    const newIdx = categories.indexOf(over.id as string);
-    if (oldIdx >= 0 && newIdx >= 0) {
-      setCategories(arrayMove(categories, oldIdx, newIdx));
-    }
-  };
+  const catModifiers = useMemo(() => [restrictToVerticalAxis], []);
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      const oldIdx = categories.indexOf(active.id as string);
+      const newIdx = categories.indexOf(over.id as string);
+      if (oldIdx >= 0 && newIdx >= 0) {
+        setCategories(arrayMove(categories, oldIdx, newIdx));
+      }
+    },
+    [categories]
+  );
+
+  // Merge built-in known categories with global custom pool (deduplicated)
+  const mergedKnownCategories = useMemo(() => {
+    const set = new Set(allKnownCategories);
+    for (const c of globalCustomCategories) set.add(c);
+    return Array.from(set);
+  }, [allKnownCategories, globalCustomCategories]);
 
   const availableChips = useMemo(() => {
     const catSet = new Set(categories);
-    return allKnownCategories.filter((c) => !catSet.has(c));
-  }, [categories, allKnownCategories]);
+    return mergedKnownCategories.filter((c) => !catSet.has(c));
+  }, [categories, mergedKnownCategories]);
 
   const searchResults = useMemo(() => {
     if (!newCat.trim()) return [];
@@ -774,6 +833,16 @@ function CategorySortModal({
     const catName = (name || newCat).trim();
     if (!catName || categories.includes(catName)) return;
     setCategories((prev) => [...prev, catName]);
+    // If this is a truly new category (not in any built-in list), add to global pool
+    const isBuiltIn = allKnownCategories.some(
+      (c) => c.toLowerCase() === catName.toLowerCase()
+    );
+    const isAlreadyCustom = globalCustomCategories.some(
+      (c) => c.toLowerCase() === catName.toLowerCase()
+    );
+    if (!isBuiltIn && !isAlreadyCustom) {
+      onAddGlobalCategory(catName);
+    }
     setNewCat("");
     setShowSuggestions(false);
     inputRef.current?.focus();
@@ -781,7 +850,7 @@ function CategorySortModal({
 
   const showCustomOption =
     newCat.trim() &&
-    !allKnownCategories.some(
+    !mergedKnownCategories.some(
       (c) => c.toLowerCase() === newCat.trim().toLowerCase()
     ) &&
     !categories.includes(newCat.trim());
@@ -818,7 +887,7 @@ function CategorySortModal({
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
-            modifiers={[restrictToVerticalAxis]}
+            modifiers={catModifiers}
             onDragEnd={handleDragEnd}
           >
             <SortableContext
@@ -955,33 +1024,10 @@ function CategorySortModal({
                 </button>
               )}
             </div>
-            <button
-              onClick={() => {
-                if (searchResults.length > 0) {
-                  handleAddCategory(searchResults[0]);
-                } else {
-                  handleAddCategory();
-                }
-              }}
-              disabled={
-                !newCat.trim() || categories.includes(newCat.trim())
-              }
-              className="w-10 h-10 rounded-xl bg-orange-500 text-white flex items-center justify-center disabled:opacity-40 transition flex-shrink-0"
-            >
-              <Plus className="w-5 h-5" />
-            </button>
+            
           </div>
         </div>
 
-        {/* Save */}
-        <div className="px-5 pb-5 flex-shrink-0">
-          <button
-            onClick={() => onSave(categories)}
-            className="w-full py-3 rounded-full bg-orange-500 text-white font-semibold text-sm hover:bg-orange-600 transition"
-          >
-            Speichern
-          </button>
-        </div>
       </motion.div>
     </motion.div>
   );
@@ -1113,7 +1159,7 @@ function AddItemBar({
     setQuery("");
     setShowSuggestions(false);
     setQuickChips((prev) => prev.filter((c) => c !== name));
-    inputRef.current?.focus();
+    inputRef.current?.blur();
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -1133,7 +1179,6 @@ function AddItemBar({
       onAdd(pendingCustomName, category);
       setQuickChips((prev) => prev.filter((c) => c !== pendingCustomName));
       setPendingCustomName(null);
-      inputRef.current?.focus();
     }
   };
 
@@ -1153,6 +1198,7 @@ function AddItemBar({
             {quickChips.map((chip) => (
               <button
                 key={chip}
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => handleSelect(chip)}
                 className="flex-shrink-0 px-3 py-1.5 rounded-full bg-orange-50 text-orange-700 text-xs font-medium hover:bg-orange-100 transition whitespace-nowrap"
               >
@@ -1176,6 +1222,7 @@ function AddItemBar({
                   return (
                     <button
                       key={result.name}
+                      onMouseDown={(e) => e.preventDefault()}
                       onClick={() => handleSelect(result.name, result.category)}
                       className="w-full text-left px-4 py-2.5 hover:bg-gray-50 flex items-center justify-between transition"
                     >
@@ -1194,6 +1241,7 @@ function AddItemBar({
                 })}
                 {searchResults.length === 0 && query.trim() && (
                   <button
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={() => {
                       setPendingCustomName(query.trim());
                       setQuery("");
@@ -1242,13 +1290,7 @@ function AddItemBar({
               </button>
             )}
           </div>
-          <button
-            type="submit"
-            disabled={!query.trim()}
-            className="w-10 h-10 rounded-xl bg-orange-500 text-white flex items-center justify-center disabled:opacity-40 transition flex-shrink-0"
-          >
-            <Plus className="w-5 h-5" />
-          </button>
+          
         </form>
       </div>
 
@@ -1333,6 +1375,24 @@ function AddStoreModal({
   existingStoreIds: Set<string>;
 }) {
   const [query, setQuery] = useState("");
+  const [bottomOffset, setBottomOffset] = useState(0);
+
+  // Track visual viewport to shift modal above keyboard
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      const keyboardHeight = window.innerHeight - vv.height - vv.offsetTop;
+      setBottomOffset(Math.max(0, keyboardHeight));
+    };
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+    };
+  }, []);
 
   const allSuggestions = useMemo(() => {
     const suggestionIds = new Set(
@@ -1370,12 +1430,14 @@ function AddStoreModal({
     onAdd({ name, type: "sonstige", bgColor: "#6B7280" });
   };
 
+  const MIN_HEIGHT = 320;
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40"
+      className="fixed inset-0 z-50 bg-black/40"
       onClick={onClose}
     >
       <motion.div
@@ -1384,18 +1446,24 @@ function AddStoreModal({
         exit={{ y: 300 }}
         transition={{ type: "spring", damping: 28, stiffness: 300 }}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-sm bg-white rounded-t-2xl shadow-lg flex flex-col max-h-[75vh]"
+        className="fixed left-0 right-0 mx-auto w-full max-w-sm bg-white rounded-t-2xl shadow-lg flex flex-col"
+        style={{
+          bottom: bottomOffset,
+          height: "60vh",
+          minHeight: MIN_HEIGHT,
+          maxHeight: `calc(100vh - ${bottomOffset}px - 40px)`,
+        }}
       >
         {/* Handle bar */}
-        <div className="flex justify-center pt-3 pb-1">
+        <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
           <div className="w-10 h-1 rounded-full bg-gray-300" />
         </div>
-        <div className="px-5 pb-3">
+        <div className="px-5 pb-3 flex-shrink-0">
           <h3 className="text-lg font-bold text-gray-900">
             Geschäft hinzufügen
           </h3>
         </div>
-        <div className="px-5 pb-3">
+        <div className="px-5 pb-3 flex-shrink-0">
           <div className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2.5 border border-gray-100">
             <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
             <input
@@ -1416,7 +1484,7 @@ function AddStoreModal({
             )}
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto px-5 pb-5">
+        <div className="flex-1 overflow-y-auto px-5 pb-5 min-h-0">
           <div className="space-y-1">
             {filtered.map((s) => {
               const logoUrl = s.domain ? getLogoUrl(s.domain) : null;
@@ -1478,17 +1546,20 @@ function StoreSuggestionRow({
   return (
     <button
       onClick={onSelect}
-      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-gray-50 transition"
+      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-gray-50 active:bg-gray-100 transition"
     >
       <div
         className="w-10 h-10 rounded-full flex items-center justify-center overflow-hidden flex-shrink-0"
-        style={{ backgroundColor: showLogo ? "#F3F4F6" : suggestion.bgColor }}
+        style={{ backgroundColor: suggestion.emoji ? suggestion.bgColor : showLogo ? "#F3F4F6" : suggestion.bgColor }}
       >
-        {showLogo ? (
+        {suggestion.emoji ? (
+          <span className="text-lg">{suggestion.emoji}</span>
+        ) : showLogo ? (
           <img
             src={logoUrl}
             alt={suggestion.name}
             className="w-[30px] h-[30px] object-contain"
+            style={{ imageRendering: "crisp-edges" }}
             onError={() => setImgError(true)}
           />
         ) : (
@@ -1505,7 +1576,6 @@ function StoreSuggestionRow({
           {typeLabel[suggestion.type] || "Geschäft"}
         </p>
       </div>
-      <Plus className="w-4 h-4 text-gray-400 flex-shrink-0" />
     </button>
   );
 }
@@ -1529,20 +1599,24 @@ export function EinkaufenScreen() {
   const [categorySortStore, setCategorySortStore] = useState<string | null>(
     null
   );
+  const [globalCustomCategories, setGlobalCustomCategories] = useState<string[]>([]);
 
   const saveTimeout = useRef<ReturnType<typeof setTimeout>>();
+  const customCatSaveTimeout = useRef<ReturnType<typeof setTimeout>>();
   const settingsSaveTimeout = useRef<ReturnType<typeof setTimeout>>();
   const storeSelectorRef = useRef<HTMLDivElement>(null);
+  const lastLocalChangeRef = useRef<number>(0);
 
   // ── Load items + store settings ────────────────────────────────
   useEffect(() => {
-    Promise.all([fetchItems(), fetchStoreSettings()]).then(
-      ([serverItems, settings]) => {
+    Promise.all([fetchItems(), fetchStoreSettings(), fetchCustomCategories()]).then(
+      ([serverItems, settings, customCats]) => {
         setItems(serverItems);
         if (settings.length > 0) {
           setStoreSettings(settings);
           applyStoreSettings(DEFAULT_STORES, settings);
         }
+        setGlobalCustomCategories(customCats);
         setLoaded(true);
       }
     );
@@ -1571,8 +1645,13 @@ export function EinkaufenScreen() {
   // ── Poll for sync ──────────────────────────────────────────────
   useEffect(() => {
     const interval = setInterval(async () => {
+      // Skip poll if a local change happened recently (debounce save is 300ms,
+      // give extra buffer so the server has time to persist)
+      if (Date.now() - lastLocalChangeRef.current < 2000) return;
       const serverItems = await fetchItems();
-      if (serverItems.length > 0 && !activeDragId) {
+      // Re-check after async fetch in case a local change happened while waiting
+      if (Date.now() - lastLocalChangeRef.current < 2000) return;
+      if (!activeDragId) {
         setItems(serverItems);
       }
     }, 5000);
@@ -1605,6 +1684,7 @@ export function EinkaufenScreen() {
 
   const updateItems = useCallback(
     (updater: (prev: ShoppingItem[]) => ShoppingItem[]) => {
+      lastLocalChangeRef.current = Date.now();
       setItems((prev) => {
         const next = updater(prev);
         debouncedSave(next);
@@ -1844,6 +1924,7 @@ export function EinkaufenScreen() {
         color: "#FFFFFF",
         bgColor: suggestion.bgColor,
         domain: suggestion.domain,
+        emoji: suggestion.emoji,
         type: suggestion.type,
       };
       setStores((prev) => {
@@ -1939,7 +2020,7 @@ export function EinkaufenScreen() {
     [updateStoreSettings]
   );
 
-  const handleCategorySave = useCallback(
+  const handleCategoryAutoSave = useCallback(
     (storeId: string, categories: string[]) => {
       updateStoreSettings((prev) => {
         const idx = prev.findIndex((s) => s.store_id === storeId);
@@ -2003,9 +2084,26 @@ export function EinkaufenScreen() {
         });
       });
 
-      setCategorySortStore(null);
+      // Do NOT close the modal — auto-save keeps it open
     },
     [stores, updateStoreSettings, updateItems]
+  );
+
+  const handleAddGlobalCategory = useCallback(
+    (name: string) => {
+      setGlobalCustomCategories((prev) => {
+        const alreadyExists = prev.some(
+          (c) => c.toLowerCase() === name.toLowerCase()
+        );
+        if (alreadyExists) return prev;
+        const next = [...prev, name];
+        // Debounce save to server
+        if (customCatSaveTimeout.current) clearTimeout(customCatSaveTimeout.current);
+        customCatSaveTimeout.current = setTimeout(() => saveCustomCategories(next), 300);
+        return next;
+      });
+    },
+    []
   );
 
   // ── dnd-kit sensors for item list ──────────────────────────────
@@ -2065,6 +2163,8 @@ export function EinkaufenScreen() {
     },
     [sortedStoreItems, updateItems]
   );
+
+  const itemModifiers = useMemo(() => [restrictToContainer], []);
 
   const sortableItemIds = useMemo(
     () => sortedStoreItems.map((i) => i.id),
@@ -2172,7 +2272,7 @@ export function EinkaufenScreen() {
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
-            modifiers={[restrictToContainer]}
+            modifiers={itemModifiers}
             onDragStart={handleDndDragStart}
             onDragEnd={handleDndDragEnd}
           >
@@ -2255,7 +2355,9 @@ export function EinkaufenScreen() {
             stores={stores}
             initialCategories={categorySortInitial}
             allKnownCategories={allKnownCategories}
-            onSave={(cats) => handleCategorySave(categorySortStore, cats)}
+            globalCustomCategories={globalCustomCategories}
+            onAutoSave={(cats) => handleCategoryAutoSave(categorySortStore, cats)}
+            onAddGlobalCategory={handleAddGlobalCategory}
             onClose={() => setCategorySortStore(null)}
           />
         )}

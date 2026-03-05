@@ -19,7 +19,8 @@ export interface StoreInfo {
   abbr: string;
   color: string;
   bgColor: string;
-  domain?: string; // for Brandfetch logo
+  domain?: string; // for Google Favicon service
+  emoji?: string;
   type: StoreType;
 }
 
@@ -36,10 +37,10 @@ export const DEFAULT_STORES: StoreInfo[] = [
   { id: "alle", name: "Alle", abbr: "🏠", color: "#D97706", bgColor: "#FEF3C7", type: "sonstige" },
 ];
 
-// ── Brandfetch logo URL helper ─────────────────────────────────────
+// ── Google Favicon URL helper ──────────────────────────────────────
 export function getLogoUrl(domain?: string): string | null {
   if (!domain) return null;
-  return `https://cdn.brandfetch.io/${domain}/w/400/h/400/logo`;
+  return `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
 }
 
 // ── Store-specific categories ──────────────────────────────────────
@@ -374,7 +375,7 @@ export const GROCERY_DATABASE: GroceryTemplate[] = [
   { name: "Scheuermilch", category: "Haushalt & Reinigung" },
   { name: "Backpapier", category: "Haushalt & Reinigung" },
 
-  // ── Tiernahrung ──────────────────────────────────────────────────
+  // ── Tiernahrung ─────────────────────────────────────────────────
   { name: "Katzenfutter (nass)", category: "Tiernahrung" },
   { name: "Katzenfutter (trocken)", category: "Tiernahrung" },
   { name: "Hundefutter (nass)", category: "Tiernahrung" },
@@ -494,6 +495,7 @@ export interface StoreSuggestion {
   domain?: string;
   type: StoreType;
   bgColor: string;
+  emoji?: string;
 }
 
 export const STORE_SUGGESTIONS: StoreSuggestion[] = [
@@ -502,7 +504,7 @@ export const STORE_SUGGESTIONS: StoreSuggestion[] = [
   { name: "Norma", domain: "norma-online.de", type: "supermarkt", bgColor: "#E30613" },
   { name: "Globus", domain: "globus.de", type: "supermarkt", bgColor: "#004B93" },
   { name: "Hit", domain: "hit.de", type: "supermarkt", bgColor: "#E2001A" },
-  { name: "Wasgau", domain: "wasgau.com", type: "supermarkt", bgColor: "#009640" },
+  { name: "Wasgau", domain: "wasgau.de", type: "supermarkt", bgColor: "#009640" },
   { name: "Marktkauf", domain: "marktkauf.de", type: "supermarkt", bgColor: "#FDDA24" },
   { name: "Combi", domain: "combi.de", type: "supermarkt", bgColor: "#E30613" },
   { name: "Toom Baumarkt", domain: "toom.de", type: "sonstige", bgColor: "#E30613" },
@@ -516,9 +518,8 @@ export const STORE_SUGGESTIONS: StoreSuggestion[] = [
   { name: "Otto", domain: "otto.de", type: "online", bgColor: "#E30613" },
   { name: "About You", domain: "aboutyou.de", type: "online", bgColor: "#000000" },
   { name: "Müller", domain: "mueller.de", type: "drogerie", bgColor: "#E30017" },
-  { name: "Budnikowsky", domain: "budni.de", type: "drogerie", bgColor: "#009640" },
-  { name: "Apotheke", type: "sonstige", bgColor: "#00A651" },
-  { name: "Reformhaus", type: "sonstige", bgColor: "#6B8E23" },
+  { name: "Douglas", domain: "douglas.de", type: "drogerie", bgColor: "#0B2545" },
+  { name: "Apotheke", type: "sonstige", bgColor: "#F3F4F6", emoji: "💊" },
 ];
 
 // ── ID generator ───────────────────────────────────────────────────

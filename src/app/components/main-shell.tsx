@@ -1,10 +1,12 @@
 import React, { useState } from "react";
 // DEV MODE: auth import removed temporarily
-import { Calendar, ShoppingCart, List, ChefHat, LogOut, Home } from "lucide-react";
+import { Calendar, ShoppingCart, List, ChefHat, Settings } from "lucide-react";
+import { Toaster } from "sonner";
 import { EinkaufenScreen } from "./einkaufen/einkaufen-screen";
 import { KalenderScreen } from "./kalender/kalender-screen";
+import { MehrScreen } from "./mehr-screen";
 
-type TabId = "kalender" | "einkaufen" | "listen" | "kochen";
+type TabId = "kalender" | "einkaufen" | "listen" | "kochen" | "mehr";
 
 interface Tab {
   id: TabId;
@@ -17,13 +19,13 @@ const tabs: Tab[] = [
   { id: "einkaufen", label: "Einkaufen", icon: ShoppingCart },
   { id: "listen", label: "Listen", icon: List },
   { id: "kochen", label: "Kochen", icon: ChefHat },
+  { id: "mehr", label: "Menü", icon: Settings },
 ];
 
 function PlaceholderScreen({ title }: { title: string }) {
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-6">
       <div className="w-16 h-16 rounded-xl bg-orange-50 flex items-center justify-center mb-4">
-        {title === "Kalender" && <Calendar className="w-8 h-8 text-orange-500" />}
         {title === "Listen" && <List className="w-8 h-8 text-orange-500" />}
         {title === "Kochen" && <ChefHat className="w-8 h-8 text-orange-500" />}
       </div>
@@ -35,46 +37,30 @@ function PlaceholderScreen({ title }: { title: string }) {
 
 export function MainShell() {
   // DEV MODE: using mock data instead of useAuth()
-  const profile = { display_name: "Entwickler" };
-  const household = { name: "Zuhause" };
   const signOut = () => { console.log("signOut (dev mode - no-op)"); };
   const [activeTab, setActiveTab] = useState<TabId>("einkaufen");
 
   return (
     <div className="h-[100dvh] flex flex-col bg-white overflow-hidden font-sans">
-      {/* Header */}
-      <header className="flex-shrink-0 flex items-center justify-between px-5 pt-4 pb-3 border-b border-gray-100">
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 bg-orange-500 rounded-xl flex items-center justify-center shadow-sm">
-            <Home className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <h1 className="text-base font-bold text-gray-900 leading-tight">
-              {household?.name || "Zuhause"}
-            </h1>
-            <p className="text-xs text-gray-500 leading-tight">
-              {profile?.display_name}
-            </p>
-          </div>
-        </div>
-        <button
-          onClick={signOut}
-          className="w-9 h-9 rounded-xl flex items-center justify-center text-gray-400 hover:text-gray-900 hover:bg-gray-100 transition"
-          title="Abmelden"
-        >
-          <LogOut className="w-5 h-5" />
-        </button>
-      </header>
+      <Toaster position="top-center" richColors />
 
-      {/* Content */}
-      <div className="flex-1 min-h-0 flex flex-col">
-        {activeTab === "einkaufen" ? (
-          <EinkaufenScreen />
-        ) : activeTab === "kalender" ? (
+      {/* Content — all tabs stay mounted, hidden via CSS to preserve state */}
+      <div className="flex-1 min-h-0 flex flex-col relative">
+        <div className={`absolute inset-0 flex flex-col ${activeTab === "kalender" ? "" : "hidden"}`}>
           <KalenderScreen />
-        ) : (
-          <PlaceholderScreen title={tabs.find(t => t.id === activeTab)!.label} />
-        )}
+        </div>
+        <div className={`absolute inset-0 flex flex-col ${activeTab === "einkaufen" ? "" : "hidden"}`}>
+          <EinkaufenScreen />
+        </div>
+        <div className={`absolute inset-0 flex flex-col ${activeTab === "listen" ? "" : "hidden"}`}>
+          <PlaceholderScreen title="Listen" />
+        </div>
+        <div className={`absolute inset-0 flex flex-col ${activeTab === "kochen" ? "" : "hidden"}`}>
+          <PlaceholderScreen title="Kochen" />
+        </div>
+        <div className={`absolute inset-0 flex flex-col ${activeTab === "mehr" ? "" : "hidden"}`}>
+          <MehrScreen onSignOut={signOut} />
+        </div>
       </div>
 
       {/* Bottom Navigation */}

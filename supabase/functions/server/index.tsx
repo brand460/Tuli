@@ -225,4 +225,38 @@ app.put("/make-server-2a26506b/calendar-labels", async (c) => {
   }
 });
 
+// ── Custom categories (global pool per household) ──────────────────
+
+// GET custom categories for a household
+app.get("/make-server-2a26506b/custom-categories", async (c) => {
+  try {
+    const householdId = c.req.query("household_id");
+    if (!householdId) {
+      return c.json({ error: "household_id ist erforderlich." }, 400);
+    }
+    const key = `custom_categories:${householdId}`;
+    const categories = await withRetry(() => kv.get(key));
+    return c.json({ categories: categories || [] });
+  } catch (err) {
+    console.log("GET /custom-categories error:", err);
+    return c.json({ error: `Fehler beim Laden der Custom-Kategorien: ${err}` }, 500);
+  }
+});
+
+// PUT — save custom categories
+app.put("/make-server-2a26506b/custom-categories", async (c) => {
+  try {
+    const { household_id, categories } = await c.req.json();
+    if (!household_id) {
+      return c.json({ error: "household_id ist erforderlich." }, 400);
+    }
+    const key = `custom_categories:${household_id}`;
+    await withRetry(() => kv.set(key, categories || []));
+    return c.json({ ok: true });
+  } catch (err) {
+    console.log("PUT /custom-categories error:", err);
+    return c.json({ error: `Fehler beim Speichern der Custom-Kategorien: ${err}` }, 500);
+  }
+});
+
 Deno.serve(app.fetch);

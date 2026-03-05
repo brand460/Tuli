@@ -474,23 +474,61 @@ export function KalenderScreen() {
 
   // ── Navigation ─────────────────────────────────────────────────
 
-  const goToPrevMonth = () => {
+  const goToPrevMonth = useCallback(() => {
     if (currentMonth === 0) {
       setCurrentMonth(11);
       setCurrentYear((y) => y - 1);
     } else {
       setCurrentMonth((m) => m - 1);
     }
-  };
+  }, [currentMonth]);
 
-  const goToNextMonth = () => {
+  const goToNextMonth = useCallback(() => {
     if (currentMonth === 11) {
       setCurrentMonth(0);
       setCurrentYear((y) => y + 1);
     } else {
       setCurrentMonth((m) => m + 1);
     }
-  };
+  }, [currentMonth]);
+
+  // ── Swipe gesture for month navigation ────────────────────────
+  const touchStartXRef = useRef<number | null>(null);
+  const [slideDirection, setSlideDirection] = useState<"left" | "right" | null>(null);
+  const swipingRef = useRef(false);
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    if (!swipingRef.current) {
+      touchStartXRef.current = e.touches[0].clientX;
+    }
+  }, []);
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (touchStartXRef.current === null || swipingRef.current) return;
+    const diff = touchStartXRef.current - e.changedTouches[0].clientX;
+    touchStartXRef.current = null;
+
+    if (Math.abs(diff) > 50) {
+      swipingRef.current = true;
+      if (diff > 0) {
+        // Swiped left → next month
+        setSlideDirection("left");
+        setTimeout(() => {
+          goToNextMonth();
+          setSlideDirection(null);
+          swipingRef.current = false;
+        }, 300);
+      } else {
+        // Swiped right → previous month
+        setSlideDirection("right");
+        setTimeout(() => {
+          goToPrevMonth();
+          setSlideDirection(null);
+          swipingRef.current = false;
+        }, 300);
+      }
+    }
+  }, [goToNextMonth, goToPrevMonth]);
 
   // ── Derived data ───────────────────────────────────────────────
 
@@ -543,26 +581,40 @@ export function KalenderScreen() {
   return (
     <div className="flex-1 flex flex-col min-h-0">
       {/* Month Header */}
-      <div className="flex-shrink-0 flex items-center justify-between px-5 py-3 bg-white border-b border-gray-100">
+      <div className="flex-shrink-0 flex items-center justify-between px-5 py-2 bg-white border-b border-gray-100">
         <button
           onClick={goToPrevMonth}
-          className="w-9 h-9 rounded-xl flex items-center justify-center text-gray-400 hover:text-gray-900 hover:bg-gray-50 transition"
+          className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-900 hover:bg-gray-50 transition"
         >
-          <ChevronLeft className="w-5 h-5" />
+          <ChevronLeft className="w-4 h-4" />
         </button>
-        <h2 className="text-base font-bold text-gray-900">
+        <h2 className="text-sm font-bold text-gray-900">
           {MONTHS_DE[currentMonth]} {currentYear}
         </h2>
         <button
           onClick={goToNextMonth}
-          className="w-9 h-9 rounded-xl flex items-center justify-center text-gray-400 hover:text-gray-900 hover:bg-gray-50 transition"
+          className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-900 hover:bg-gray-50 transition"
         >
-          <ChevronRight className="w-5 h-5" />
+          <ChevronRight className="w-4 h-4" />
         </button>
       </div>
 
       {/* Calendar Grid */}
-      <div className="flex-shrink-0 bg-white px-1 pb-1 pt-1">
+      <div
+        className="flex-shrink-0 bg-white px-1 pb-1 pt-1 overflow-hidden"
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+      >
+        <div
+          style={{
+            transform: slideDirection === "left"
+              ? "translateX(-100%)"
+              : slideDirection === "right"
+              ? "translateX(100%)"
+              : "translateX(0)",
+            transition: slideDirection ? "transform 300ms ease" : "none",
+          }}
+        >
         <div className="grid grid-cols-7 mb-0.5">
           {WEEKDAYS.map((wd) => (
             <div key={wd} className="text-center text-[11px] font-semibold text-gray-400 py-1">
@@ -737,6 +789,7 @@ export function KalenderScreen() {
             </div>
           );
         })}
+        </div>
       </div>
 
       {/* Event Panel */}
@@ -751,7 +804,7 @@ export function KalenderScreen() {
           </button>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4">
+        <div className={`flex-1 min-h-0 px-4 pb-4 ${selectedDayEvents.length > 0 ? "overflow-y-auto" : "overflow-hidden"}`}>
           {selectedDayEvents.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-gray-400">
               <p className="text-sm">Keine Termine</p>
@@ -1419,6 +1472,7 @@ function EventEditorSheet({
   const [editingNote, setEditingNote] = useState(!!event.description);
   const [showLinkPopup, setShowLinkPopup] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
 
   const isNew = !event.id;
   const isFirstRender = useRef(true);
@@ -1464,6 +1518,21 @@ function EventEditorSheet({
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     };
   }, [formSnapshot, isNew, buildCurrentEvent, onAutoSave]);
+
+  // Track initial snapshot to detect dirty state for new events
+  const initialSnapshot = useRef(formSnapshot);
+
+  const isDirty = useCallback(() => {
+    return formSnapshot !== initialSnapshot.current;
+  }, [formSnapshot]);
+
+  const handleCloseAttempt = useCallback(() => {
+    if (isNew && isDirty()) {
+      setShowDiscardConfirm(true);
+    } else {
+      onClose();
+    }
+  }, [isNew, isDirty, onClose]);
 
   const handleSave = () => {
     if (!title.trim()) return;
@@ -1530,7 +1599,7 @@ function EventEditorSheet({
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
     >
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/40" onClick={handleCloseAttempt} />
       <motion.div
         className="relative w-full max-w-[400px] bg-white rounded-t-2xl shadow-lg flex flex-col"
         style={{ maxHeight: "90dvh" }}
@@ -1542,7 +1611,7 @@ function EventEditorSheet({
         dragConstraints={{ top: 0 }}
         dragElastic={0.2}
         onDragEnd={(_, info) => {
-          if (info.offset.y > 100) onClose();
+          if (info.offset.y > 100) handleCloseAttempt();
         }}
       >
         {/* Handle bar */}
@@ -1552,13 +1621,7 @@ function EventEditorSheet({
 
         {/* Header — different for new vs edit */}
         {isNew ? (
-          <div className="flex items-center justify-between px-4 pb-2 flex-shrink-0">
-            <button
-              onClick={onClose}
-              className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-900 transition"
-            >
-              <X className="w-5 h-5" />
-            </button>
+          <div className="flex items-center justify-end px-4 pb-2 flex-shrink-0">
             <button
               onClick={handleSave}
               disabled={!title.trim()}
@@ -1568,7 +1631,7 @@ function EventEditorSheet({
             </button>
           </div>
         ) : (
-          /* Edit mode: no X, no save button — just the handle bar for swipe-down */
+          /* Edit mode: no save button — just the handle bar for swipe-down */
           <div className="h-1" />
         )}
 
@@ -1898,6 +1961,50 @@ function EventEditorSheet({
             }}
             onCancel={() => setShowDeleteConfirm(false)}
           />
+        )}
+      </AnimatePresence>
+
+      {/* Discard confirmation modal for new events */}
+      <AnimatePresence>
+        {showDiscardConfirm && (
+          <motion.div
+            className="fixed inset-0 z-[70] flex items-center justify-center px-6"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <div className="absolute inset-0 bg-black/40" onClick={() => setShowDiscardConfirm(false)} />
+            <motion.div
+              className="relative w-full max-w-[320px] bg-white rounded-2xl shadow-xl p-6"
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ type: "spring", damping: 25, stiffness: 400 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-base font-bold text-gray-900 text-center">Termin verwerfen?</h3>
+              <p className="text-sm text-gray-500 text-center mt-2">
+                Du hast Änderungen vorgenommen. Möchtest du diese verwerfen?
+              </p>
+              <div className="flex gap-3 mt-5">
+                <button
+                  onClick={() => setShowDiscardConfirm(false)}
+                  className="flex-1 py-2.5 rounded-full bg-gray-100 text-gray-700 text-sm font-semibold hover:bg-gray-200 transition"
+                >
+                  Abbrechen
+                </button>
+                <button
+                  onClick={() => {
+                    setShowDiscardConfirm(false);
+                    onClose();
+                  }}
+                  className="flex-1 py-2.5 rounded-full bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition"
+                >
+                  Verwerfen
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </motion.div>
