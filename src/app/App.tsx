@@ -21,6 +21,7 @@ export default function App() {
   return (
     <HelmetProvider>
       <Helmet>
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, interactive-widget=resizes-visual" />
         <link rel="manifest" href="/manifest.json" />
         <meta name="theme-color" content="#F97316" />
         <meta name="apple-mobile-web-app-capable" content="yes" />

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Plus,
@@ -56,6 +56,7 @@ import {
 } from "./shopping-data";
 import { API_BASE } from "../supabase-client";
 import { publicAnonKey } from "/utils/supabase/info";
+import { useKeyboardHeight } from "./use-keyboard-height";
 
 // ── Types ──────────────────────────────────────────────────────────
 interface StoreSettingEntry {
@@ -557,6 +558,7 @@ function CategoryChip({
   return (
     <button
       onClick={onClick}
+      onMouseDown={(e) => e.preventDefault()}
       className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-sm font-medium transition whitespace-nowrap ${
         selected
           ? "bg-white border-2"
@@ -605,15 +607,164 @@ const restrictToContainer: any = ({
   };
 };
 
+// ── Unit helpers ───────────────────────────────────────────────────
+type UnitType = null | "g" | "kg" | "ml" | "L";
+const UNITS: { value: UnitType; label: string }[] = [
+  { value: null, label: "Stk." },
+  { value: "g", label: "g" },
+  { value: "kg", label: "kg" },
+  { value: "ml", label: "ml" },
+  { value: "L", label: "L" },
+];
+
+function getUnitStep(unit: string | null | undefined): number {
+  switch (unit) {
+    case "g": case "ml": return 50;
+    case "kg": case "L": return 0.5;
+    default: return 1;
+  }
+}
+
+function getUnitMin(unit: string | null | undefined): number {
+  switch (unit) {
+    case "g": case "ml": return 50;
+    case "kg": case "L": return 0.5;
+    default: return 1;
+  }
+}
+
+function formatQuantity(qty: number, unit: string | null | undefined): string {
+  if (unit === "kg" || unit === "L") {
+    return qty % 1 === 0 ? qty.toString() : qty.toFixed(1);
+  }
+  return qty.toString();
+}
+
+function getDefaultQuantityForUnit(unit: UnitType): number {
+  switch (unit) {
+    case "g": case "ml": return 100;
+    case "kg": case "L": return 1;
+    default: return 1;
+  }
+}
+
+// ── Quantity / Unit Drawer ─────────────────────────────────────────
+function QuantityDrawer({
+  item,
+  onSave,
+  onClose,
+}: {
+  item: ShoppingItem;
+  onSave: (quantity: number, unit: UnitType) => void;
+  onClose: () => void;
+}) {
+  const currentUnit = (item.unit as UnitType) || null;
+  const [unit, setUnit] = useState<UnitType>(currentUnit);
+  const [inputValue, setInputValue] = useState(item.quantity.toString());
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    // Auto-focus the input after the animation
+    const t = setTimeout(() => inputRef.current?.focus(), 100);
+    return () => clearTimeout(t);
+  }, []);
+
+  const handleUnitChange = (newUnit: UnitType) => {
+    setUnit(newUnit);
+    // If switching unit category, set a sensible default
+    const parsed = parseFloat(inputValue);
+    if (isNaN(parsed) || parsed <= 0) {
+      setInputValue(getDefaultQuantityForUnit(newUnit).toString());
+    }
+  };
+
+  const doSave = useCallback(() => {
+    let qty = parseFloat(inputValue);
+    if (isNaN(qty) || qty <= 0) qty = getDefaultQuantityForUnit(unit);
+    const min = getUnitMin(unit);
+    if (qty < min) qty = min;
+    onSave(qty, unit);
+    onClose();
+  }, [inputValue, unit, onSave, onClose]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      doSave();
+    }
+  };
+
+  // Save on backdrop click or close
+  const handleBackdropClick = () => doSave();
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-50 flex flex-col justify-end"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.15 }}
+    >
+      <div className="absolute inset-0 bg-black/40" onClick={handleBackdropClick} />
+      <motion.div
+        className="relative bg-white rounded-t-2xl px-5 pt-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))]"
+        initial={{ y: "100%" }}
+        animate={{ y: 0 }}
+        exit={{ y: "100%" }}
+        transition={{ type: "spring", damping: 30, stiffness: 400 }}
+      >
+        {/* Drag handle */}
+        <div className="flex justify-center mb-4">
+          <div className="w-10 h-1 rounded-full bg-gray-200" />
+        </div>
+
+        <p className="text-sm font-semibold text-gray-900 mb-3">{item.name}</p>
+
+        <div className="flex items-center gap-3">
+          {/* Quantity input */}
+          <input
+            ref={inputRef}
+            type="text"
+            inputMode="decimal"
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyDown={handleKeyDown}
+            className="w-20 h-11 rounded-xl border border-gray-200 text-center text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+          />
+
+          {/* Unit segmented control */}
+          <div className="flex-1 flex bg-gray-100 rounded-xl p-1 gap-0.5">
+            {UNITS.map((u) => (
+              <button
+                key={u.label}
+                onClick={() => handleUnitChange(u.value)}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${
+                  unit === u.value
+                    ? "bg-orange-500 text-white shadow-sm"
+                    : "text-gray-600 hover:text-gray-900"
+                }`}
+              >
+                {u.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ── Sortable Shopping List Item (dnd-kit) ──────────────────────────
 function SortableShoppingItem({
   item,
   onToggle,
   onQuantityChange,
+  onOpenQuantityDrawer,
 }: {
   item: ShoppingItem;
   onToggle: () => void;
   onQuantityChange: (delta: number) => void;
+  onOpenQuantityDrawer: () => void;
 }) {
   const {
     attributes,
@@ -630,6 +781,29 @@ function SortableShoppingItem({
     zIndex: isDragging ? 20 : undefined,
     position: "relative" as const,
   };
+
+  // Long press on counter area
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressFired = useRef(false);
+
+  const handlePointerDown = useCallback(() => {
+    longPressFired.current = false;
+    longPressTimer.current = setTimeout(() => {
+      longPressFired.current = true;
+      onOpenQuantityDrawer();
+    }, 500);
+  }, [onOpenQuantityDrawer]);
+
+  const handlePointerUp = useCallback(() => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  }, []);
+
+  const step = getUnitStep(item.unit);
+  const min = getUnitMin(item.unit);
+  const unitLabel = item.unit && item.unit !== "Stk." ? item.unit : null;
 
   return (
     <div ref={setNodeRef} style={style}>
@@ -668,19 +842,36 @@ function SortableShoppingItem({
             {item.name}
           </p>
         </div>
-        <div className="flex items-center gap-1 flex-shrink-0">
+        <div
+          className="flex items-center gap-1 flex-shrink-0 select-none"
+          onPointerDown={handlePointerDown}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          onContextMenu={(e) => e.preventDefault()}
+        >
           <button
-            onClick={() => onQuantityChange(-1)}
-            disabled={item.quantity <= 1}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!longPressFired.current) onQuantityChange(-step);
+            }}
+            disabled={item.quantity <= min}
             className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 hover:text-gray-900 disabled:opacity-30 transition"
           >
             <Minus className="w-3.5 h-3.5" />
           </button>
-          <span className="w-6 text-center text-sm font-semibold text-gray-900">
-            {item.quantity}
-          </span>
+          <div className="flex items-baseline gap-0.5 min-w-[28px] justify-center">
+            <span className="text-sm font-semibold text-gray-900">
+              {formatQuantity(item.quantity, item.unit)}
+            </span>
+            {unitLabel && (
+              <span className="text-xs text-gray-400">{unitLabel}</span>
+            )}
+          </div>
           <button
-            onClick={() => onQuantityChange(1)}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!longPressFired.current) onQuantityChange(step);
+            }}
             className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 hover:text-gray-900 transition"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -742,6 +933,7 @@ function SortableCategoryItem({
         </div>
         <button
           onClick={onRemove}
+          onMouseDown={(e) => e.preventDefault()}
           className="flex-shrink-0 p-1 text-gray-300 hover:text-red-500 transition"
         >
           <X className="w-3.5 h-3.5" />
@@ -845,7 +1037,7 @@ function CategorySortModal({
     }
     setNewCat("");
     setShowSuggestions(false);
-    inputRef.current?.focus();
+    inputRef.current?.blur();
   };
 
   const showCustomOption =
@@ -925,6 +1117,7 @@ function CategorySortModal({
                   <button
                     key={chip}
                     onClick={() => handleAddCategory(chip)}
+                    onMouseDown={(e) => e.preventDefault()}
                     className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium hover:scale-105 active:scale-95 transition whitespace-nowrap bg-gray-50 border border-gray-100"
                     style={{ color: colors.text }}
                   >
@@ -956,6 +1149,7 @@ function CategorySortModal({
                       <button
                         key={result}
                         onClick={() => handleAddCategory(result)}
+                        onMouseDown={(e) => e.preventDefault()}
                         className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded-lg flex items-center gap-2 transition"
                       >
                         <span
@@ -971,6 +1165,7 @@ function CategorySortModal({
                   {showCustomOption && (
                     <button
                       onClick={() => handleAddCategory()}
+                      onMouseDown={(e) => e.preventDefault()}
                       className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded-lg transition"
                     >
                       <span className="text-sm text-orange-500 font-medium">
@@ -1087,7 +1282,8 @@ function CheckedSection({
                     {item.name}
                   </span>
                   <span className="text-[10px] text-gray-400">
-                    {item.quantity}x
+                    {formatQuantity(item.quantity, item.unit)}
+                    {item.unit && item.unit !== "Stk." ? item.unit : "x"}
                   </span>
                 </div>
               ))}
@@ -1550,7 +1746,7 @@ function StoreSuggestionRow({
     >
       <div
         className="w-10 h-10 rounded-full flex items-center justify-center overflow-hidden flex-shrink-0"
-        style={{ backgroundColor: suggestion.emoji ? suggestion.bgColor : showLogo ? "#F3F4F6" : suggestion.bgColor }}
+        style={{ backgroundColor: suggestion.emoji ? suggestion.bgColor : showLogo ? "#F3F4F6" : "#E5E7EB" }}
       >
         {suggestion.emoji ? (
           <span className="text-lg">{suggestion.emoji}</span>
@@ -1563,7 +1759,7 @@ function StoreSuggestionRow({
             onError={() => setImgError(true)}
           />
         ) : (
-          <span className="text-white text-xs font-bold">
+          <span className="text-gray-500 text-xs font-bold">
             {suggestion.name.slice(0, 2).toUpperCase()}
           </span>
         )}
@@ -1606,6 +1802,9 @@ export function EinkaufenScreen() {
   const settingsSaveTimeout = useRef<ReturnType<typeof setTimeout>>();
   const storeSelectorRef = useRef<HTMLDivElement>(null);
   const lastLocalChangeRef = useRef<number>(0);
+  const bottomBarRef = useRef<HTMLDivElement>(null);
+  const [bottomBarHeight, setBottomBarHeight] = useState(56);
+  const keyboardHeight = useKeyboardHeight();
 
   // ── Load items + store settings ────────────────────────────────
   useEffect(() => {
@@ -1814,14 +2013,33 @@ export function EinkaufenScreen() {
   const handleQuantityChange = useCallback(
     (id: string, delta: number) => {
       updateItems((prev) =>
+        prev.map((i) => {
+          if (i.id !== id) return i;
+          const min = getUnitMin(i.unit);
+          const raw = Math.round((i.quantity + delta) * 100) / 100; // avoid float issues
+          return { ...i, quantity: Math.max(min, raw) };
+        })
+      );
+    },
+    [updateItems]
+  );
+
+  const handleUpdateQuantityUnit = useCallback(
+    (id: string, quantity: number, unit: UnitType) => {
+      updateItems((prev) =>
         prev.map((i) =>
-          i.id === id
-            ? { ...i, quantity: Math.max(1, i.quantity + delta) }
-            : i
+          i.id === id ? { ...i, quantity, unit } : i
         )
       );
     },
     [updateItems]
+  );
+
+  // State for the quantity/unit drawer
+  const [quantityDrawerItemId, setQuantityDrawerItemId] = useState<string | null>(null);
+  const quantityDrawerItem = useMemo(
+    () => items.find((i) => i.id === quantityDrawerItemId) ?? null,
+    [items, quantityDrawerItemId]
   );
 
   const handleAddItem = useCallback(
@@ -2203,8 +2421,20 @@ export function EinkaufenScreen() {
     return result;
   }, [storeSettings]);
 
+  // Measure the bottom bar height for scroll area padding
+  useLayoutEffect(() => {
+    if (!bottomBarRef.current) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setBottomBarHeight(entry.contentRect.height);
+      }
+    });
+    ro.observe(bottomBarRef.current);
+    return () => ro.disconnect();
+  }, []);
+
   return (
-    <div className="flex-1 flex flex-col bg-white min-h-0">
+    <div className="flex-1 flex flex-col bg-white min-h-0 relative">
       {/* Wiggle animation for store reorder */}
       <style>{`
         @keyframes wiggle {
@@ -2213,8 +2443,8 @@ export function EinkaufenScreen() {
         }
       `}</style>
 
-      {/* Store selector */}
-      <div className="flex-shrink-0" ref={storeSelectorRef}>
+      {/* Store selector — stays at top, never moves */}
+      <div className="flex-shrink-0 z-10" ref={storeSelectorRef}>
         <StoreSelector
           stores={stores}
           selectedStore={selectedStore}
@@ -2227,8 +2457,11 @@ export function EinkaufenScreen() {
         />
       </div>
 
-      {/* Shopping list */}
-      <div className="flex-1 min-h-0 overflow-y-auto">
+      {/* Scrollable list area — dynamic padding-bottom for the fixed input bar */}
+      <div
+        className="flex-1 min-h-0 overflow-y-auto"
+        style={{ paddingBottom: bottomBarHeight + keyboardHeight }}
+      >
         {!loaded ? (
           <div className="flex-1 flex items-center justify-center py-20">
             <div className="w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
@@ -2289,16 +2522,17 @@ export function EinkaufenScreen() {
                     onQuantityChange={(d) =>
                       handleQuantityChange(item.id, d)
                     }
+                    onOpenQuantityDrawer={() =>
+                      setQuantityDrawerItemId(item.id)
+                    }
                   />
                 ))}
               </div>
             </SortableContext>
           </DndContext>
         )}
-      </div>
 
-      {/* Checked items */}
-      <div className="flex-shrink-0">
+        {/* Checked items — inside scroll area so they scroll with the list */}
         <CheckedSection
           items={checkedItems}
           onToggle={handleToggle}
@@ -2306,8 +2540,15 @@ export function EinkaufenScreen() {
         />
       </div>
 
-      {/* Add item bar */}
-      <div className="flex-shrink-0">
+      {/* Add item bar — absolute positioned at bottom, shifts up with keyboard */}
+      <div
+        ref={bottomBarRef}
+        className="absolute left-0 right-0 bottom-0 z-10 bg-white"
+        style={{
+          transform: keyboardHeight > 0 ? `translateY(-${keyboardHeight}px)` : undefined,
+          willChange: keyboardHeight > 0 ? "transform" : undefined,
+        }}
+      >
         <AddItemBar
           storeId={selectedStore}
           stores={stores}
@@ -2317,6 +2558,19 @@ export function EinkaufenScreen() {
           categoryOrder={currentCategoryOrder}
         />
       </div>
+
+      {/* Quantity / Unit drawer */}
+      <AnimatePresence>
+        {quantityDrawerItem && (
+          <QuantityDrawer
+            item={quantityDrawerItem}
+            onSave={(qty, unit) =>
+              handleUpdateQuantityUnit(quantityDrawerItem.id, qty, unit)
+            }
+            onClose={() => setQuantityDrawerItemId(null)}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Add store modal */}
       <AnimatePresence>

@@ -7,6 +7,7 @@ export interface ShoppingItem {
   is_checked: boolean;
   position: number;
   quantity: number;
+  unit?: string | null; // null/"Stk." = pieces, "g", "kg", "ml", "L"
   household_id: string;
   manually_positioned?: boolean; // true if user dragged this item manually
 }
@@ -507,6 +508,14 @@ export const STORE_SUGGESTIONS: StoreSuggestion[] = [
   { name: "Wasgau", domain: "wasgau.de", type: "supermarkt", bgColor: "#009640" },
   { name: "Marktkauf", domain: "marktkauf.de", type: "supermarkt", bgColor: "#FDDA24" },
   { name: "Combi", domain: "combi.de", type: "supermarkt", bgColor: "#E30613" },
+  { name: "K+K", domain: "klaas-und-kock.de", type: "supermarkt", bgColor: "#E30613" },
+  { name: "Markant", domain: "markant-online.de", type: "supermarkt", bgColor: "#004B93" },
+  { name: "Eiskönig", domain: "eiskoenig.eu", type: "supermarkt", bgColor: "#0077C8" },
+  { name: "Getränke Hoffmann", domain: "getraenke-hoffmann.de", type: "supermarkt", bgColor: "#003D7A" },
+  { name: "Coop", domain: "coop.ch", type: "supermarkt", bgColor: "#E3000F" },
+  { name: "Albert Heijn", domain: "ah.nl", type: "supermarkt", bgColor: "#00A0E2" },
+  { name: "Jumbo", domain: "jumbo.com", type: "supermarkt", bgColor: "#FFC917" },
+  { name: "SPAR", domain: "spar.de", type: "supermarkt", bgColor: "#00843D" },
   { name: "Toom Baumarkt", domain: "toom.de", type: "sonstige", bgColor: "#E30613" },
   { name: "OBI", domain: "obi.de", type: "sonstige", bgColor: "#FF6600" },
   { name: "Bauhaus", domain: "bauhaus.info", type: "sonstige", bgColor: "#E30613" },

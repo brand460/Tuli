@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 // DEV MODE: auth import removed temporarily
 import { Calendar, ShoppingCart, List, ChefHat, Settings } from "lucide-react";
 import { Toaster } from "sonner";
@@ -35,13 +35,66 @@ function PlaceholderScreen({ title }: { title: string }) {
   );
 }
 
+/**
+ * Use a stable viewport height that doesn't shrink when the virtual keyboard opens.
+ * We capture window.innerHeight on mount and only update it when the keyboard is NOT visible
+ * (i.e. the viewport grows back to full size).
+ */
+function useStableViewportHeight() {
+  const [height, setHeight] = useState(() => window.innerHeight);
+  const stableRef = useRef(window.innerHeight);
+
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    // Capture the initial full height
+    stableRef.current = Math.max(stableRef.current, window.innerHeight);
+
+    const onResize = () => {
+      // Only update height when keyboard is NOT visible (viewport ~= full height)
+      // A keyboard is typically >100px, so if the visual viewport is close to
+      // window.innerHeight, the keyboard is closed.
+      const diff = Math.abs(window.innerHeight - vv.height);
+      if (diff < 100) {
+        const newH = window.innerHeight;
+        stableRef.current = newH;
+        setHeight(newH);
+      }
+    };
+
+    // Also handle orientation change / real resize (not keyboard)
+    const onWindowResize = () => {
+      const vv2 = window.visualViewport;
+      const diff = vv2 ? Math.abs(window.innerHeight - vv2.height) : 0;
+      if (diff < 100) {
+        stableRef.current = window.innerHeight;
+        setHeight(window.innerHeight);
+      }
+    };
+
+    vv.addEventListener("resize", onResize);
+    window.addEventListener("resize", onWindowResize);
+    return () => {
+      vv.removeEventListener("resize", onResize);
+      window.removeEventListener("resize", onWindowResize);
+    };
+  }, []);
+
+  return height;
+}
+
 export function MainShell() {
   // DEV MODE: using mock data instead of useAuth()
   const signOut = () => { console.log("signOut (dev mode - no-op)"); };
   const [activeTab, setActiveTab] = useState<TabId>("einkaufen");
+  const stableHeight = useStableViewportHeight();
 
   return (
-    <div className="h-[100dvh] flex flex-col bg-white overflow-hidden font-sans">
+    <div
+      className="flex flex-col bg-white overflow-hidden font-sans"
+      style={{ height: stableHeight, position: "fixed", top: 0, left: 0, right: 0 }}
+    >
       <Toaster position="top-center" richColors />
 
       {/* Content — all tabs stay mounted, hidden via CSS to preserve state */}
@@ -65,7 +118,7 @@ export function MainShell() {
 
       {/* Bottom Navigation */}
       <nav className="flex-shrink-0 border-t border-gray-100 bg-white pb-[env(safe-area-inset-bottom)]">
-        <div className="flex items-center justify-around px-2 pt-2 pb-3">
+        <div className="flex items-center justify-around px-2 pt-2 pb-2">
           {tabs.map((tab) => {
             const isActive = activeTab === tab.id;
             const Icon = tab.icon;
@@ -73,26 +126,13 @@ export function MainShell() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex flex-col items-center gap-0.5 min-w-[64px] py-1 rounded-xl transition ${
+                className={`flex items-center justify-center w-12 h-12 rounded-xl transition ${
                   isActive
-                    ? "text-orange-500"
+                    ? "text-orange-500 bg-orange-50"
                     : "text-gray-400 hover:text-gray-900"
                 }`}
               >
-                <div
-                  className={`w-10 h-10 rounded-xl flex items-center justify-center transition ${
-                    isActive ? "bg-orange-50" : ""
-                  }`}
-                >
-                  <Icon className="w-5 h-5" strokeWidth={isActive ? 2.5 : 2} />
-                </div>
-                <span
-                  className={`text-[11px] leading-tight ${
-                    isActive ? "font-semibold" : "font-medium"
-                  }`}
-                >
-                  {tab.label}
-                </span>
+                <Icon className="w-5 h-5" strokeWidth={isActive ? 2.5 : 2} />
               </button>
             );
           })}

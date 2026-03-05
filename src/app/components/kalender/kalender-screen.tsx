@@ -122,6 +122,12 @@ function getEventsForDate(events: CalendarEvent[], targetDate: Date): CalendarEv
 
     if (ev.recurring_exception_dates?.includes(target)) continue;
 
+    // Respect end_repeat_date – skip recurring instances on or after this date
+    if (ev.repeat_rule !== "none" && ev.end_repeat_date) {
+      const endRepeat = new Date(ev.end_repeat_date);
+      if (targetMid >= dateMidnight(endRepeat)) continue;
+    }
+
     const edit = ev.recurring_edits?.[target];
     const effective = edit ? { ...ev, ...edit } : ev;
 
@@ -349,9 +355,9 @@ export function KalenderScreen() {
 
   const handleNewEvent = () => {
     const startDate = new Date(selectedDate);
-    startDate.setHours(new Date().getHours() + 1, 0, 0, 0);
+    startDate.setHours(12, 0, 0, 0);
     const endDate = new Date(startDate);
-    endDate.setHours(startDate.getHours() + 1);
+    endDate.setHours(13, 0, 0, 0);
 
     setEditingEvent({
       id: "",
@@ -466,8 +472,29 @@ export function KalenderScreen() {
     [saveEvents]
   );
 
-  const handleDeleteEvent = (id: string) => {
-    updateEvents(events.filter((e) => e.id !== id));
+  const handleDeleteEvent = (id: string, mode: "all" | "single" | "future" = "all", dateKey?: string) => {
+    if (mode === "all") {
+      updateEvents(events.filter((e) => e.id !== id));
+    } else if (mode === "single" && dateKey) {
+      updateEvents(
+        events.map((e) => {
+          if (e.id !== id) return e;
+          const exceptions = [...(e.recurring_exception_dates || [])];
+          if (!exceptions.includes(dateKey)) exceptions.push(dateKey);
+          // Also remove any single-occurrence edits for this date
+          const edits = { ...(e.recurring_edits || {}) };
+          delete edits[dateKey];
+          return { ...e, recurring_exception_dates: exceptions, recurring_edits: edits };
+        })
+      );
+    } else if (mode === "future" && dateKey) {
+      updateEvents(
+        events.map((e) => {
+          if (e.id !== id) return e;
+          return { ...e, end_repeat_date: dateKey };
+        })
+      );
+    }
     setShowEditor(false);
     setEditingEvent(null);
   };
@@ -811,33 +838,68 @@ export function KalenderScreen() {
             </div>
           ) : (
             <div className="space-y-2">
-              {selectedDayEvents.map((ev) => (
-                <button
-                  key={`${ev.id}-${toDateKey(selectedDate)}`}
-                  onClick={() => handleEditEvent(ev)}
-                  className="w-full flex items-stretch bg-white rounded-xl shadow-sm overflow-hidden transition hover:shadow-md active:scale-[0.98]"
-                >
-                  <div className="w-1.5 flex-shrink-0" style={{ backgroundColor: getColorHex(ev.color) }} />
-                  <div className="flex-1 flex items-center gap-3 px-3 py-2.5 min-w-0">
-                    <div className="flex-shrink-0 text-xs text-gray-500 w-12 text-right">
-                      {ev.all_day ? (
-                        <span className="font-medium text-gray-400">Ganzt.</span>
-                      ) : (
-                        <span>{formatTime(ev.start_time)}</span>
+              {selectedDayEvents.map((ev) => {
+                const hasAssigned = ev.assigned_to && ev.assigned_to.length > 0;
+                const hasNote = !!ev.description;
+                const hasLink = ev.linked_recipe_id != null || ev.linked_list_id != null;
+                const hasRepeat = ev.repeat_rule !== "none";
+                const hasMeta = hasAssigned || hasNote || hasLink || hasRepeat;
+
+                return (
+                  <button
+                    key={`${ev.id}-${toDateKey(selectedDate)}`}
+                    onClick={() => handleEditEvent(ev)}
+                    className="w-full flex items-stretch bg-white rounded-xl shadow-sm overflow-hidden transition hover:shadow-md active:scale-[0.98]"
+                  >
+                    <div className="w-1.5 flex-shrink-0" style={{ backgroundColor: getColorHex(ev.color) }} />
+                    <div className="flex-1 flex items-center gap-3 px-3 py-2.5 min-w-0">
+                      <div className="flex-shrink-0 text-xs text-gray-500 w-12 text-right">
+                        {ev.all_day ? (
+                          <span className="font-medium text-gray-400">Ganzt.</span>
+                        ) : (
+                          <span>{formatTime(ev.start_time)}</span>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-gray-900 truncate text-left">{ev.title}</p>
+                      </div>
+                      {hasMeta && (
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          {hasAssigned && (
+                            <div className="flex items-center flex-shrink-0">
+                              {ev.assigned_to!.map((memberId, idx) => {
+                                const member = DEV_MEMBERS.find((m) => m.id === memberId);
+                                if (!member) return null;
+                                const initial = member.display_name.charAt(0).toUpperCase();
+                                return member.avatar_url ? (
+                                  <img
+                                    key={member.id}
+                                    src={member.avatar_url}
+                                    alt={member.display_name}
+                                    className="w-6 h-6 rounded-full object-cover ring-2 ring-white"
+                                    style={{ marginLeft: idx > 0 ? -8 : 0 }}
+                                  />
+                                ) : (
+                                  <div
+                                    key={member.id}
+                                    className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white ring-2 ring-white"
+                                    style={{ backgroundColor: member.initials_color, marginLeft: idx > 0 ? -8 : 0 }}
+                                  >
+                                    {initial}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                          {hasNote && <FileText className="w-4 h-4 text-gray-400 flex-shrink-0" />}
+                          {hasLink && <Link className="w-4 h-4 text-gray-400 flex-shrink-0" />}
+                          {hasRepeat && <Repeat className="w-4 h-4 text-gray-400 flex-shrink-0" />}
+                        </div>
                       )}
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-900 truncate text-left">{ev.title}</p>
-                      {ev.description && (
-                        <p className="text-xs text-gray-500 truncate text-left">{ev.description}</p>
-                      )}
-                    </div>
-                    {ev.repeat_rule !== "none" && (
-                      <Repeat className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-                    )}
-                  </div>
-                </button>
-              ))}
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
@@ -848,10 +910,11 @@ export function KalenderScreen() {
         {showEditor && editingEvent && (
           <EventEditorSheet
             event={editingEvent}
+            contextDateKey={toDateKey(selectedDate)}
             labels={labels}
             onSave={handleSaveEvent}
             onAutoSave={handleAutoSaveEvent}
-            onDelete={editingEvent.id ? () => handleDeleteEvent(editingEvent.id) : undefined}
+            onDelete={editingEvent.id ? (mode: "all" | "single" | "future", dateKey?: string) => handleDeleteEvent(editingEvent.id, mode, dateKey) : undefined}
             onClose={() => {
               setShowEditor(false);
               setEditingEvent(null);
@@ -1378,47 +1441,92 @@ function PopupSheet({
 // ── Delete Confirmation Modal ──────────────────────────────────────
 
 function DeleteConfirmModal({
-  onConfirm,
+  isRecurring,
+  onDeleteAll,
+  onDeleteSingle,
+  onDeleteFuture,
   onCancel,
 }: {
-  onConfirm: () => void;
+  isRecurring: boolean;
+  onDeleteAll: () => void;
+  onDeleteSingle?: () => void;
+  onDeleteFuture?: () => void;
   onCancel: () => void;
 }) {
   return (
     <motion.div
-      className="fixed inset-0 z-[70] flex items-center justify-center px-6"
+      className="fixed inset-0 z-[70] flex items-end justify-center"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
     >
-      <div className="absolute inset-0 bg-black/40" onClick={onCancel} />
-      <motion.div
-        className="relative w-full max-w-[320px] bg-white rounded-2xl shadow-xl p-6"
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.9, opacity: 0 }}
-        transition={{ type: "spring", damping: 25, stiffness: 400 }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 className="text-base font-bold text-gray-900 text-center">Event löschen?</h3>
-        <p className="text-sm text-gray-500 text-center mt-2">
-          Diese Aktion kann nicht rückgängig gemacht werden.
-        </p>
-        <div className="flex gap-3 mt-5">
-          <button
-            onClick={onCancel}
-            className="flex-1 py-2.5 rounded-full bg-gray-100 text-gray-700 text-sm font-semibold hover:bg-gray-200 transition"
-          >
-            Abbrechen
-          </button>
-          <button
-            onClick={onConfirm}
-            className="flex-1 py-2.5 rounded-full bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition"
-          >
-            Löschen
-          </button>
-        </div>
-      </motion.div>
+      <div className="absolute inset-0 bg-black/40" onClick={(e) => { e.stopPropagation(); onCancel(); }} />
+      {isRecurring ? (
+        <motion.div
+          className="relative w-full max-w-[400px] bg-white rounded-t-2xl shadow-lg p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))]"
+          initial={{ y: "100%" }}
+          animate={{ y: 0 }}
+          exit={{ y: "100%" }}
+          transition={{ type: "spring", damping: 25, stiffness: 300 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex justify-center mb-4">
+            <div className="w-10 h-1 bg-gray-300 rounded-full" />
+          </div>
+          <h3 className="text-base font-bold text-gray-900 text-center mb-1">Wiederkehrendes Event löschen</h3>
+          <p className="text-sm text-gray-500 text-center mb-4">
+            Wie soll dieses wiederkehrende Event gelöscht werden?
+          </p>
+          <div className="space-y-2">
+            <button
+              onClick={onDeleteSingle}
+              className="w-full py-3 rounded-full bg-gray-100 text-gray-700 font-semibold text-sm hover:bg-gray-200 transition"
+            >
+              Nur dieses Event löschen
+            </button>
+            <button
+              onClick={onDeleteFuture}
+              className="w-full py-3 rounded-full bg-gray-100 text-gray-700 font-semibold text-sm hover:bg-gray-200 transition"
+            >
+              Dieses und alle folgenden löschen
+            </button>
+            <button
+              onClick={onDeleteAll}
+              className="w-full py-3 rounded-full bg-red-500 text-white font-semibold text-sm hover:bg-red-600 transition"
+            >
+              Alle Wiederholungen löschen
+            </button>
+          </div>
+        </motion.div>
+      ) : (
+        <motion.div
+          className="relative w-full max-w-[320px] bg-white rounded-2xl shadow-xl p-6 mb-8"
+          initial={{ scale: 0.9, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          exit={{ scale: 0.9, opacity: 0 }}
+          transition={{ type: "spring", damping: 25, stiffness: 400 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <h3 className="text-base font-bold text-gray-900 text-center">Event löschen?</h3>
+          <p className="text-sm text-gray-500 text-center mt-2">
+            Diese Aktion kann nicht rückgängig gemacht werden.
+          </p>
+          <div className="flex gap-3 mt-5">
+            <button
+              onClick={onCancel}
+              className="flex-1 py-2.5 rounded-full bg-gray-100 text-gray-700 text-sm font-semibold hover:bg-gray-200 transition"
+            >
+              Abbrechen
+            </button>
+            <button
+              onClick={onDeleteAll}
+              className="flex-1 py-2.5 rounded-full bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition"
+            >
+              Löschen
+            </button>
+          </div>
+        </motion.div>
+      )}
     </motion.div>
   );
 }
@@ -1436,6 +1544,7 @@ const NOTIFICATION_PRESETS: { value: number; label: string }[] = [
 
 function EventEditorSheet({
   event,
+  contextDateKey,
   labels,
   onSave,
   onAutoSave,
@@ -1443,10 +1552,11 @@ function EventEditorSheet({
   onClose,
 }: {
   event: CalendarEvent;
+  contextDateKey: string;
   labels: CalendarLabel[];
   onSave: (ev: CalendarEvent) => void;
   onAutoSave: (ev: CalendarEvent) => void;
-  onDelete?: () => void;
+  onDelete?: (mode: "all" | "single" | "future", dateKey?: string) => void;
   onClose: () => void;
 }) {
   const [title, setTitle] = useState(event.title);
@@ -1534,6 +1644,20 @@ function EventEditorSheet({
     }
   }, [isNew, isDirty, onClose]);
 
+  // Force-close: reset ALL overlay states, then call parent onClose
+  const forceClose = useCallback(() => {
+    setShowStartPicker(false);
+    setShowEndPicker(false);
+    setShowLabelPopup(false);
+    setShowRepeatPopup(false);
+    setShowNotificationPopup(false);
+    setShowCustomNotification(false);
+    setShowLinkPopup(false);
+    setShowDeleteConfirm(false);
+    setShowDiscardConfirm(false);
+    onClose();
+  }, [onClose]);
+
   const handleSave = () => {
     if (!title.trim()) return;
     onSave(buildCurrentEvent());
@@ -1608,8 +1732,9 @@ function EventEditorSheet({
         exit={{ y: "100%" }}
         transition={{ type: "spring", damping: 25, stiffness: 300 }}
         drag="y"
-        dragConstraints={{ top: 0 }}
-        dragElastic={0.2}
+        dragConstraints={{ top: 0, bottom: 0 }}
+        dragElastic={{ top: 0, bottom: 0.4 }}
+        dragSnapToOrigin
         onDragEnd={(_, info) => {
           if (info.offset.y > 100) handleCloseAttempt();
         }}
@@ -1955,10 +2080,21 @@ function EventEditorSheet({
       <AnimatePresence>
         {showDeleteConfirm && onDelete && (
           <DeleteConfirmModal
-            onConfirm={() => {
+            isRecurring={event.repeat_rule !== "none"}
+            onDeleteAll={() => {
               setShowDeleteConfirm(false);
-              onDelete();
+              onDelete("all");
             }}
+            onDeleteSingle={event.repeat_rule !== "none" ? () => {
+              setShowDeleteConfirm(false);
+              const dateKey = (event as any)._singleEditDate || contextDateKey;
+              onDelete("single", dateKey);
+            } : undefined}
+            onDeleteFuture={event.repeat_rule !== "none" ? () => {
+              setShowDeleteConfirm(false);
+              const dateKey = (event as any)._singleEditDate || contextDateKey;
+              onDelete("future", dateKey);
+            } : undefined}
             onCancel={() => setShowDeleteConfirm(false)}
           />
         )}
@@ -1973,7 +2109,7 @@ function EventEditorSheet({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
-            <div className="absolute inset-0 bg-black/40" onClick={() => setShowDiscardConfirm(false)} />
+            <div className="absolute inset-0 bg-black/40" onClick={(e) => { e.stopPropagation(); setShowDiscardConfirm(false); }} />
             <motion.div
               className="relative w-full max-w-[320px] bg-white rounded-2xl shadow-xl p-6"
               initial={{ scale: 0.9, opacity: 0 }}
@@ -1994,10 +2130,7 @@ function EventEditorSheet({
                   Abbrechen
                 </button>
                 <button
-                  onClick={() => {
-                    setShowDiscardConfirm(false);
-                    onClose();
-                  }}
+                  onClick={forceClose}
                   className="flex-1 py-2.5 rounded-full bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition"
                 >
                   Verwerfen

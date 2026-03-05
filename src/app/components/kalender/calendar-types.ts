@@ -14,6 +14,7 @@ export interface CalendarEvent {
   description: string;
   color: EventColor;
   repeat_rule: RepeatRule;
+  end_repeat_date?: string; // ISO date string – recurring events stop after this date
   notification_minutes: NotificationMinutes; // kept for backward compat
   notifications?: number[]; // array of notification values in minutes
   assigned_to?: string[]; // array of household member IDs
