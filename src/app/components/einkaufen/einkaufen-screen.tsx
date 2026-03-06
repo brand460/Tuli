@@ -154,6 +154,43 @@ async function saveCustomCategories(categories: string[]): Promise<void> {
   }
 }
 
+// ── Global items API helpers ───────────────────────────────────────
+interface GlobalItem {
+  name: string;
+  category: string;
+  created_by_household_id: string;
+  times_used: number;
+}
+
+async function fetchGlobalItems(): Promise<GlobalItem[]> {
+  try {
+    const res = await fetch(
+      `${API_BASE}/global-items?household_id=${DEV_HOUSEHOLD_ID}`,
+      { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+    );
+    const json = await res.json();
+    return json.items || [];
+  } catch (err) {
+    console.log("fetchGlobalItems error:", err);
+    return [];
+  }
+}
+
+async function upsertGlobalItem(name: string, category: string): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/global-items`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${publicAnonKey}`,
+      },
+      body: JSON.stringify({ household_id: DEV_HOUSEHOLD_ID, name, category }),
+    });
+  } catch (err) {
+    console.log("upsertGlobalItem error:", err);
+  }
+}
+
 // ── Store Logo Avatar ──────────────────────────────────────────────
 function StoreLogo({
   store,
@@ -270,6 +307,8 @@ function StoreSelector({
   onLongPress,
   isReorderMode,
   onStoreReorderEnd,
+  transferHoveredStoreId,
+  isTransferActive,
 }: {
   stores: StoreInfo[];
   selectedStore: string;
@@ -279,6 +318,8 @@ function StoreSelector({
   onLongPress: (storeId: string, anchorEl: HTMLElement) => void;
   isReorderMode: boolean;
   onStoreReorderEnd: (event: DragEndEvent) => void;
+  transferHoveredStoreId?: string | null;
+  isTransferActive?: boolean;
 }) {
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressTriggered = useRef(false);
@@ -371,23 +412,26 @@ function StoreSelector({
           stores.map((store) => {
             const isSelected = selectedStore === store.id;
             const count = itemCounts[store.id] || 0;
+            const isTransferHovered = isTransferActive && transferHoveredStoreId === store.id;
             return (
               <button
                 key={store.id}
+                data-store-id={store.id}
                 onPointerDown={(e) => handlePointerDown(store.id, e)}
                 onPointerUp={handlePointerUp}
                 onPointerLeave={handlePointerLeave}
                 onClick={() => handleClick(store.id)}
                 onContextMenu={(e) => e.preventDefault()}
-                onTouchStart={(e) => e.preventDefault()}
-                className="flex items-center justify-center flex-shrink-0 transition-all duration-150"
+                className={`flex items-center justify-center flex-shrink-0 transition-all duration-150 ${
+                  isTransferHovered ? "scale-125" : ""
+                }`}
                 style={{ WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none" }}
               >
-                <div className="relative">
+                <div className={`relative ${isTransferHovered ? "ring-3 ring-orange-500 rounded-full shadow-lg" : ""}`}>
                   <StoreLogo
                     store={store}
                     size={62}
-                    isSelected={isSelected}
+                    isSelected={isSelected || !!isTransferHovered}
                   />
                   {count > 0 && (
                     <span className="absolute -top-1 -right-1 bg-orange-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
@@ -558,6 +602,7 @@ function CategoryChip({
   return (
     <button
       onClick={onClick}
+      onPointerDown={(e) => e.preventDefault()}
       onMouseDown={(e) => e.preventDefault()}
       className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-sm font-medium transition whitespace-nowrap ${
         selected
@@ -590,9 +635,15 @@ function createRestrictToListBounds(
   storeSelectorRef: React.RefObject<HTMLDivElement | null>,
   checkedSectionRef: React.RefObject<HTMLDivElement | null>,
   scrollContainerRef: React.RefObject<HTMLDivElement | null>,
+  storeTransferModeRef: { current: boolean },
 ) {
   return ({ transform, draggingNodeRect }: any) => {
     if (!draggingNodeRect) return { ...transform, x: 0 };
+
+    // In store transfer mode, allow free movement
+    if (storeTransferModeRef.current) {
+      return transform;
+    }
 
     // Top bound: bottom edge of store selector
     const selectorRect = storeSelectorRef.current?.getBoundingClientRect();
@@ -743,6 +794,7 @@ function QuantityDrawer({
             autoComplete="off"
             autoCorrect="off"
             data-lpignore="true"
+            data-1p-ignore="true"
             data-form-type="other"
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
@@ -784,11 +836,17 @@ function SortableShoppingItem({
   onToggle,
   onQuantityChange,
   onOpenQuantityDrawer,
+  onNameChange,
+  animatingCheckId,
+  isTransferDragging,
 }: {
   item: ShoppingItem;
   onToggle: () => void;
   onQuantityChange: (delta: number) => void;
   onOpenQuantityDrawer: () => void;
+  onNameChange: (newName: string) => void;
+  animatingCheckId: string | null;
+  isTransferDragging?: boolean;
 }) {
   const {
     attributes,
@@ -798,6 +856,52 @@ function SortableShoppingItem({
     transition,
     isDragging,
   } = useSortable({ id: item.id });
+
+  const isAnimating = animatingCheckId === item.id;
+  const [phase, setPhase] = useState<"idle" | "flash" | "flyout">("idle");
+
+  useEffect(() => {
+    if (!isAnimating) { setPhase("idle"); return; }
+    setPhase("flash");
+    const t1 = setTimeout(() => setPhase("flyout"), 300);
+    return () => clearTimeout(t1);
+  }, [isAnimating]);
+
+  // ── Name editing state ──
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editNameValue, setEditNameValue] = useState(item.name);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isEditingName && nameInputRef.current) {
+      nameInputRef.current.focus();
+      nameInputRef.current.setSelectionRange(0, nameInputRef.current.value.length);
+    }
+  }, [isEditingName]);
+
+  // Keep edit value in sync if item.name changes externally
+  useEffect(() => {
+    if (!isEditingName) setEditNameValue(item.name);
+  }, [item.name, isEditingName]);
+
+  const handleNameSave = useCallback(() => {
+    const trimmed = editNameValue.trim();
+    if (trimmed && trimmed !== item.name) {
+      onNameChange(trimmed);
+    }
+    setIsEditingName(false);
+  }, [editNameValue, item.name, onNameChange]);
+
+  const handleNameKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleNameSave();
+    }
+    if (e.key === "Escape") {
+      setEditNameValue(item.name);
+      setIsEditingName(false);
+    }
+  }, [handleNameSave, item.name]);
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -832,11 +936,26 @@ function SortableShoppingItem({
   return (
     <div ref={setNodeRef} style={style}>
       <div
-        className={`flex items-center gap-2 px-4 py-2.5 bg-white transition-shadow ${
-          isDragging
-            ? "shadow-lg rounded-xl scale-[1.02] opacity-95"
-            : ""
+        className={`flex items-center gap-2 px-4 py-2.5 transition-all ${
+          isDragging && isTransferDragging
+            ? "shadow-xl rounded-xl scale-[1.08] opacity-95 bg-white ring-2 ring-orange-400"
+            : isDragging
+              ? "shadow-lg rounded-xl scale-[1.02] opacity-95 bg-white"
+              : phase === "flash"
+                ? "bg-green-50"
+                : "bg-white"
         }`}
+        style={
+          phase === "flyout"
+            ? {
+                transform: "translateY(100px)",
+                opacity: 0,
+                transition: "transform 400ms ease-in, opacity 400ms ease-in",
+              }
+            : phase === "flash"
+              ? { transition: "background-color 150ms ease-in" }
+              : undefined
+        }
       >
         <button
           {...attributes}
@@ -848,23 +967,49 @@ function SortableShoppingItem({
         <button
           onClick={onToggle}
           className={`flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition ${
-            item.is_checked
-              ? "bg-orange-500 border-orange-500"
-              : "border-gray-200 hover:border-orange-500"
+            phase === "flash" || phase === "flyout"
+              ? "bg-green-500 border-green-500"
+              : item.is_checked
+                ? "bg-orange-500 border-orange-500"
+                : "border-gray-200 hover:border-orange-500"
           }`}
         >
-          {item.is_checked && <Check className="w-3.5 h-3.5 text-white" />}
+          {(item.is_checked || phase === "flash" || phase === "flyout") && <Check className="w-3.5 h-3.5 text-white" />}
         </button>
         <div className="flex-1 min-w-0">
-          <p
-            className={`text-sm leading-tight truncate ${
-              item.is_checked
-                ? "line-through text-gray-400"
-                : "text-gray-900 font-medium"
-            }`}
-          >
-            {item.name}
-          </p>
+          {isEditingName && !item.is_checked ? (
+            <input
+              ref={nameInputRef}
+              type="text"
+              inputMode="text"
+              autoComplete="off"
+              autoCorrect="off"
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-form-type="other"
+              value={editNameValue}
+              onChange={(e) => setEditNameValue(e.target.value)}
+              onBlur={handleNameSave}
+              onKeyDown={handleNameKeyDown}
+              className="w-full text-sm font-medium text-gray-900 bg-transparent outline-none border-b border-orange-300 py-0.5 leading-tight"
+            />
+          ) : (
+            <p
+              onClick={(e) => {
+                if (item.is_checked || isDragging) return;
+                e.stopPropagation();
+                setEditNameValue(item.name);
+                setIsEditingName(true);
+              }}
+              className={`text-sm leading-tight truncate cursor-text ${
+                item.is_checked
+                  ? "line-through text-gray-400"
+                  : "text-gray-900 font-medium"
+              }`}
+            >
+              {item.name}
+            </p>
+          )}
         </div>
         <div
           className="flex items-center gap-1 flex-shrink-0 select-none"
@@ -1212,6 +1357,7 @@ function CategorySortModal({
                 autoComplete="off"
                 autoCorrect="off"
                 data-lpignore="true"
+                data-1p-ignore="true"
                 data-form-type="other"
                 value={newCat}
                 onChange={(e) => {
@@ -1370,7 +1516,7 @@ function AddItemBar({
     );
   }, [query, storeId, stores, existingNames, customTemplates]);
 
-  const handleSelect = (name: string, category?: string) => {
+  const handleSelect = (name: string, category?: string, fromSearch?: boolean) => {
     const cat =
       category || findGroceryTemplate(name, customTemplates)?.category || null;
     if (!cat) {
@@ -1380,10 +1526,17 @@ function AddItemBar({
       return;
     }
     onAdd(name, cat);
-    setQuery("");
-    setShowSuggestions(false);
     setQuickChips((prev) => prev.filter((c) => c !== name));
-    inputRef.current?.blur();
+    if (fromSearch && query.trim()) {
+      // Search had text + result tapped → clear search, keep keyboard open, keep focus
+      setQuery("");
+      setShowSuggestions(false);
+      // Focus stays because onPointerDown prevented blur
+    } else {
+      // Chip tapped with empty search → add, keyboard stays closed
+      setQuery("");
+      setShowSuggestions(false);
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -1431,6 +1584,7 @@ function AddItemBar({
             {quickChips.map((chip) => (
               <button
                 key={chip}
+                onPointerDown={(e) => e.preventDefault()}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => handleSelect(chip)}
                 className="flex-shrink-0 px-3 py-1.5 rounded-full bg-orange-50 text-orange-700 text-xs font-medium hover:bg-orange-100 transition whitespace-nowrap"
@@ -1455,8 +1609,9 @@ function AddItemBar({
                   return (
                     <button
                       key={result.name}
+                      onPointerDown={(e) => e.preventDefault()}
                       onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => handleSelect(result.name, result.category)}
+                      onClick={() => handleSelect(result.name, result.category, true)}
                       className="w-full text-left px-4 py-2.5 hover:bg-gray-50 flex items-center justify-between transition"
                     >
                       <span className="text-sm text-gray-900">
@@ -1477,6 +1632,7 @@ function AddItemBar({
                     (r) => r.name.toLowerCase() === query.trim().toLowerCase()
                   ) && (
                   <button
+                    onPointerDown={(e) => e.preventDefault()}
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => {
                       setPendingCustomName(query.trim());
@@ -1508,6 +1664,7 @@ function AddItemBar({
               autoCapitalize="off"
               spellCheck={false}
               data-lpignore="true"
+              data-1p-ignore="true"
               data-form-type="other"
               value={query}
               onChange={(e) => {
@@ -1550,7 +1707,7 @@ function AddItemBar({
   );
 }
 
-// ── Category Picker Modal ──────────────────────────────────────────
+// ── Category Picker Modal (keyboard-aware) ─────────────────────────
 function CategoryPickerModal({
   itemName,
   categories,
@@ -1562,12 +1719,39 @@ function CategoryPickerModal({
   onSelect: (category: string) => void;
   onClose: () => void;
 }) {
+  const [filterQuery, setFilterQuery] = useState("");
+  const [bottomOffset, setBottomOffset] = useState(0);
+
+  // Track visual viewport to position above keyboard
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      const kbHeight = window.innerHeight - vv.height - vv.offsetTop;
+      setBottomOffset(Math.max(0, kbHeight));
+    };
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+    };
+  }, []);
+
+  const filtered = useMemo(() => {
+    if (!filterQuery.trim()) return categories;
+    const q = filterQuery.toLowerCase().trim();
+    return categories.filter((c) => c.toLowerCase().includes(q));
+  }, [categories, filterQuery]);
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40"
+      className="fixed inset-0 z-50 bg-black/40"
+      style={{ touchAction: "none" }}
       onClick={onClose}
     >
       <motion.div
@@ -1576,13 +1760,18 @@ function CategoryPickerModal({
         exit={{ y: 300 }}
         transition={{ type: "spring", damping: 28, stiffness: 300 }}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-sm bg-white rounded-t-2xl shadow-lg flex flex-col max-h-[60vh]"
+        className="fixed left-0 right-0 mx-auto w-full max-w-sm bg-white rounded-t-2xl shadow-lg flex flex-col"
+        style={{
+          bottom: bottomOffset,
+          height: "40vh",
+          maxHeight: `calc(100vh - ${bottomOffset}px - 40px)`,
+        }}
       >
         {/* Handle bar */}
-        <div className="flex justify-center pt-3 pb-1">
+        <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
           <div className="w-10 h-1 rounded-full bg-gray-300" />
         </div>
-        <div className="px-5 pb-3">
+        <div className="px-5 pb-2 flex-shrink-0">
           <h3 className="text-base font-bold text-gray-900">
             Kategorie wählen
           </h3>
@@ -1590,15 +1779,49 @@ function CategoryPickerModal({
             Für &bdquo;{itemName}&ldquo;
           </p>
         </div>
-        <div className="flex-1 overflow-y-auto px-5 pb-5">
+        {/* Search field */}
+        <div className="px-5 pb-2 flex-shrink-0">
+          <div className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2 border border-gray-100">
+            <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
+            <input
+              type="text"
+              inputMode="text"
+              autoComplete="off"
+              autoCorrect="off"
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-form-type="other"
+              value={filterQuery}
+              onChange={(e) => setFilterQuery(e.target.value)}
+              placeholder="Kategorie suchen..."
+              className="flex-1 bg-transparent outline-none text-sm text-gray-900 placeholder:text-gray-400"
+            />
+            {filterQuery && (
+              <button
+                type="button"
+                onPointerDown={(e) => e.preventDefault()}
+                onClick={() => setFilterQuery("")}
+                className="text-gray-400 hover:text-gray-900"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto px-5 pb-5 min-h-0">
           <div className="flex flex-wrap gap-2">
-            {categories.map((cat) => (
+            {filtered.map((cat) => (
               <CategoryChip
                 key={cat}
                 category={cat}
                 onClick={() => onSelect(cat)}
               />
             ))}
+            {filtered.length === 0 && (
+              <p className="text-sm text-gray-500 text-center py-4 w-full">
+                Keine Kategorien gefunden
+              </p>
+            )}
           </div>
         </div>
       </motion.div>
@@ -1716,6 +1939,7 @@ function AddStoreModal({
               autoCapitalize="off"
               spellCheck={false}
               data-lpignore="true"
+              data-1p-ignore="true"
               data-form-type="other"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -1829,7 +2053,7 @@ function StoreSuggestionRow({
 }
 
 // ── Main Einkaufen Screen ──────────────────────────────────────────
-export function EinkaufenScreen() {
+export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (count: number) => void }) {
   const [items, setItems] = useState<ShoppingItem[]>([]);
   const [stores, setStores] = useState<StoreInfo[]>(DEFAULT_STORES);
   const [storeSettings, setStoreSettings] = useState<StoreSettingEntry[]>([]);
@@ -1848,6 +2072,16 @@ export function EinkaufenScreen() {
     null
   );
   const [globalCustomCategories, setGlobalCustomCategories] = useState<string[]>([]);
+  const [globalItems, setGlobalItems] = useState<GlobalItem[]>([]);
+  const [animatingCheckId, setAnimatingCheckId] = useState<string | null>(null);
+
+  // Store transfer drag state
+  const storeTransferModeRef = useRef(false);
+  const storeTransferTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pointerPosRef = useRef({ x: 0, y: 0 });
+  const [storeTransferActive, setStoreTransferActive] = useState(false);
+  const [hoveredStoreId, setHoveredStoreId] = useState<string | null>(null);
+  const hoveredStoreRef = useRef<string | null>(null);
 
   const saveTimeout = useRef<ReturnType<typeof setTimeout>>();
   const customCatSaveTimeout = useRef<ReturnType<typeof setTimeout>>();
@@ -1861,19 +2095,52 @@ export function EinkaufenScreen() {
   const keyboardHeight = useKeyboardHeight();
 
   // ── Load items + store settings ────────────────────────────────
-  useEffect(() => {
-    Promise.all([fetchItems(), fetchStoreSettings(), fetchCustomCategories()]).then(
-      ([serverItems, settings, customCats]) => {
-        setItems(serverItems);
-        if (settings.length > 0) {
-          setStoreSettings(settings);
-          applyStoreSettings(DEFAULT_STORES, settings);
-        }
-        setGlobalCustomCategories(customCats);
-        setLoaded(true);
+  const reloadAllData = useCallback(async () => {
+    try {
+      const [serverItems, settings, customCats, gItems] = await Promise.all([
+        fetchItems(),
+        fetchStoreSettings(),
+        fetchCustomCategories(),
+        fetchGlobalItems(),
+      ]);
+      // Only update if no local changes happened during fetch
+      if (Date.now() - lastLocalChangeRef.current < 2000) return;
+      setItems(serverItems);
+      if (settings.length > 0) {
+        setStoreSettings(settings);
+        applyStoreSettings(DEFAULT_STORES, settings);
       }
-    );
+      setGlobalCustomCategories(customCats);
+      setGlobalItems(gItems);
+      setLoaded(true);
+    } catch (err) {
+      console.log("reloadAllData error:", err);
+    }
   }, []);
+
+  useEffect(() => {
+    reloadAllData();
+  }, [reloadAllData]);
+
+  // ── Reload on visibility change / focus (fixes empty list after app switch) ──
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        console.log("[Einkaufen] App visible again, reloading data...");
+        reloadAllData();
+      }
+    };
+    const handleFocus = () => {
+      console.log("[Einkaufen] Window focused, reloading data...");
+      reloadAllData();
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleFocus);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, [reloadAllData]);
 
   const applyStoreSettings = (
     baseStores: StoreInfo[],
@@ -2028,6 +2295,15 @@ export function EinkaufenScreen() {
     return counts;
   }, [items]);
 
+  // Report total unchecked count to parent
+  const totalUncheckedCount = useMemo(() => {
+    return items.filter((i) => !i.is_checked).length;
+  }, [items]);
+
+  useEffect(() => {
+    onItemCountChange?.(totalUncheckedCount);
+  }, [totalUncheckedCount, onItemCountChange]);
+
   const existingNames = useMemo(() => {
     return new Set(
       items.filter((i) => i.store === selectedStore).map((i) => i.name)
@@ -2042,6 +2318,18 @@ export function EinkaufenScreen() {
     const dbNames = new Set(GROCERY_DATABASE.map((g) => g.name.toLowerCase()));
     const seen = new Set<string>();
     const templates: GroceryTemplate[] = [];
+
+    // Add global items first (sorted by times_used desc for priority)
+    const sortedGlobal = [...globalItems].sort((a, b) => b.times_used - a.times_used);
+    for (const gi of sortedGlobal) {
+      const key = gi.name.toLowerCase();
+      if (!dbNames.has(key) && !seen.has(key)) {
+        seen.add(key);
+        templates.push({ name: gi.name, category: gi.category });
+      }
+    }
+
+    // Also add from current items list (catch any not yet in global)
     for (const item of items) {
       const key = item.name.toLowerCase();
       if (!dbNames.has(key) && !seen.has(key)) {
@@ -2050,18 +2338,34 @@ export function EinkaufenScreen() {
       }
     }
     return templates;
-  }, [items]);
+  }, [items, globalItems]);
 
   // ── Handlers ───────────────────────────────────────────────────
   const handleToggle = useCallback(
     (id: string) => {
-      updateItems((prev) =>
-        prev.map((i) =>
-          i.id === id ? { ...i, is_checked: !i.is_checked } : i
-        )
-      );
+      // If unchecking (already checked), do it immediately
+      const item = items.find((i) => i.id === id);
+      if (item?.is_checked) {
+        updateItems((prev) =>
+          prev.map((i) =>
+            i.id === id ? { ...i, is_checked: false } : i
+          )
+        );
+        return;
+      }
+      // Checking: animate first, then update
+      setAnimatingCheckId(id);
+      // After flash (300ms) + flyout (400ms), actually check the item
+      setTimeout(() => {
+        updateItems((prev) =>
+          prev.map((i) =>
+            i.id === id ? { ...i, is_checked: true } : i
+          )
+        );
+        setAnimatingCheckId(null);
+      }, 700);
     },
-    [updateItems]
+    [items, updateItems]
   );
 
   const handleQuantityChange = useCallback(
@@ -2087,6 +2391,31 @@ export function EinkaufenScreen() {
       );
     },
     [updateItems]
+  );
+
+  const handleNameChange = useCallback(
+    (id: string, newName: string) => {
+      const item = items.find((i) => i.id === id);
+      if (!item) return;
+      updateItems((prev) =>
+        prev.map((i) => (i.id === id ? { ...i, name: newName } : i))
+      );
+      // If the new name doesn't exist in global_items or GROCERY_DATABASE, upsert it
+      const isBuiltIn = GROCERY_DATABASE.some(
+        (g) => g.name.toLowerCase() === newName.toLowerCase()
+      );
+      const isInGlobal = globalItems.some(
+        (g) => g.name.toLowerCase() === newName.toLowerCase()
+      );
+      if (!isBuiltIn && !isInGlobal) {
+        setGlobalItems((prev) => [
+          ...prev,
+          { name: newName, category: item.category, created_by_household_id: DEV_HOUSEHOLD_ID, times_used: 1 },
+        ]);
+        upsertGlobalItem(newName, item.category);
+      }
+    },
+    [items, globalItems, updateItems]
   );
 
   // State for the quantity/unit drawer
@@ -2141,6 +2470,27 @@ export function EinkaufenScreen() {
         );
         return [...shifted, newItem];
       });
+
+      // If this is a custom article (not in built-in DB), save/upsert to global items
+      const isBuiltIn = GROCERY_DATABASE.some(
+        (g) => g.name.toLowerCase() === name.toLowerCase()
+      );
+      if (!isBuiltIn) {
+        // Update local state immediately for instant search visibility
+        setGlobalItems((prev) => {
+          const idx = prev.findIndex(
+            (g) => g.name.toLowerCase() === name.toLowerCase()
+          );
+          if (idx >= 0) {
+            const copy = [...prev];
+            copy[idx] = { ...copy[idx], times_used: copy[idx].times_used + 1, category };
+            return copy;
+          }
+          return [...prev, { name, category, created_by_household_id: DEV_HOUSEHOLD_ID, times_used: 1 }];
+        });
+        // Persist to server (fire and forget)
+        upsertGlobalItem(name, category);
+      }
     },
     [items, selectedStore, getCustomCategoryIndex, updateItems]
   );
@@ -2389,16 +2739,129 @@ export function EinkaufenScreen() {
 
   const handleDndDragStart = useCallback((event: DragStartEvent) => {
     setActiveDragId(event.active.id as string);
+    storeTransferModeRef.current = false;
+    setStoreTransferActive(false);
+    hoveredStoreRef.current = null;
+    setHoveredStoreId(null);
+
+    // Track pointer position for store transfer detection
+    const trackPointer = (e: PointerEvent | TouchEvent) => {
+      if ("touches" in e) {
+        pointerPosRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      } else {
+        pointerPosRef.current = { x: e.clientX, y: e.clientY };
+      }
+    };
+    document.addEventListener("pointermove", trackPointer as any);
+    document.addEventListener("touchmove", trackPointer as any, { passive: true });
+
+    // Clean up on drag end (will be removed in handleDndDragEnd too)
+    const cleanup = () => {
+      document.removeEventListener("pointermove", trackPointer as any);
+      document.removeEventListener("touchmove", trackPointer as any);
+      document.removeEventListener("pointerup", cleanup);
+      document.removeEventListener("touchend", cleanup);
+    };
+    document.addEventListener("pointerup", cleanup, { once: true });
+    document.addEventListener("touchend", cleanup, { once: true });
+  }, []);
+
+  const handleDndDragMove = useCallback(() => {
+    // Check if the dragged item is near the top of the list area
+    const selectorRect = storeSelectorRef.current?.getBoundingClientRect();
+    if (!selectorRect) return;
+
+    const topThreshold = selectorRect.bottom + 60; // within 60px of the top
+    const itemRect = scrollContainerRef.current?.getBoundingClientRect();
+    if (!itemRect) return;
+
+    // Use pointer position for detection
+    const py = pointerPosRef.current.y;
+
+    if (py < topThreshold && py > selectorRect.top) {
+      // Near the top — start timer if not already started
+      if (!storeTransferTimerRef.current && !storeTransferModeRef.current) {
+        storeTransferTimerRef.current = setTimeout(() => {
+          storeTransferModeRef.current = true;
+          setStoreTransferActive(true);
+          // Vibrate for haptic feedback if available
+          if (navigator.vibrate) navigator.vibrate(50);
+        }, 800);
+      }
+    } else {
+      // Not near top — clear timer
+      if (storeTransferTimerRef.current) {
+        clearTimeout(storeTransferTimerRef.current);
+        storeTransferTimerRef.current = null;
+      }
+    }
+
+    // In transfer mode, detect which store icon the pointer is hovering over
+    if (storeTransferModeRef.current) {
+      const storeButtons = document.querySelectorAll<HTMLElement>("[data-store-id]");
+      let foundStore: string | null = null;
+      const px = pointerPosRef.current.x;
+      storeButtons.forEach((btn) => {
+        const rect = btn.getBoundingClientRect();
+        if (
+          px >= rect.left - 10 &&
+          px <= rect.right + 10 &&
+          py >= rect.top - 10 &&
+          py <= rect.bottom + 10
+        ) {
+          foundStore = btn.getAttribute("data-store-id");
+        }
+      });
+      hoveredStoreRef.current = foundStore;
+      setHoveredStoreId(foundStore);
+    }
   }, []);
 
   const handleDndDragEnd = useCallback(
     (event: DragEndEvent) => {
       const { active, over } = event;
+      const activeId = active.id as string;
+
+      // Clean up transfer state
+      if (storeTransferTimerRef.current) {
+        clearTimeout(storeTransferTimerRef.current);
+        storeTransferTimerRef.current = null;
+      }
+      const wasTransferMode = storeTransferModeRef.current;
+      const targetStore = hoveredStoreRef.current;
+      storeTransferModeRef.current = false;
+      setStoreTransferActive(false);
+      hoveredStoreRef.current = null;
+      setHoveredStoreId(null);
       setActiveDragId(null);
 
+      // Handle store transfer
+      if (wasTransferMode && targetStore && targetStore !== selectedStore) {
+        // Transfer the item to the new store
+        updateItems((prev) => {
+          // Get the max position in the target store
+          const targetItems = prev.filter(
+            (i) => i.store === targetStore && !i.is_checked
+          );
+          const maxPos = targetItems.length > 0
+            ? Math.max(...targetItems.map((i) => i.position)) + 1
+            : 0;
+
+          return prev.map((i) =>
+            i.id === activeId
+              ? { ...i, store: targetStore, position: maxPos, manually_positioned: false }
+              : i
+          );
+        });
+        return;
+      }
+
+      // If transfer mode was active but no valid target, cancel (item stays)
+      if (wasTransferMode) return;
+
+      // Normal reorder
       if (!over || active.id === over.id) return;
 
-      const activeId = active.id as string;
       const overId = over.id as string;
 
       const oldIndex = sortedStoreItems.findIndex((i) => i.id === activeId);
@@ -2433,11 +2896,23 @@ export function EinkaufenScreen() {
         });
       });
     },
-    [sortedStoreItems, updateItems]
+    [sortedStoreItems, updateItems, selectedStore]
   );
 
+  const handleDndDragCancel = useCallback(() => {
+    if (storeTransferTimerRef.current) {
+      clearTimeout(storeTransferTimerRef.current);
+      storeTransferTimerRef.current = null;
+    }
+    storeTransferModeRef.current = false;
+    setStoreTransferActive(false);
+    hoveredStoreRef.current = null;
+    setHoveredStoreId(null);
+    setActiveDragId(null);
+  }, []);
+
   const restrictToListBounds = useMemo(
-    () => createRestrictToListBounds(storeSelectorRef, checkedSectionRef, scrollContainerRef),
+    () => createRestrictToListBounds(storeSelectorRef, checkedSectionRef, scrollContainerRef, storeTransferModeRef),
     []
   );
   const itemModifiers = useMemo(() => [restrictToListBounds], [restrictToListBounds]);
@@ -2512,6 +2987,8 @@ export function EinkaufenScreen() {
           onLongPress={handleStoreLongPress}
           isReorderMode={storeReorderMode}
           onStoreReorderEnd={handleStoreReorderEnd}
+          transferHoveredStoreId={hoveredStoreId}
+          isTransferActive={storeTransferActive}
         />
       </div>
 
@@ -2566,7 +3043,9 @@ export function EinkaufenScreen() {
             collisionDetection={closestCenter}
             modifiers={itemModifiers}
             onDragStart={handleDndDragStart}
+            onDragMove={handleDndDragMove}
             onDragEnd={handleDndDragEnd}
+            onDragCancel={handleDndDragCancel}
           >
             <SortableContext
               items={sortableItemIds}
@@ -2584,6 +3063,11 @@ export function EinkaufenScreen() {
                     onOpenQuantityDrawer={() =>
                       setQuantityDrawerItemId(item.id)
                     }
+                    onNameChange={(newName) =>
+                      handleNameChange(item.id, newName)
+                    }
+                    animatingCheckId={animatingCheckId}
+                    isTransferDragging={storeTransferActive && activeDragId === item.id}
                   />
                 ))}
               </div>

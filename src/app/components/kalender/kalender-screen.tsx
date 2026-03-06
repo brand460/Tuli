@@ -252,6 +252,173 @@ function bandsAtCol(segments: MultiDaySegment[], col: number): number {
   return max;
 }
 
+// ── Month Grid Data helper ─────────────────────────────────────────
+
+interface MonthGridData {
+  weeks: { date: Date; inMonth: boolean }[][];
+  weekBands: MultiDaySegment[][];
+  cellSingleEvents: Record<string, CalendarEvent[]>;
+  cellAllEvents: Record<string, CalendarEvent[]>;
+}
+
+function computeMonthGridData(year: number, month: number, events: CalendarEvent[]): MonthGridData {
+  const monthDays = getMonthDays(year, month);
+  const weeks: { date: Date; inMonth: boolean }[][] = [];
+  for (let i = 0; i < monthDays.length; i += 7) weeks.push(monthDays.slice(i, i + 7));
+  const weekBands = weeks.map((week) => computeWeekBands(week, events));
+  const cellSingleEvents: Record<string, CalendarEvent[]> = {};
+  const cellAllEvents: Record<string, CalendarEvent[]> = {};
+  for (const { date } of monthDays) {
+    const key = toDateKey(date);
+    const evs = getEventsForDate(events, date);
+    if (evs.length > 0) cellAllEvents[key] = evs;
+    const singles = evs.filter((ev) => !isMultiDay(ev));
+    if (singles.length > 0) cellSingleEvents[key] = singles;
+  }
+  return { weeks, weekBands, cellSingleEvents, cellAllEvents };
+}
+
+// ── Extracted MonthGrid component ──────────────────────────────────
+
+const BAND_HEIGHT = 16;
+const BAND_GAP = 1;
+const DAY_NUM_HEIGHT = 28;
+
+interface MonthGridProps {
+  data: MonthGridData;
+  selectedDate: Date;
+  highlightMonth: number;
+  today: Date;
+  onDayClick: (date: Date) => void;
+}
+
+const MonthGrid = React.memo(function MonthGrid({ data, selectedDate, highlightMonth, today, onDayClick }: MonthGridProps) {
+  const { weeks, weekBands, cellSingleEvents, cellAllEvents } = data;
+  return (
+    <div style={{ flex: "0 0 33.3333%" }}>
+      <div className="grid grid-cols-7 mb-0.5">
+        {WEEKDAYS.map((wd) => (
+          <div key={wd} className="text-center text-[11px] font-semibold text-gray-400 py-1">
+            {wd}
+          </div>
+        ))}
+      </div>
+      {weeks.map((week, weekIdx) => {
+        const bands = weekBands[weekIdx];
+        const maxLanes = bands.length > 0 ? Math.max(...bands.map((b) => b.lane)) + 1 : 0;
+        const bandAreaHeight = maxLanes * (BAND_HEIGHT + BAND_GAP);
+        return (
+          <div key={weekIdx} className="relative grid grid-cols-7" style={{ height: 72 }}>
+            {bands.map((seg) => {
+              const pillStyle = getEventPillStyle(seg.event.color);
+              const sMid = dateMidnight(new Date(seg.event.start_time));
+              const eMid = dateMidnight(new Date(seg.event.end_time));
+              const isStart = toDateKey(sMid) >= toDateKey(week[0].date);
+              const isEnd = toDateKey(eMid) <= toDateKey(week[6].date);
+              return (
+                <div
+                  key={`band-${seg.event.id}-${weekIdx}`}
+                  className={`absolute z-20 flex items-center overflow-hidden ${
+                    isStart && isEnd ? "rounded-sm" : isStart ? "rounded-l-sm" : isEnd ? "rounded-r-sm" : ""
+                  }`}
+                  style={{
+                    left: `${(seg.startCol / 7) * 100}%`,
+                    width: `${(seg.span / 7) * 100}%`,
+                    top: DAY_NUM_HEIGHT + seg.lane * (BAND_HEIGHT + BAND_GAP),
+                    height: BAND_HEIGHT,
+                    backgroundColor: pillStyle.bg,
+                  }}
+                >
+                  <span className="text-[10px] font-medium truncate w-full px-1 leading-none" style={{ color: pillStyle.text }}>
+                    {seg.event.title}
+                  </span>
+                </div>
+              );
+            })}
+            {week.map((dayObj, colIdx) => {
+              const { date, inMonth } = dayObj;
+              const key = toDateKey(date);
+              const isToday = isSameDay(date, today);
+              const isSelected = isSameDay(date, selectedDate) && date.getMonth() === highlightMonth;
+              const singleEvents = cellSingleEvents[key] || [];
+              const allEvents = cellAllEvents[key] || [];
+              const bandsHere = bandsAtCol(bands, colIdx);
+              const maxSingleSlots = Math.max(0, 2 - bandsHere);
+              const visibleSingle = singleEvents.slice(0, maxSingleSlots);
+              const visibleIds = new Set<string>();
+              for (const seg of bands) {
+                if (colIdx >= seg.startCol && colIdx < seg.startCol + seg.span) visibleIds.add(seg.event.id);
+              }
+              for (const ev of visibleSingle) visibleIds.add(ev.id);
+              const hiddenEvents = allEvents.filter((ev) => !visibleIds.has(ev.id));
+              const hiddenCount = hiddenEvents.length;
+              const hiddenColors = [...new Set(hiddenEvents.map((ev) => ev.color))];
+              return (
+                <button
+                  key={colIdx}
+                  onClick={() => onDayClick(date)}
+                  className={`flex flex-col items-center pt-1 relative overflow-hidden ${
+                    isSelected ? "bg-orange-50 rounded-lg" : ""
+                  }`}
+                  style={{ height: 72 }}
+                >
+                  <div
+                    className={`w-6 h-6 flex items-center justify-center rounded-full text-xs relative z-10 flex-shrink-0 ${
+                      isSelected && isToday
+                        ? "bg-orange-500 text-white font-bold"
+                        : isSelected
+                        ? "bg-gray-900 text-white font-bold"
+                        : isToday
+                        ? "ring-2 ring-orange-500 text-orange-500 font-bold"
+                        : inMonth
+                        ? "text-gray-900"
+                        : "text-gray-300"
+                    }`}
+                  >
+                    {date.getDate()}
+                  </div>
+                  {visibleSingle.length > 0 && (
+                    <div className="w-full flex flex-col gap-px absolute left-0 right-0" style={{ top: DAY_NUM_HEIGHT + bandAreaHeight }}>
+                      {visibleSingle.map((ev) => {
+                        const pillStyle = getEventPillStyle(ev.color);
+                        return (
+                          <div
+                            key={ev.id}
+                            className={`flex items-center overflow-hidden rounded-sm ${ev.all_day ? "w-full" : "mx-1"}`}
+                            style={{ height: BAND_HEIGHT, backgroundColor: pillStyle.bg }}
+                          >
+                            <span className="text-[10px] font-medium truncate w-full px-1 leading-none" style={{ color: pillStyle.text }}>
+                              {ev.title}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {hiddenCount > 0 && (
+                    <div
+                      className="absolute flex items-center justify-center gap-0.5 w-full"
+                      style={{
+                        top: DAY_NUM_HEIGHT + bandAreaHeight + visibleSingle.length * (BAND_HEIGHT + BAND_GAP),
+                        height: 14,
+                      }}
+                    >
+                      {hiddenColors.map((c) => (
+                        <div key={c} className="w-1 h-1 rounded-full flex-shrink-0" style={{ backgroundColor: getColorHex(c) }} />
+                      ))}
+                      <span className="text-[9px] text-gray-400 leading-none ml-px">+{hiddenCount}</span>
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
+});
+
 function getEventPillStyle(color: EventColor): { bg: string; text: string } {
   const map: Record<EventColor, { bg: string; text: string }> = {
     orange: { bg: "rgba(249,115,22,0.15)", text: "#EA580C" },
@@ -337,10 +504,25 @@ export function KalenderScreen() {
   }, []);
 
   useEffect(() => {
+    // Stagger initial loads slightly to avoid overwhelming edge function cold start
     loadEvents();
-    loadLabels();
-    const interval = setInterval(loadEvents, 5000);
-    return () => clearInterval(interval);
+    const labelTimer = setTimeout(loadLabels, 200);
+    // If initial load failed, retry a few more times with increasing delay
+    let retryCount = 0;
+    const maxRetries = 3;
+    const retryTimer = setInterval(() => {
+      if (loadErrorRef.current && retryCount < maxRetries) {
+        retryCount++;
+        console.log(`Kalender: Auto-Retry ${retryCount}/${maxRetries}...`);
+        loadEvents();
+      }
+    }, 3000);
+    const interval = setInterval(loadEvents, 10000);
+    return () => {
+      clearTimeout(labelTimer);
+      clearInterval(retryTimer);
+      clearInterval(interval);
+    };
   }, [loadEvents, loadLabels]);
 
   // ── Event CRUD ─────────────────────────────────────────────────
@@ -519,10 +701,64 @@ export function KalenderScreen() {
     }
   }, [currentMonth]);
 
-  // ── Swipe gesture for month navigation ────────────────────────
+  // ── Derived data (3 months: prev, current, next) ────────────────
+
+  const selectedDayEvents = useMemo(() => getEventsForDate(events, selectedDate), [events, selectedDate]);
+
+  const [prevYear, prevMonth] = useMemo<[number, number]>(
+    () => (currentMonth === 0 ? [currentYear - 1, 11] : [currentYear, currentMonth - 1]),
+    [currentYear, currentMonth]
+  );
+  const [nextYear, nextMonth] = useMemo<[number, number]>(
+    () => (currentMonth === 11 ? [currentYear + 1, 0] : [currentYear, currentMonth + 1]),
+    [currentYear, currentMonth]
+  );
+
+  const curData = useMemo(() => computeMonthGridData(currentYear, currentMonth, events), [currentYear, currentMonth, events]);
+  const prevData = useMemo(() => computeMonthGridData(prevYear, prevMonth, events), [prevYear, prevMonth, events]);
+  const nextData = useMemo(() => computeMonthGridData(nextYear, nextMonth, events), [nextYear, nextMonth, events]);
+
+  // ── Swipe gesture with 3-panel track ──────────────────────────
   const touchStartXRef = useRef<number | null>(null);
-  const [slideDirection, setSlideDirection] = useState<"left" | "right" | null>(null);
   const swipingRef = useRef(false);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const isTransitioningRef = useRef(false);
+
+  const animateToMonth = useCallback((direction: "prev" | "next") => {
+    if (isTransitioningRef.current) return;
+    const track = trackRef.current;
+    if (!track) return;
+    isTransitioningRef.current = true;
+
+    // Enable transition & slide to prev or next panel
+    track.style.transition = "transform 200ms cubic-bezier(0.25, 0.1, 0.25, 1)";
+    track.style.transform = direction === "next"
+      ? "translateX(-66.6667%)"
+      : "translateX(0%)";
+
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      track.removeEventListener("transitionend", finish);
+      // Update month state (this re-renders with new prev/cur/next)
+      if (direction === "next") {
+        goToNextMonth();
+      } else {
+        goToPrevMonth();
+      }
+      // Instantly snap back to center without transition
+      track.style.transition = "none";
+      track.style.transform = "translateX(-33.3333%)";
+      // Force reflow so the snap is instant before next paint
+      void track.offsetHeight;
+      isTransitioningRef.current = false;
+      swipingRef.current = false;
+    };
+    track.addEventListener("transitionend", finish);
+    // Safety fallback in case transitionend doesn't fire
+    setTimeout(finish, 250);
+  }, [goToNextMonth, goToPrevMonth]);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     if (!swipingRef.current) {
@@ -537,80 +773,24 @@ export function KalenderScreen() {
 
     if (Math.abs(diff) > 50) {
       swipingRef.current = true;
-      if (diff > 0) {
-        // Swiped left → next month
-        setSlideDirection("left");
-        setTimeout(() => {
-          goToNextMonth();
-          setSlideDirection(null);
-          swipingRef.current = false;
-        }, 300);
-      } else {
-        // Swiped right → previous month
-        setSlideDirection("right");
-        setTimeout(() => {
-          goToPrevMonth();
-          setSlideDirection(null);
-          swipingRef.current = false;
-        }, 300);
-      }
+      animateToMonth(diff > 0 ? "next" : "prev");
     }
-  }, [goToNextMonth, goToPrevMonth]);
+  }, [animateToMonth]);
 
-  // ── Derived data ───────────────────────────────────────────────
-
-  const monthDays = useMemo(() => getMonthDays(currentYear, currentMonth), [currentYear, currentMonth]);
-  const selectedDayEvents = useMemo(() => getEventsForDate(events, selectedDate), [events, selectedDate]);
-
-  // Split into weeks (rows of 7)
-  const weeks = useMemo(() => {
-    const w: { date: Date; inMonth: boolean }[][] = [];
-    for (let i = 0; i < monthDays.length; i += 7) {
-      w.push(monthDays.slice(i, i + 7));
+  const handleDayClick = useCallback((date: Date) => {
+    setSelectedDate(date);
+    if (date.getMonth() !== currentMonth || date.getFullYear() !== currentYear) {
+      setCurrentMonth(date.getMonth());
+      setCurrentYear(date.getFullYear());
     }
-    return w;
-  }, [monthDays]);
-
-  // Compute multi-day band segments per week
-  const weekBands = useMemo(
-    () => weeks.map((week) => computeWeekBands(week, events)),
-    [weeks, events]
-  );
-
-  // Pre-compute single-day events per cell (excluding multi-day ones)
-  const cellSingleEvents = useMemo(() => {
-    const map: Record<string, CalendarEvent[]> = {};
-    for (const { date } of monthDays) {
-      const key = toDateKey(date);
-      const evs = getEventsForDate(events, date).filter(
-        (ev) => !isMultiDay(ev)
-      );
-      if (evs.length > 0) map[key] = evs;
-    }
-    return map;
-  }, [events, monthDays]);
-
-  // All events per cell (for overflow counting + color dots)
-  const cellAllEvents = useMemo(() => {
-    const map: Record<string, CalendarEvent[]> = {};
-    for (const { date } of monthDays) {
-      const key = toDateKey(date);
-      const evs = getEventsForDate(events, date);
-      if (evs.length > 0) map[key] = evs;
-    }
-    return map;
-  }, [events, monthDays]);
-
-  const BAND_HEIGHT = 16;
-  const BAND_GAP = 1;
-  const DAY_NUM_HEIGHT = 28;
+  }, [currentMonth, currentYear]);
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
       {/* Month Header */}
       <div className="flex-shrink-0 flex items-center justify-between px-5 py-2 bg-white border-b border-gray-100">
         <button
-          onClick={goToPrevMonth}
+          onClick={() => animateToMonth("prev")}
           className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-900 hover:bg-gray-50 transition"
         >
           <ChevronLeft className="w-4 h-4" />
@@ -619,203 +799,49 @@ export function KalenderScreen() {
           {MONTHS_DE[currentMonth]} {currentYear}
         </h2>
         <button
-          onClick={goToNextMonth}
+          onClick={() => animateToMonth("next")}
           className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-900 hover:bg-gray-50 transition"
         >
           <ChevronRight className="w-4 h-4" />
         </button>
       </div>
 
-      {/* Calendar Grid */}
+      {/* Calendar Grid — 3-panel track: [prev] [current] [next] */}
       <div
         className="flex-shrink-0 bg-white px-1 pb-1 pt-1 overflow-hidden"
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
         <div
+          ref={trackRef}
           style={{
-            transform: slideDirection === "left"
-              ? "translateX(-100%)"
-              : slideDirection === "right"
-              ? "translateX(100%)"
-              : "translateX(0)",
-            transition: slideDirection ? "transform 300ms ease" : "none",
+            display: "flex",
+            width: "300%",
+            transform: "translateX(-33.3333%)",
+            willChange: "transform",
           }}
         >
-        <div className="grid grid-cols-7 mb-0.5">
-          {WEEKDAYS.map((wd) => (
-            <div key={wd} className="text-center text-[11px] font-semibold text-gray-400 py-1">
-              {wd}
-            </div>
-          ))}
-        </div>
-
-        {/* Week rows */}
-        {weeks.map((week, weekIdx) => {
-          const bands = weekBands[weekIdx];
-          const maxLanes = bands.length > 0 ? Math.max(...bands.map((b) => b.lane)) + 1 : 0;
-          const bandAreaHeight = maxLanes * (BAND_HEIGHT + BAND_GAP);
-
-          return (
-            <div key={weekIdx} className="relative grid grid-cols-7" style={{ height: 72 }}>
-              {/* Multi-day bands — absolutely positioned */}
-              {bands.map((seg) => {
-                const pillStyle = getEventPillStyle(seg.event.color);
-                const sMid = dateMidnight(new Date(seg.event.start_time));
-                const eMid = dateMidnight(new Date(seg.event.end_time));
-                const isStart = toDateKey(sMid) >= toDateKey(week[0].date);
-                const isEnd = toDateKey(eMid) <= toDateKey(week[6].date);
-                return (
-                  <div
-                    key={`band-${seg.event.id}-${weekIdx}`}
-                    className={`absolute z-20 flex items-center overflow-hidden ${
-                      isStart && isEnd
-                        ? "rounded-sm"
-                        : isStart
-                        ? "rounded-l-sm"
-                        : isEnd
-                        ? "rounded-r-sm"
-                        : ""
-                    }`}
-                    style={{
-                      left: `${(seg.startCol / 7) * 100}%`,
-                      width: `${(seg.span / 7) * 100}%`,
-                      top: DAY_NUM_HEIGHT + seg.lane * (BAND_HEIGHT + BAND_GAP),
-                      height: BAND_HEIGHT,
-                      backgroundColor: pillStyle.bg,
-                    }}
-                  >
-                    <span
-                      className="text-[10px] font-medium truncate w-full px-1 leading-none"
-                      style={{ color: pillStyle.text }}
-                    >
-                      {seg.event.title}
-                    </span>
-                  </div>
-                );
-              })}
-
-              {/* Day cells */}
-              {week.map((dayObj, colIdx) => {
-                const { date, inMonth } = dayObj;
-                const key = toDateKey(date);
-                const isToday = isSameDay(date, today);
-                const isSelected = isSameDay(date, selectedDate);
-                const singleEvents = cellSingleEvents[key] || [];
-                const allEvents = cellAllEvents[key] || [];
-                const bandsHere = bandsAtCol(bands, colIdx);
-
-                const maxSingleSlots = Math.max(0, 2 - bandsHere);
-                const visibleSingle = singleEvents.slice(0, maxSingleSlots);
-
-                // Collect IDs of visible events (bands + shown pills)
-                const visibleIds = new Set<string>();
-                for (const seg of bands) {
-                  if (colIdx >= seg.startCol && colIdx < seg.startCol + seg.span) {
-                    visibleIds.add(seg.event.id);
-                  }
-                }
-                for (const ev of visibleSingle) {
-                  visibleIds.add(ev.id);
-                }
-                const hiddenEvents = allEvents.filter((ev) => !visibleIds.has(ev.id));
-                const hiddenCount = hiddenEvents.length;
-                // Unique colors of hidden events for dots
-                const hiddenColors = [...new Set(hiddenEvents.map((ev) => ev.color))];
-
-                return (
-                  <button
-                    key={colIdx}
-                    onClick={() => {
-                      setSelectedDate(date);
-                      if (date.getMonth() !== currentMonth) {
-                        setCurrentMonth(date.getMonth());
-                        setCurrentYear(date.getFullYear());
-                      }
-                    }}
-                    className={`flex flex-col items-center pt-1 relative overflow-hidden ${
-                      isSelected ? "bg-orange-50 rounded-lg" : ""
-                    }`}
-                    style={{ height: 72 }}
-                  >
-                    {/* Day number */}
-                    <div
-                      className={`w-6 h-6 flex items-center justify-center rounded-full text-xs relative z-10 flex-shrink-0 ${
-                        isSelected && isToday
-                          ? "bg-orange-500 text-white font-bold"
-                          : isSelected
-                          ? "bg-gray-900 text-white font-bold"
-                          : isToday
-                          ? "ring-2 ring-orange-500 text-orange-500 font-bold"
-                          : inMonth
-                          ? "text-gray-900"
-                          : "text-gray-300"
-                      }`}
-                    >
-                      {date.getDate()}
-                    </div>
-
-                    {/* Single-day event pills (positioned below bands) */}
-                    {visibleSingle.length > 0 && (
-                      <div
-                        className="w-full flex flex-col gap-px absolute left-0 right-0"
-                        style={{ top: DAY_NUM_HEIGHT + bandAreaHeight }}
-                      >
-                        {visibleSingle.map((ev) => {
-                          const pillStyle = getEventPillStyle(ev.color);
-                          return (
-                            <div
-                              key={ev.id}
-                              className={`flex items-center overflow-hidden rounded-sm ${
-                                ev.all_day ? "w-full" : "mx-1"
-                              }`}
-                              style={{
-                                height: BAND_HEIGHT,
-                                backgroundColor: pillStyle.bg,
-                              }}
-                            >
-                              <span
-                                className="text-[10px] font-medium truncate w-full px-1 leading-none"
-                                style={{ color: pillStyle.text }}
-                              >
-                                {ev.title}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {/* "+X" overflow indicator with color dots */}
-                    {hiddenCount > 0 && (
-                      <div
-                        className="absolute flex items-center justify-center gap-0.5 w-full"
-                        style={{
-                          top:
-                            DAY_NUM_HEIGHT +
-                            bandAreaHeight +
-                            visibleSingle.length * (BAND_HEIGHT + BAND_GAP),
-                          height: 14,
-                        }}
-                      >
-                        {hiddenColors.map((c) => (
-                          <div
-                            key={c}
-                            className="w-1 h-1 rounded-full flex-shrink-0"
-                            style={{ backgroundColor: getColorHex(c) }}
-                          />
-                        ))}
-                        <span className="text-[9px] text-gray-400 leading-none ml-px">
-                          +{hiddenCount}
-                        </span>
-                      </div>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          );
-        })}
+          <MonthGrid
+            data={prevData}
+            selectedDate={selectedDate}
+            highlightMonth={prevMonth}
+            today={today}
+            onDayClick={handleDayClick}
+          />
+          <MonthGrid
+            data={curData}
+            selectedDate={selectedDate}
+            highlightMonth={currentMonth}
+            today={today}
+            onDayClick={handleDayClick}
+          />
+          <MonthGrid
+            data={nextData}
+            selectedDate={selectedDate}
+            highlightMonth={nextMonth}
+            today={today}
+            onDayClick={handleDayClick}
+          />
         </div>
       </div>
 
@@ -1768,6 +1794,7 @@ function EventEditorSheet({
               type="text"
               autoComplete="off"
               data-lpignore="true"
+              data-1p-ignore="true"
               data-form-type="other"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
@@ -1910,6 +1937,7 @@ function EventEditorSheet({
                   rows={3}
                   autoComplete="off"
                   data-lpignore="true"
+                  data-1p-ignore="true"
                   data-form-type="other"
                   className="flex-1 text-sm text-gray-900 placeholder:text-gray-400 outline-none bg-transparent resize-none"
                   autoFocus

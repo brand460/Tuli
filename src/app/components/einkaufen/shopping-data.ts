@@ -442,33 +442,40 @@ export function searchGroceries(query: string, storeId: string, stores: StoreInf
   const store = stores.find((s) => s.id === storeId);
   const cats = store ? getCategoriesForStore(storeId, stores) : null;
 
-  // Merge built-in + custom, deduplicate by lowercase name
+  // Merge custom + built-in, deduplicate by lowercase name
+  // Custom templates come first so they have priority
   const seen = new Set<string>();
+  const customSet = new Set<string>();
   const all: GroceryTemplate[] = [];
+  if (customTemplates) {
+    for (const g of customTemplates) {
+      const key = g.name.toLowerCase();
+      if (!seen.has(key)) { seen.add(key); all.push(g); customSet.add(key); }
+    }
+  }
   for (const g of GROCERY_DATABASE) {
     const key = g.name.toLowerCase();
     if (!seen.has(key)) { seen.add(key); all.push(g); }
   }
-  if (customTemplates) {
-    for (const g of customTemplates) {
-      const key = g.name.toLowerCase();
-      if (!seen.has(key)) { seen.add(key); all.push(g); }
-    }
-  }
 
-  // Filter matching items, prioritize items in matching categories for this store type
+  // Filter matching items
   const matches = all.filter((g) =>
     g.name.toLowerCase().includes(q)
   );
 
-  if (cats) {
-    const catSet = new Set(cats);
-    matches.sort((a, b) => {
+  // Sort: custom items first, then by store category match
+  matches.sort((a, b) => {
+    const aCustom = customSet.has(a.name.toLowerCase()) ? 0 : 1;
+    const bCustom = customSet.has(b.name.toLowerCase()) ? 0 : 1;
+    if (aCustom !== bCustom) return aCustom - bCustom;
+    if (cats) {
+      const catSet = new Set(cats);
       const aIn = catSet.has(a.category) ? 0 : 1;
       const bIn = catSet.has(b.category) ? 0 : 1;
       return aIn - bIn;
-    });
-  }
+    }
+    return 0;
+  });
 
   return matches.slice(0, 10);
 }

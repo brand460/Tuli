@@ -26,43 +26,63 @@ export async function apiFetch(path: string, options: RequestInit = {}) {
   const token = publicAnonKey;
 
   const url = `${API_BASE}${path}`;
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      ...options,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-        ...options.headers,
-      },
-    });
-  } catch (networkErr) {
-    throw new Error(`Netzwerkfehler bei ${options.method || "GET"} ${path}: ${networkErr}`);
-  }
+  const MAX_RETRIES = 4;
+  const RETRY_DELAY = 1000;
 
-  let body: any;
-  const contentType = res.headers.get("content-type") || "";
-  if (contentType.includes("application/json")) {
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    let res: Response;
     try {
-      body = await res.json();
-    } catch (parseErr) {
-      throw new Error(`JSON-Parse-Fehler (Status ${res.status}) bei ${path}: ${parseErr}`);
+      res = await fetch(url, {
+        ...options,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          ...options.headers,
+        },
+      });
+    } catch (networkErr) {
+      // Retry on transient network errors (cold start, connection reset)
+      if (attempt < MAX_RETRIES) {
+        console.log(`[apiFetch] Netzwerkfehler bei ${path} (Versuch ${attempt}/${MAX_RETRIES}), retry in ${RETRY_DELAY}ms...`);
+        await new Promise((r) => setTimeout(r, RETRY_DELAY * attempt));
+        continue;
+      }
+      throw new Error(`Netzwerkfehler bei ${options.method || "GET"} ${path}: ${networkErr}`);
     }
-  } else {
-    const text = await res.text();
+
+    // Retry on 5xx or 0 status (server error / edge function cold start)
+    if (res.status >= 500 && attempt < MAX_RETRIES) {
+      console.log(`[apiFetch] Server-Fehler ${res.status} bei ${path} (Versuch ${attempt}/${MAX_RETRIES}), retry...`);
+      await new Promise((r) => setTimeout(r, RETRY_DELAY * attempt));
+      continue;
+    }
+
+    let body: any;
+    const contentType = res.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      try {
+        body = await res.json();
+      } catch (parseErr) {
+        throw new Error(`JSON-Parse-Fehler (Status ${res.status}) bei ${path}: ${parseErr}`);
+      }
+    } else {
+      const text = await res.text();
+      if (!res.ok) {
+        throw new Error(`Server-Fehler ${res.status} bei ${path}: ${text}`);
+      }
+      try {
+        body = JSON.parse(text);
+      } catch {
+        throw new Error(`Unerwartete Antwort (Status ${res.status}) bei ${path}: ${text.substring(0, 200)}`);
+      }
+    }
+
     if (!res.ok) {
-      throw new Error(`Server-Fehler ${res.status} bei ${path}: ${text}`);
+      const msg = body?.error || body?.message || body?.msg || JSON.stringify(body);
+      throw new Error(`Fehler ${res.status} bei ${path}: ${msg}`);
     }
-    try {
-      body = JSON.parse(text);
-    } catch {
-      throw new Error(`Unerwartete Antwort (Status ${res.status}) bei ${path}: ${text.substring(0, 200)}`);
-    }
+    return body;
   }
 
-  if (!res.ok) {
-    const msg = body?.error || body?.message || body?.msg || JSON.stringify(body);
-    throw new Error(`Fehler ${res.status} bei ${path}: ${msg}`);
-  }
-  return body;
+  throw new Error(`apiFetch: max retries exhausted for ${path}`);
 }

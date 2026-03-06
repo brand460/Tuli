@@ -54,6 +54,7 @@ export function RegisterScreen({ onSwitchToLogin }: RegisterScreenProps) {
               type="text"
               autoComplete="off"
               data-lpignore="true"
+              data-1p-ignore="true"
               data-form-type="other"
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -71,6 +72,7 @@ export function RegisterScreen({ onSwitchToLogin }: RegisterScreenProps) {
               type="email"
               autoComplete="off"
               data-lpignore="true"
+              data-1p-ignore="true"
               data-form-type="other"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -88,6 +90,7 @@ export function RegisterScreen({ onSwitchToLogin }: RegisterScreenProps) {
               type="password"
               autoComplete="new-password"
               data-lpignore="true"
+              data-1p-ignore="true"
               data-form-type="other"
               value={password}
               onChange={(e) => setPassword(e.target.value)}

@@ -51,7 +51,7 @@ const supabaseAdmin = () =>
 
 // Health check
 app.get("/make-server-2a26506b/health", (c) => {
-  return c.json({ status: "ok" });
+  return c.json({ status: "ok", ts: Date.now() });
 });
 
 // Sign up — uses admin API to create user with email_confirm: true
@@ -259,4 +259,163 @@ app.put("/make-server-2a26506b/custom-categories", async (c) => {
   }
 });
 
-Deno.serve(app.fetch);
+// ── Global custom items (user-created articles) ────────────────────
+
+// GET global items for a household
+app.get("/make-server-2a26506b/global-items", async (c) => {
+  try {
+    const householdId = c.req.query("household_id");
+    if (!householdId) {
+      return c.json({ error: "household_id ist erforderlich." }, 400);
+    }
+    const key = `global_items:${householdId}`;
+    const items = await withRetry(() => kv.get(key));
+    return c.json({ items: items || [] });
+  } catch (err) {
+    console.log("GET /global-items error:", err);
+    return c.json({ error: `Fehler beim Laden der globalen Artikel: ${err}` }, 500);
+  }
+});
+
+// PUT — upsert a global item (create or increment times_used)
+app.put("/make-server-2a26506b/global-items", async (c) => {
+  try {
+    const { household_id, name, category } = await c.req.json();
+    if (!household_id || !name || !category) {
+      return c.json({ error: "household_id, name und category sind erforderlich." }, 400);
+    }
+    const key = `global_items:${household_id}`;
+    const existing: any[] = (await withRetry(() => kv.get(key))) || [];
+    const idx = existing.findIndex(
+      (it: any) => it.name.toLowerCase() === name.toLowerCase()
+    );
+    if (idx >= 0) {
+      existing[idx].times_used = (existing[idx].times_used || 1) + 1;
+      existing[idx].category = category; // update category if changed
+    } else {
+      existing.push({
+        name,
+        category,
+        created_by_household_id: household_id,
+        times_used: 1,
+      });
+    }
+    await withRetry(() => kv.set(key, existing));
+    return c.json({ ok: true, items: existing });
+  } catch (err) {
+    console.log("PUT /global-items error:", err);
+    return c.json({ error: `Fehler beim Speichern des globalen Artikels: ${err}` }, 500);
+  }
+});
+
+// ── Custom pages (Notion-like editor) ──────────────────────────────
+
+// GET all pages for a household
+app.get("/make-server-2a26506b/custom-pages", async (c) => {
+  try {
+    const householdId = c.req.query("household_id");
+    if (!householdId) {
+      return c.json({ error: "household_id ist erforderlich." }, 400);
+    }
+    const key = `custom_pages:${householdId}`;
+    const pages = await withRetry(() => kv.get(key));
+    return c.json({ pages: pages || [] });
+  } catch (err) {
+    console.log("GET /custom-pages error:", err);
+    return c.json({ error: `Fehler beim Laden der Seiten: ${err}` }, 500);
+  }
+});
+
+// PUT — save all pages
+app.put("/make-server-2a26506b/custom-pages", async (c) => {
+  try {
+    const { household_id, pages } = await c.req.json();
+    if (!household_id) {
+      return c.json({ error: "household_id ist erforderlich." }, 400);
+    }
+    const key = `custom_pages:${household_id}`;
+    await withRetry(() => kv.set(key, pages || []));
+    return c.json({ ok: true });
+  } catch (err) {
+    console.log("PUT /custom-pages error:", err);
+    return c.json({ error: `Fehler beim Speichern der Seiten: ${err}` }, 500);
+  }
+});
+
+// ── Custom blocks (Notion-like editor) ─────────────────────────────
+
+// GET all blocks for a household
+app.get("/make-server-2a26506b/custom-blocks", async (c) => {
+  try {
+    const householdId = c.req.query("household_id");
+    if (!householdId) {
+      return c.json({ error: "household_id ist erforderlich." }, 400);
+    }
+    const key = `custom_blocks:${householdId}`;
+    const blocks = await withRetry(() => kv.get(key));
+    return c.json({ blocks: blocks || [] });
+  } catch (err) {
+    console.log("GET /custom-blocks error:", err);
+    return c.json({ error: `Fehler beim Laden der Blöcke: ${err}` }, 500);
+  }
+});
+
+// PUT — save all blocks
+app.put("/make-server-2a26506b/custom-blocks", async (c) => {
+  try {
+    const { household_id, blocks } = await c.req.json();
+    if (!household_id) {
+      return c.json({ error: "household_id ist erforderlich." }, 400);
+    }
+    const key = `custom_blocks:${household_id}`;
+    await withRetry(() => kv.set(key, blocks || []));
+    return c.json({ ok: true });
+  } catch (err) {
+    console.log("PUT /custom-blocks error:", err);
+    return c.json({ error: `Fehler beim Speichern der Blöcke: ${err}` }, 500);
+  }
+});
+
+// Global error handler — ensures CORS headers are always returned even on crashes
+app.onError((err, c) => {
+  console.log("Unhandled server error:", err);
+  return c.json(
+    { error: `Interner Serverfehler: ${err?.message || err}` },
+    500,
+  );
+});
+
+// Wrap Deno.serve to guarantee CORS headers on every response (including edge-function-level errors)
+Deno.serve(async (req) => {
+  // Fast-path: handle bare OPTIONS preflight before Hono, in case middleware fails
+  if (req.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+        "Access-Control-Max-Age": "600",
+      },
+    });
+  }
+  try {
+    const res = await app.fetch(req);
+    // Ensure CORS origin header is present on every response
+    if (!res.headers.get("Access-Control-Allow-Origin")) {
+      const headers = new Headers(res.headers);
+      headers.set("Access-Control-Allow-Origin", "*");
+      return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+    }
+    return res;
+  } catch (e) {
+    console.log("Fatal Deno.serve error:", e);
+    return new Response(JSON.stringify({ error: `Fatal: ${e}` }), {
+      status: 500,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
+    });
+  }
+});

@@ -125,6 +125,7 @@ export function HouseholdSetup() {
                   type="text"
                   autoComplete="off"
                   data-lpignore="true"
+                  data-1p-ignore="true"
                   data-form-type="other"
                   value={householdName}
                   onChange={(e) => setHouseholdName(e.target.value)}
@@ -172,6 +173,7 @@ export function HouseholdSetup() {
                   type="text"
                   autoComplete="off"
                   data-lpignore="true"
+                  data-1p-ignore="true"
                   data-form-type="other"
                   value={inviteCode}
                   onChange={(e) => setInviteCode(e.target.value.toUpperCase())}

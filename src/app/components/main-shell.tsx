@@ -5,6 +5,7 @@ import { Toaster } from "sonner";
 import { EinkaufenScreen } from "./einkaufen/einkaufen-screen";
 import { KalenderScreen } from "./kalender/kalender-screen";
 import { MehrScreen } from "./mehr-screen";
+import { ListenScreen } from "./listen/listen-screen";
 
 type TabId = "kalender" | "einkaufen" | "listen" | "kochen" | "mehr";
 
@@ -88,6 +89,7 @@ export function MainShell() {
   // DEV MODE: using mock data instead of useAuth()
   const signOut = () => { console.log("signOut (dev mode - no-op)"); };
   const [activeTab, setActiveTab] = useState<TabId>("einkaufen");
+  const [einkaufenCount, setEinkaufenCount] = useState(0);
   const stableHeight = useStableViewportHeight();
 
   return (
@@ -103,10 +105,10 @@ export function MainShell() {
           <KalenderScreen />
         </div>
         <div className={`absolute inset-0 flex flex-col ${activeTab === "einkaufen" ? "" : "hidden"}`}>
-          <EinkaufenScreen />
+          <EinkaufenScreen onItemCountChange={setEinkaufenCount} />
         </div>
         <div className={`absolute inset-0 flex flex-col ${activeTab === "listen" ? "" : "hidden"}`}>
-          <PlaceholderScreen title="Listen" />
+          <ListenScreen />
         </div>
         <div className={`absolute inset-0 flex flex-col ${activeTab === "kochen" ? "" : "hidden"}`}>
           <PlaceholderScreen title="Kochen" />
@@ -126,13 +128,18 @@ export function MainShell() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center justify-center w-12 h-12 rounded-xl transition ${
+                className={`relative flex items-center justify-center w-12 h-12 rounded-xl transition ${
                   isActive
                     ? "text-orange-500 bg-orange-50"
                     : "text-gray-400 hover:text-gray-900"
                 }`}
               >
                 <Icon className="w-5 h-5" strokeWidth={isActive ? 2.5 : 2} />
+                {tab.id === "einkaufen" && einkaufenCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 bg-orange-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+                    {einkaufenCount}
+                  </span>
+                )}
               </button>
             );
           })}
