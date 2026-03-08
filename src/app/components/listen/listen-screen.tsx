@@ -245,20 +245,13 @@ export function ListenScreen() {
           const savedId = localStorage.getItem(LS_LAST_PAGE_KEY);
           const restoredId = (savedId && loadedPages.some(p => p.id === savedId)) ? savedId : loadedPages[0]?.id || null;
           setActivePageId(restoredId);
-          // Expand ancestors so restored page is visible in sidebar
-          if (restoredId) {
-            const ancestors = new Set<string>();
-            let cur = loadedPages.find(p => p.id === restoredId);
-            while (cur?.parent_id) {
-              ancestors.add(cur.parent_id);
-              cur = loadedPages.find(p => p.id === cur!.parent_id);
-            }
-            if (ancestors.size > 0) setExpandedPages(prev => {
-              const next = new Set(prev);
-              ancestors.forEach(id => next.add(id));
-              return next;
-            });
-          }
+          // Alle Seiten mit Unterseiten beim ersten Laden aufklappen
+          const parentIds = new Set<string>(
+            loadedPages
+              .filter(p => p.parent_id !== null && p.parent_id !== undefined)
+              .map(p => p.parent_id as string)
+          );
+          setExpandedPages(parentIds);
         }
       }
       if (isInitial) setLoaded(true);
@@ -1626,6 +1619,8 @@ interface PageEditorProps {
 
 // ── Slash-command menu items ──
 const SLASH_ITEMS = [
+  { id: "bullet", label: "Bullet-Liste", icon: "•" },
+  { id: "numbered", label: "Nummerierte Liste", icon: "1." },
   { id: "checklist", label: "Checkliste", icon: "\u2705" },
   { id: "h1", label: "\u00dcberschrift 1", icon: "H1" },
   { id: "h2", label: "\u00dcberschrift 2", icon: "H2" },
@@ -2257,6 +2252,24 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
       setSlashFilter("");
 
       switch (id) {
+        case "bullet": {
+          const li = document.createElement("li");
+          li.innerHTML = "<br>";
+          const ul = document.createElement("ul");
+          ul.appendChild(li);
+          blockEl.replaceWith(ul);
+          placeCursorAtStart(li);
+          break;
+        }
+        case "numbered": {
+          const li = document.createElement("li");
+          li.innerHTML = "<br>";
+          const ol = document.createElement("ol");
+          ol.appendChild(li);
+          blockEl.replaceWith(ol);
+          placeCursorAtStart(li);
+          break;
+        }
         case "checklist": {
           const todoDiv = document.createElement("div");
           todoDiv.className = "editor-todo";
@@ -2557,18 +2570,13 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
   }, [tablePopover]);
 
   // ── Handle input events ──
-  const handleInput = useCallback((e: React.FormEvent) => {
+  const handleInput = useCallback(() => {
     if (!editorRef.current) return;
 
     // Skip if we're in the middle of a markdown conversion (prevents loop)
     if (isConvertingRef.current) return;
 
     ensureNotEmpty();
-
-    // Filter by inputType — only react to actual text insertion, not deletions/formatting
-    const nativeEvent = e.nativeEvent as InputEvent;
-    const inputType = nativeEvent?.inputType || "";
-    const isTextInsert = inputType === "insertText" || inputType === "insertCompositionText" || inputType === "";
 
     // Check for slash command trigger
     const sel = window.getSelection();
@@ -2593,108 +2601,132 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
       closeSlashMenu();
     }
 
-    // ── Markdown shortcuts via input event (reliable on mobile where keydown is unreliable) ──
-    // Only check on text insertion events
-    if (isTextInsert && sel?.isCollapsed && sel.rangeCount) {
-      const range = sel.getRangeAt(0);
-      const node = sel.anchorNode;
-      const blockEl = getBlockElement(range.startContainer);
-      if (node && blockEl && (blockEl.tagName === "P" || blockEl.tagName === "DIV") && !blockEl.classList.contains("editor-todo")) {
-        // Primary: check text before cursor (sel.anchorOffset)
-        const nodeText = node.textContent || "";
-        const textBefore = nodeText.substring(0, sel.anchorOffset);
-        // Fallback: check full block textContent (Android sometimes doesn't update anchorOffset correctly)
-        const blockText = blockEl.textContent || "";
-
-        // Helper: perform conversion with isConverting guard
-        const doConvert = (fn: () => void) => {
-          isConvertingRef.current = true;
-          fn();
-          // Reset after a microtask so any triggered input events are suppressed
-          Promise.resolve().then(() => { isConvertingRef.current = false; });
-        };
-
-        // "- " → bullet list
-        if (textBefore === "- " || textBefore === "\u2013 " || textBefore === "\u2014 "
-            || /^[-\u2013\u2014] $/.test(blockText)) {
-          const triggerLen = blockText.match(/^[-\u2013\u2014] /)?.[0]?.length || 2;
-          const rest = blockText.substring(triggerLen);
-          doConvert(() => {
-            const li = document.createElement("li");
-            li.innerHTML = rest || "<br>";
-            const ul = document.createElement("ul");
-            ul.appendChild(li);
-            blockEl.replaceWith(ul);
-            placeCursorAtStart(li);
-            syncContent();
-          });
-          return;
-        }
-        // "1. " → numbered list
-        if (/^\d+\.\s$/.test(textBefore) || /^\d+\.\s$/.test(blockText)) {
-          const triggerMatch = blockText.match(/^(\d+\.\s)/);
-          const triggerLen = triggerMatch ? triggerMatch[1].length : 3;
-          const rest = blockText.substring(triggerLen);
-          doConvert(() => {
-            const li = document.createElement("li");
-            li.innerHTML = rest || "<br>";
-            const ol = document.createElement("ol");
-            ol.appendChild(li);
-            blockEl.replaceWith(ol);
-            placeCursorAtStart(li);
-            syncContent();
-          });
-          return;
-        }
-        // "[] " → to-do
-        if (textBefore === "[] " || /^\[\]\s$/.test(blockText)) {
-          const triggerLen = blockText.match(/^\[\]\s/)?.[0]?.length || 3;
-          const rest = blockText.substring(triggerLen);
-          doConvert(() => {
-            const todoDiv = document.createElement("div");
-            todoDiv.className = "editor-todo";
-            todoDiv.setAttribute("data-checked", "false");
-            const checkbox = document.createElement("span");
-            checkbox.contentEditable = "false";
-            checkbox.className = "editor-todo-check";
-            todoDiv.appendChild(checkbox);
-            const textSpan = document.createElement("span");
-            textSpan.className = "editor-todo-text";
-            textSpan.innerHTML = rest || "<br>";
-            todoDiv.appendChild(textSpan);
-            blockEl.replaceWith(todoDiv);
-            placeCursorAtStart(textSpan);
-            syncContent();
-          });
-          return;
-        }
-        // "# " → H1, "## " → H2, "### " → H3
-        if (textBefore === "# " || /^#\s$/.test(blockText)) {
-          const rest = blockText.substring(2);
-          doConvert(() => {
-            const h = document.createElement("h1"); h.innerHTML = rest || "<br>"; blockEl.replaceWith(h); placeCursorAtStart(h); syncContent();
-          });
-          return;
-        }
-        if (textBefore === "## " || /^##\s$/.test(blockText)) {
-          const rest = blockText.substring(3);
-          doConvert(() => {
-            const h = document.createElement("h2"); h.innerHTML = rest || "<br>"; blockEl.replaceWith(h); placeCursorAtStart(h); syncContent();
-          });
-          return;
-        }
-        if (textBefore === "### " || /^###\s$/.test(blockText)) {
-          const rest = blockText.substring(4);
-          doConvert(() => {
-            const h = document.createElement("h3"); h.innerHTML = rest || "<br>"; blockEl.replaceWith(h); placeCursorAtStart(h); syncContent();
-          });
-          return;
-        }
-      }
-    }
-
     syncContent();
-  }, [syncContent, ensureNotEmpty, getBlockElement, placeCursorAtStart, slashOpen, openSlashMenu, closeSlashMenu]);
+  }, [syncContent, ensureNotEmpty, getBlockElement, slashOpen, openSlashMenu, closeSlashMenu]);
+
+  // ── MutationObserver for markdown shortcuts (works on Android where input/keydown are unreliable) ──
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const observer = new MutationObserver(() => {
+      if (isConvertingRef.current) return;
+
+      const sel = window.getSelection();
+      if (!sel?.isCollapsed || !sel.rangeCount) return;
+
+      const node = sel.anchorNode;
+      if (!node) return;
+
+      const blockEl = getBlockElement(node);
+      if (!blockEl) return;
+      const tag = blockEl.tagName;
+      // Only convert in plain P or DIV blocks (not already in lists, todos, headings)
+      if ((tag !== "P" && tag !== "DIV") || blockEl.classList.contains("editor-todo")) return;
+      // Don't convert if already inside a list
+      if (blockEl.closest("ul") || blockEl.closest("ol")) return;
+
+      const blockText = blockEl.textContent || "";
+
+      // "- " → bullet list
+      if (/^[-\u2013\u2014] /.test(blockText)) {
+        const triggerLen = blockText.match(/^[-\u2013\u2014] /)?.[0]?.length || 2;
+        const rest = blockText.substring(triggerLen);
+        isConvertingRef.current = true;
+        const li = document.createElement("li");
+        li.innerHTML = rest || "<br>";
+        const ul = document.createElement("ul");
+        ul.appendChild(li);
+        blockEl.replaceWith(ul);
+        placeCursorAtStart(li);
+        syncContent();
+        Promise.resolve().then(() => { isConvertingRef.current = false; });
+        return;
+      }
+
+      // "1. " → numbered list
+      if (/^\d+\.\s/.test(blockText)) {
+        const triggerMatch = blockText.match(/^(\d+\.\s)/);
+        if (!triggerMatch) return;
+        const triggerLen = triggerMatch[1].length;
+        const rest = blockText.substring(triggerLen);
+        isConvertingRef.current = true;
+        const li = document.createElement("li");
+        li.innerHTML = rest || "<br>";
+        const ol = document.createElement("ol");
+        ol.appendChild(li);
+        blockEl.replaceWith(ol);
+        placeCursorAtStart(li);
+        syncContent();
+        Promise.resolve().then(() => { isConvertingRef.current = false; });
+        return;
+      }
+
+      // "[] " → to-do
+      if (/^\[\]\s/.test(blockText)) {
+        const rest = blockText.substring(3);
+        isConvertingRef.current = true;
+        const todoDiv = document.createElement("div");
+        todoDiv.className = "editor-todo";
+        todoDiv.setAttribute("data-checked", "false");
+        const checkbox = document.createElement("span");
+        checkbox.contentEditable = "false";
+        checkbox.className = "editor-todo-check";
+        todoDiv.appendChild(checkbox);
+        const textSpan = document.createElement("span");
+        textSpan.className = "editor-todo-text";
+        textSpan.innerHTML = rest || "<br>";
+        todoDiv.appendChild(textSpan);
+        blockEl.replaceWith(todoDiv);
+        placeCursorAtStart(textSpan);
+        syncContent();
+        Promise.resolve().then(() => { isConvertingRef.current = false; });
+        return;
+      }
+
+      // "# " → H1
+      if (/^#\s/.test(blockText) && !/^##/.test(blockText)) {
+        const rest = blockText.substring(2);
+        isConvertingRef.current = true;
+        const h = document.createElement("h1");
+        h.innerHTML = rest || "<br>";
+        blockEl.replaceWith(h);
+        placeCursorAtStart(h);
+        syncContent();
+        Promise.resolve().then(() => { isConvertingRef.current = false; });
+        return;
+      }
+
+      // "## " → H2
+      if (/^##\s/.test(blockText) && !/^###/.test(blockText)) {
+        const rest = blockText.substring(3);
+        isConvertingRef.current = true;
+        const h = document.createElement("h2");
+        h.innerHTML = rest || "<br>";
+        blockEl.replaceWith(h);
+        placeCursorAtStart(h);
+        syncContent();
+        Promise.resolve().then(() => { isConvertingRef.current = false; });
+        return;
+      }
+
+      // "### " → H3
+      if (/^###\s/.test(blockText)) {
+        const rest = blockText.substring(4);
+        isConvertingRef.current = true;
+        const h = document.createElement("h3");
+        h.innerHTML = rest || "<br>";
+        blockEl.replaceWith(h);
+        placeCursorAtStart(h);
+        syncContent();
+        Promise.resolve().then(() => { isConvertingRef.current = false; });
+        return;
+      }
+    });
+
+    observer.observe(editor, { childList: true, subtree: true, characterData: true });
+    return () => observer.disconnect();
+  }, [getBlockElement, placeCursorAtStart, syncContent]);
 
   // ── Handle keydown ──
   const handleKeyDown = useCallback(
