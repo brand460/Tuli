@@ -458,13 +458,12 @@ export function ListenScreen() {
   }, [searchQuery, pages, pageContents]);
 
   // ── DnD sensors (for sidebar page reordering) ─────────────────
-  const sensorOptions = useMemo(() => ({
-    pointer: { activationConstraint: { distance: 5 } },
-    touch: { activationConstraint: { delay: 300, tolerance: 5 } },
-  }), []);
+  // On touch: disable PointerSensor (it fires pointercancel without touch-action:none on the row,
+  // which would kill scrolling). TouchSensor uses native touch events and can preventDefault()
+  // after activation, so it works without touch-action:none.
   const sensors = useSensors(
-    useSensor(PointerSensor, sensorOptions.pointer),
-    useSensor(TouchSensor, sensorOptions.touch)
+    useSensor(PointerSensor, { activationConstraint: { distance: isTouch ? 999999 : 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 500, tolerance: 10 } })
   );
 
   // ── Render ─────────────────────────────────────────────────────
@@ -1025,7 +1024,13 @@ function SidebarContent(props: SidebarContentProps) {
       )}
 
       {/* Page tree — DndContext always mounted to prevent useLayoutEffect size-change warning */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-2 scrollbar-hide" style={{ display: searchQuery.trim() ? "none" : undefined }}>
+      <div
+        className="flex-1 min-h-0 overflow-y-auto px-2 pb-2 scrollbar-hide"
+        style={{
+          display: searchQuery.trim() ? "none" : undefined,
+          ...(dragActiveId ? { overflow: "hidden", touchAction: "none" } : {}),
+        }}
+      >
         <DndContext
           sensors={sensors}
           modifiers={dndModifiers}
@@ -1366,69 +1371,59 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
   const dragSrcRef = useRef<HTMLElement | null>(null);
   const [dropIdx, setDropIdx] = useState<number | null>(null);
 
-  // Floating selection toolbar state
-  const [cursorInLi, setCursorInLi] = useState(false);
-  const [selToolbar, setSelToolbar] = useState<{ top: number; left: number; below: boolean } | null>(null);
-  const selToolbarRef = useRef<HTMLDivElement>(null);
+  // ── Li drag handles ──────────────────────────────────────────────
+  const editorWrapperRef = useRef<HTMLDivElement>(null);
+  const [liPositions, setLiPositions] = useState<Array<{ top: number; left: number; height: number }>>([]);
+  const liElsRef = useRef<HTMLLIElement[]>([]);
+  const liDragRef = useRef<{
+    li: HTMLLIElement;
+    intent: "none" | "vertical" | "horizontal";
+    startX: number;
+    startY: number;
+    ghostEl: HTMLDivElement;
+    parentList: HTMLElement;
+    siblings: HTMLLIElement[];
+    srcIdx: number;
+    indentLevel: number;
+    lastFlashedLevel: number;
+    dropIdx: number;
+  } | null>(null);
+  const [liDragging, setLiDragging] = useState(false);
+  const [liDropIndicator, setLiDropIndicator] = useState<number | null>(null);
 
-  // Track whether cursor is inside an <li> + floating selection toolbar
-  useEffect(() => {
-    const TOOLBAR_H = 44;
-    const TOOLBAR_MARGIN = 8;
-
-    const onSelectionChange = () => {
-      const sel = window.getSelection();
-      if (!sel?.rangeCount || !editorRef.current) {
-        setCursorInLi(false);
-        setSelToolbar(null);
-        return;
-      }
-
-      // Check selection is inside our editor
-      if (!editorRef.current.contains(sel.getRangeAt(0).startContainer)) {
-        setCursorInLi(false);
-        setSelToolbar(null);
-        return;
-      }
-
-      // Walk up from selection to find <li>
-      let node: Node | null = sel.getRangeAt(0).startContainer;
-      let foundLi = false;
-      while (node && node !== editorRef.current) {
-        if (node instanceof HTMLElement && node.tagName === "LI") { foundLi = true; break; }
-        node = node.parentNode;
-      }
-      setCursorInLi(foundLi);
-
-      // Floating toolbar: only for non-collapsed selection inside <li>
-      if (!foundLi || sel.isCollapsed || !sel.toString().trim()) {
-        setSelToolbar(null);
-        return;
-      }
-
-      const range = sel.getRangeAt(0);
-      const rect = range.getBoundingClientRect();
-      if (rect.width === 0 && rect.height === 0) { setSelToolbar(null); return; }
-
-      const scrollParent = editorRef.current.closest(".overflow-y-auto");
-      const scrollY = scrollParent ? scrollParent.scrollTop : 0;
-      const parentRect = scrollParent ? scrollParent.getBoundingClientRect() : { top: 0, left: 0 };
-
-      let top = rect.top - parentRect.top + scrollY - TOOLBAR_H - TOOLBAR_MARGIN;
-      let below = false;
-      // If toolbar would be above viewport within the scroll container
-      if (rect.top - TOOLBAR_H - TOOLBAR_MARGIN < parentRect.top) {
-        top = rect.bottom - parentRect.top + scrollY + TOOLBAR_MARGIN;
-        below = true;
-      }
-      const left = rect.left + rect.width / 2 - parentRect.left;
-
-      setSelToolbar({ top, left, below });
-    };
-
-    document.addEventListener("selectionchange", onSelectionChange);
-    return () => document.removeEventListener("selectionchange", onSelectionChange);
+  // Compute positions of all <li> elements relative to the editor wrapper
+  const recomputeLiPositions = useCallback(() => {
+    const wrapper = editorWrapperRef.current;
+    const editor = editorRef.current;
+    if (!wrapper || !editor) { setLiPositions([]); liElsRef.current = []; return; }
+    const lis = Array.from(editor.querySelectorAll("li")) as HTMLLIElement[];
+    const wrapperRect = wrapper.getBoundingClientRect();
+    const positions = lis.map((li) => {
+      const r = li.getBoundingClientRect();
+      return {
+        top: r.top - wrapperRect.top,
+        left: r.left - wrapperRect.left - 18,
+        height: r.height,
+      };
+    });
+    liElsRef.current = lis;
+    setLiPositions(positions);
   }, []);
+
+  // Watch for DOM mutations in the editor to track <li> elements
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const observer = new MutationObserver(() => {
+      if (!liDragRef.current) recomputeLiPositions();
+    });
+    observer.observe(editor, { childList: true, subtree: true, characterData: true });
+    recomputeLiPositions();
+    const container = editor.closest(".overflow-y-auto");
+    const onScroll = () => { if (!liDragRef.current) recomputeLiPositions(); };
+    container?.addEventListener("scroll", onScroll, { passive: true });
+    return () => { observer.disconnect(); container?.removeEventListener("scroll", onScroll); };
+  }, [recomputeLiPositions]);
 
   // Slash-command state
   const [slashOpen, setSlashOpen] = useState(false);
@@ -1514,38 +1509,40 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
     sel?.addRange(r);
   }, []);
 
-  // ── Floating toolbar indent/outdent (preserves selection) ──
-  const handleFloatingIndent = useCallback(() => {
-    const sel = window.getSelection();
-    if (!sel?.rangeCount || !editorRef.current) return;
-    const savedRange = sel.getRangeAt(0).cloneRange();
-    const li = findClosestTag(sel.getRangeAt(0).startContainer, "LI");
-    if (!li) return;
-    const parentList = li.parentElement;
-    if (!parentList || (parentList.tagName !== "UL" && parentList.tagName !== "OL")) return;
-    const prevLi = li.previousElementSibling;
-    if (!prevLi || prevLi.tagName !== "LI") return;
-    const listTag = parentList.tagName.toLowerCase();
-    let subList = prevLi.querySelector(`:scope > ${listTag}`) as HTMLElement | null;
-    if (!subList) { subList = document.createElement(listTag); prevLi.appendChild(subList); }
-    subList.appendChild(li);
-    // Restore selection
-    try { sel.removeAllRanges(); sel.addRange(savedRange); } catch { placeCursorAtStart(li); }
-    syncContent();
-  }, [findClosestTag, placeCursorAtStart, syncContent]);
+  // Get indent level of an <li>
+  const getLiIndentLevel = useCallback((li: HTMLLIElement): number => {
+    let level = 0;
+    let el: HTMLElement | null = li.parentElement;
+    while (el && el !== editorRef.current) {
+      if (el.tagName === "UL" || el.tagName === "OL") level++;
+      el = el.parentElement;
+    }
+    return Math.max(0, level - 1);
+  }, []);
 
-  const handleFloatingOutdent = useCallback(() => {
-    const sel = window.getSelection();
-    if (!sel?.rangeCount || !editorRef.current) return;
-    const savedRange = sel.getRangeAt(0).cloneRange();
-    const li = findClosestTag(sel.getRangeAt(0).startContainer, "LI");
-    if (!li) return;
+  // Indent a specific <li> into the previous sibling
+  const indentLi = useCallback((li: HTMLLIElement): boolean => {
     const parentList = li.parentElement;
-    if (!parentList) return;
+    if (!parentList || (parentList.tagName !== "UL" && parentList.tagName !== "OL")) return false;
+    if (getLiIndentLevel(li) >= 4) return false;
+    const prevLi = li.previousElementSibling;
+    if (!prevLi || prevLi.tagName !== "LI") return false;
+    const tag = parentList.tagName.toLowerCase();
+    let subList = prevLi.querySelector(`:scope > ${tag}`) as HTMLElement | null;
+    if (!subList) { subList = document.createElement(tag); prevLi.appendChild(subList); }
+    subList.appendChild(li);
+    syncContent();
+    return true;
+  }, [getLiIndentLevel, syncContent]);
+
+  // Outdent a specific <li> out of its parent list
+  const outdentLi = useCallback((li: HTMLLIElement): boolean => {
+    const parentList = li.parentElement;
+    if (!parentList) return false;
     const grandparentLi = parentList.parentElement;
-    if (!grandparentLi || grandparentLi.tagName !== "LI") return;
+    if (!grandparentLi || grandparentLi.tagName !== "LI") return false;
     const outerList = grandparentLi.parentElement;
-    if (!outerList) return;
+    if (!outerList) return false;
     const siblingsAfter: Element[] = [];
     let next = li.nextElementSibling;
     while (next) { siblingsAfter.push(next); next = next.nextElementSibling; }
@@ -1556,10 +1553,240 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
       li.appendChild(subList);
     }
     if (parentList.children.length === 0) parentList.remove();
-    // Restore selection
-    try { sel.removeAllRanges(); sel.addRange(savedRange); } catch { placeCursorAtStart(li); }
     syncContent();
-  }, [findClosestTag, placeCursorAtStart, syncContent]);
+    return true;
+  }, [syncContent]);
+
+  // ── Li drag touch handlers ──
+  const handleLiTouchStart = useCallback((e: React.TouchEvent, idx: number) => {
+    const touch = e.touches[0];
+    if (touch.clientX < 20) return; // Edge guard: Android swipe-back zone
+    e.preventDefault();
+    e.stopPropagation();
+    const li = liElsRef.current[idx];
+    if (!li) return;
+    const parentList = li.parentElement;
+    if (!parentList || (parentList.tagName !== "UL" && parentList.tagName !== "OL")) return;
+    const siblings = Array.from(parentList.children).filter((c) => c.tagName === "LI") as HTMLLIElement[];
+    const srcIdx = siblings.indexOf(li);
+
+    // Create ghost
+    const ghost = document.createElement("div");
+    ghost.style.cssText = `position:fixed;pointer-events:none;z-index:9999;background:var(--surface);border:1px solid var(--zu-border);border-radius:8px;padding:4px 10px;font-size:14px;color:var(--text-1);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,0.15);left:${touch.clientX - 30}px;top:${touch.clientY - 20}px;`;
+    const textContent = Array.from(li.childNodes)
+      .filter((n) => !(n instanceof HTMLElement && (n.tagName === "UL" || n.tagName === "OL")))
+      .map((n) => n.textContent || "").join("").trim();
+    ghost.textContent = textContent || "\u2026";
+    document.body.appendChild(ghost);
+    li.style.opacity = "0.4";
+
+    const level = getLiIndentLevel(li);
+    liDragRef.current = {
+      li, intent: "none", startX: touch.clientX, startY: touch.clientY,
+      ghostEl: ghost, parentList, siblings, srcIdx,
+      indentLevel: level, lastFlashedLevel: level, dropIdx: srcIdx,
+    };
+    setLiDragging(true);
+  }, [getLiIndentLevel]);
+
+  const handleLiTouchMove = useCallback((e: TouchEvent) => {
+    const state = liDragRef.current;
+    if (!state) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    const dx = touch.clientX - state.startX;
+    const dy = touch.clientY - state.startY;
+    state.ghostEl.style.left = `${touch.clientX - 30}px`;
+    state.ghostEl.style.top = `${touch.clientY - 20}px`;
+
+    if (state.intent === "none") {
+      if (Math.sqrt(dx * dx + dy * dy) >= 10) {
+        state.intent = Math.abs(dx) > Math.abs(dy) ? "horizontal" : "vertical";
+      } else return;
+    }
+
+    if (state.intent === "horizontal") {
+      const INDENT_PX = 40;
+      const rawDelta = Math.round(dx / INDENT_PX);
+      const targetLevel = Math.max(0, Math.min(4, state.indentLevel + rawDelta));
+      if (targetLevel !== state.lastFlashedLevel) {
+        const diff = targetLevel - state.lastFlashedLevel;
+        const success = diff > 0 ? indentLi(state.li) : outdentLi(state.li);
+        if (success) {
+          state.lastFlashedLevel = getLiIndentLevel(state.li);
+          state.li.classList.remove("li-indent-flash");
+          void state.li.offsetWidth;
+          state.li.classList.add("li-indent-flash");
+          const newParent = state.li.parentElement;
+          if (newParent && (newParent.tagName === "UL" || newParent.tagName === "OL")) {
+            state.parentList = newParent;
+            state.siblings = Array.from(newParent.children).filter((c) => c.tagName === "LI") as HTMLLIElement[];
+            state.srcIdx = state.siblings.indexOf(state.li);
+            state.dropIdx = state.srcIdx;
+          }
+        }
+      }
+    } else {
+      // Vertical: determine drop position among siblings
+      const wrapper = editorWrapperRef.current;
+      if (!wrapper) return;
+      const wrapperRect = wrapper.getBoundingClientRect();
+      let targetIdx = state.siblings.length;
+      for (let i = 0; i < state.siblings.length; i++) {
+        if (state.siblings[i] === state.li) continue;
+        const rect = state.siblings[i].getBoundingClientRect();
+        if (touch.clientY < rect.top + rect.height / 2) { targetIdx = i; break; }
+      }
+      state.dropIdx = targetIdx;
+      // Compute drop indicator
+      if (targetIdx < state.siblings.length) {
+        setLiDropIndicator(state.siblings[targetIdx].getBoundingClientRect().top - wrapperRect.top);
+      } else {
+        const last = state.siblings[state.siblings.length - 1];
+        if (last) setLiDropIndicator(last.getBoundingClientRect().bottom - wrapperRect.top);
+      }
+    }
+  }, [indentLi, outdentLi, getLiIndentLevel]);
+
+  const handleLiTouchEnd = useCallback(() => {
+    const state = liDragRef.current;
+    if (!state) return;
+    state.ghostEl.remove();
+    state.li.style.opacity = "";
+    state.li.classList.remove("li-indent-flash");
+    if (state.intent === "vertical" && state.dropIdx !== state.srcIdx) {
+      const { li, parentList, srcIdx, dropIdx } = state;
+      parentList.removeChild(li);
+      const remaining = Array.from(parentList.children).filter((c) => c.tagName === "LI");
+      const adj = dropIdx > srcIdx ? dropIdx - 1 : dropIdx;
+      if (adj >= remaining.length) { parentList.appendChild(li); } else { parentList.insertBefore(li, remaining[adj]); }
+      syncContent();
+    }
+    liDragRef.current = null;
+    setLiDragging(false);
+    setLiDropIndicator(null);
+    requestAnimationFrame(recomputeLiPositions);
+  }, [syncContent, recomputeLiPositions]);
+
+  // Mouse handlers for li drag (desktop)
+  const handleLiMouseDown = useCallback((e: React.MouseEvent, idx: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const li = liElsRef.current[idx];
+    if (!li) return;
+    const parentList = li.parentElement;
+    if (!parentList || (parentList.tagName !== "UL" && parentList.tagName !== "OL")) return;
+    const siblings = Array.from(parentList.children).filter((c) => c.tagName === "LI") as HTMLLIElement[];
+    const srcIdx = siblings.indexOf(li);
+    const ghost = document.createElement("div");
+    ghost.style.cssText = `position:fixed;pointer-events:none;z-index:9999;background:var(--surface);border:1px solid var(--zu-border);border-radius:8px;padding:4px 10px;font-size:14px;color:var(--text-1);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,0.15);left:${e.clientX - 30}px;top:${e.clientY - 20}px;`;
+    const textContent = Array.from(li.childNodes)
+      .filter((n) => !(n instanceof HTMLElement && (n.tagName === "UL" || n.tagName === "OL")))
+      .map((n) => n.textContent || "").join("").trim();
+    ghost.textContent = textContent || "\u2026";
+    document.body.appendChild(ghost);
+    li.style.opacity = "0.4";
+    const level = getLiIndentLevel(li);
+    liDragRef.current = {
+      li, intent: "none", startX: e.clientX, startY: e.clientY,
+      ghostEl: ghost, parentList, siblings, srcIdx,
+      indentLevel: level, lastFlashedLevel: level, dropIdx: srcIdx,
+    };
+    setLiDragging(true);
+  }, [getLiIndentLevel]);
+
+  const handleLiMouseMove = useCallback((e: MouseEvent) => {
+    const state = liDragRef.current;
+    if (!state) return;
+    e.preventDefault();
+    const dx = e.clientX - state.startX;
+    const dy = e.clientY - state.startY;
+    state.ghostEl.style.left = `${e.clientX - 30}px`;
+    state.ghostEl.style.top = `${e.clientY - 20}px`;
+    if (state.intent === "none") {
+      if (Math.sqrt(dx * dx + dy * dy) >= 10) {
+        state.intent = Math.abs(dx) > Math.abs(dy) ? "horizontal" : "vertical";
+      } else return;
+    }
+    if (state.intent === "horizontal") {
+      const INDENT_PX = 40;
+      const rawDelta = Math.round(dx / INDENT_PX);
+      const targetLevel = Math.max(0, Math.min(4, state.indentLevel + rawDelta));
+      if (targetLevel !== state.lastFlashedLevel) {
+        const diff = targetLevel - state.lastFlashedLevel;
+        const success = diff > 0 ? indentLi(state.li) : outdentLi(state.li);
+        if (success) {
+          state.lastFlashedLevel = getLiIndentLevel(state.li);
+          state.li.classList.remove("li-indent-flash");
+          void state.li.offsetWidth;
+          state.li.classList.add("li-indent-flash");
+          const newParent = state.li.parentElement;
+          if (newParent && (newParent.tagName === "UL" || newParent.tagName === "OL")) {
+            state.parentList = newParent;
+            state.siblings = Array.from(newParent.children).filter((c) => c.tagName === "LI") as HTMLLIElement[];
+            state.srcIdx = state.siblings.indexOf(state.li);
+            state.dropIdx = state.srcIdx;
+          }
+        }
+      }
+    } else {
+      const wrapper = editorWrapperRef.current;
+      if (!wrapper) return;
+      const wrapperRect = wrapper.getBoundingClientRect();
+      let targetIdx = state.siblings.length;
+      for (let i = 0; i < state.siblings.length; i++) {
+        if (state.siblings[i] === state.li) continue;
+        const rect = state.siblings[i].getBoundingClientRect();
+        if (e.clientY < rect.top + rect.height / 2) { targetIdx = i; break; }
+      }
+      state.dropIdx = targetIdx;
+      if (targetIdx < state.siblings.length) {
+        setLiDropIndicator(state.siblings[targetIdx].getBoundingClientRect().top - wrapperRect.top);
+      } else {
+        const last = state.siblings[state.siblings.length - 1];
+        if (last) setLiDropIndicator(last.getBoundingClientRect().bottom - wrapperRect.top);
+      }
+    }
+  }, [indentLi, outdentLi, getLiIndentLevel]);
+
+  const handleLiMouseUp = useCallback(() => {
+    const state = liDragRef.current;
+    if (!state) return;
+    state.ghostEl.remove();
+    state.li.style.opacity = "";
+    state.li.classList.remove("li-indent-flash");
+    if (state.intent === "vertical" && state.dropIdx !== state.srcIdx) {
+      const { li, parentList, srcIdx, dropIdx } = state;
+      parentList.removeChild(li);
+      const remaining = Array.from(parentList.children).filter((c) => c.tagName === "LI");
+      const adj = dropIdx > srcIdx ? dropIdx - 1 : dropIdx;
+      if (adj >= remaining.length) { parentList.appendChild(li); } else { parentList.insertBefore(li, remaining[adj]); }
+      syncContent();
+    }
+    liDragRef.current = null;
+    setLiDragging(false);
+    setLiDropIndicator(null);
+    requestAnimationFrame(recomputeLiPositions);
+  }, [syncContent, recomputeLiPositions]);
+
+  // Global listeners for li drag
+  useEffect(() => {
+    if (!liDragging) return;
+    // Touch
+    document.addEventListener("touchmove", handleLiTouchMove, { passive: false });
+    document.addEventListener("touchend", handleLiTouchEnd);
+    document.addEventListener("touchcancel", handleLiTouchEnd);
+    // Mouse
+    document.addEventListener("mousemove", handleLiMouseMove);
+    document.addEventListener("mouseup", handleLiMouseUp);
+    return () => {
+      document.removeEventListener("touchmove", handleLiTouchMove);
+      document.removeEventListener("touchend", handleLiTouchEnd);
+      document.removeEventListener("touchcancel", handleLiTouchEnd);
+      document.removeEventListener("mousemove", handleLiMouseMove);
+      document.removeEventListener("mouseup", handleLiMouseUp);
+    };
+  }, [liDragging, handleLiTouchMove, handleLiTouchEnd, handleLiMouseMove, handleLiMouseUp]);
 
   // ── Slash-command: filtered items ──
   const slashFiltered = useMemo(() => {
@@ -2791,6 +3018,7 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
 
         {/* Single contentEditable editor with drag handle overlay */}
         <div
+          ref={editorWrapperRef}
           className="relative"
           style={{ marginLeft: -32, paddingLeft: 32 }}
           onMouseMove={handleMouseMove}
@@ -2973,76 +3201,30 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
               </div>
             </>
           )}
+
+          {/* Li drag handles — always visible next to bullet/numbered list items */}
+          {!liDragging && liPositions.map((pos, i) => (
+            <div
+              key={i}
+              className="li-drag-handle"
+              style={{ top: pos.top, left: pos.left, height: Math.max(pos.height, 22) }}
+              onTouchStart={(e) => handleLiTouchStart(e, i)}
+              onMouseDown={(e) => handleLiMouseDown(e, i)}
+              onContextMenu={(e) => e.preventDefault()}
+            >
+              {"\u283F"}
+            </div>
+          ))}
+
+          {/* Li vertical drag drop indicator */}
+          {liDropIndicator !== null && (
+            <div
+              className="absolute left-8 right-0 h-0.5 bg-accent z-20 pointer-events-none rounded-full"
+              style={{ top: liDropIndicator }}
+            />
+          )}
         </div>
       </div>
-
-      {/* Floating selection toolbar for indent/outdent */}
-      {selToolbar && (
-        <div
-          ref={selToolbarRef}
-          style={{
-            position: "absolute",
-            top: selToolbar.top,
-            left: selToolbar.left,
-            transform: "translateX(-50%)",
-            zIndex: 9999,
-            background: "var(--text-1)",
-            color: "var(--zu-bg)",
-            borderRadius: 8,
-            padding: "6px 4px",
-            boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
-            display: "flex",
-            gap: 0,
-            alignItems: "center",
-            userSelect: "none",
-            WebkitUserSelect: "none",
-            touchAction: "none",
-          }}
-          onContextMenu={(e) => e.preventDefault()}
-        >
-          <button
-            onTouchStart={(e) => { e.preventDefault(); handleFloatingOutdent(); }}
-            onMouseDown={(e) => { e.preventDefault(); handleFloatingOutdent(); }}
-            style={{
-              padding: "6px 12px",
-              fontSize: 13,
-              fontWeight: 600,
-              borderRadius: 6,
-              background: "transparent",
-              color: "inherit",
-              border: "none",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
-              whiteSpace: "nowrap",
-            }}
-          >
-            {"\u21E4"} Ausrücken
-          </button>
-          <div style={{ width: 1, height: 20, background: "var(--text-3)", flexShrink: 0 }} />
-          <button
-            onTouchStart={(e) => { e.preventDefault(); handleFloatingIndent(); }}
-            onMouseDown={(e) => { e.preventDefault(); handleFloatingIndent(); }}
-            style={{
-              padding: "6px 12px",
-              fontSize: 13,
-              fontWeight: 600,
-              borderRadius: 6,
-              background: "transparent",
-              color: "inherit",
-              border: "none",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
-              whiteSpace: "nowrap",
-            }}
-          >
-            Einrücken {"\u21E5"}
-          </button>
-        </div>
-      )}
 
 
     </div>
