@@ -1643,6 +1643,7 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
   const initializedRef = useRef(false);
   const dragSrcRef = useRef<HTMLElement | null>(null);
   const [dropIdx, setDropIdx] = useState<number | null>(null);
+  const isConvertingRef = useRef(false);
 
   // ── Li drag handles ──────────────────────────────────────────────
   const editorWrapperRef = useRef<HTMLDivElement>(null);
@@ -2556,9 +2557,18 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
   }, [tablePopover]);
 
   // ── Handle input events ──
-  const handleInput = useCallback(() => {
+  const handleInput = useCallback((e: React.FormEvent) => {
     if (!editorRef.current) return;
+
+    // Skip if we're in the middle of a markdown conversion (prevents loop)
+    if (isConvertingRef.current) return;
+
     ensureNotEmpty();
+
+    // Filter by inputType — only react to actual text insertion, not deletions/formatting
+    const nativeEvent = e.nativeEvent as InputEvent;
+    const inputType = nativeEvent?.inputType || "";
+    const isTextInsert = inputType === "insertText" || inputType === "insertCompositionText" || inputType === "";
 
     // Check for slash command trigger
     const sel = window.getSelection();
@@ -2584,70 +2594,101 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
     }
 
     // ── Markdown shortcuts via input event (reliable on mobile where keydown is unreliable) ──
-    if (sel?.isCollapsed && sel.rangeCount) {
+    // Only check on text insertion events
+    if (isTextInsert && sel?.isCollapsed && sel.rangeCount) {
       const range = sel.getRangeAt(0);
       const node = sel.anchorNode;
       const blockEl = getBlockElement(range.startContainer);
       if (node && blockEl && (blockEl.tagName === "P" || blockEl.tagName === "DIV") && !blockEl.classList.contains("editor-todo")) {
-        const text = node.textContent || "";
-        const lineText = text.substring(0, sel.anchorOffset);
+        // Primary: check text before cursor (sel.anchorOffset)
+        const nodeText = node.textContent || "";
+        const textBefore = nodeText.substring(0, sel.anchorOffset);
+        // Fallback: check full block textContent (Android sometimes doesn't update anchorOffset correctly)
+        const blockText = blockEl.textContent || "";
+
+        // Helper: perform conversion with isConverting guard
+        const doConvert = (fn: () => void) => {
+          isConvertingRef.current = true;
+          fn();
+          // Reset after a microtask so any triggered input events are suppressed
+          Promise.resolve().then(() => { isConvertingRef.current = false; });
+        };
 
         // "- " → bullet list
-        if (lineText === "- " || lineText === "\u2013 " || lineText === "\u2014 ") {
-          // Preserve any text after the trigger
-          const rest = text.substring(sel.anchorOffset);
-          const li = document.createElement("li");
-          li.innerHTML = rest || "<br>";
-          const ul = document.createElement("ul");
-          ul.appendChild(li);
-          blockEl.replaceWith(ul);
-          placeCursorAtStart(li);
-          syncContent();
+        if (textBefore === "- " || textBefore === "\u2013 " || textBefore === "\u2014 "
+            || /^[-\u2013\u2014] $/.test(blockText)) {
+          const triggerLen = blockText.match(/^[-\u2013\u2014] /)?.[0]?.length || 2;
+          const rest = blockText.substring(triggerLen);
+          doConvert(() => {
+            const li = document.createElement("li");
+            li.innerHTML = rest || "<br>";
+            const ul = document.createElement("ul");
+            ul.appendChild(li);
+            blockEl.replaceWith(ul);
+            placeCursorAtStart(li);
+            syncContent();
+          });
           return;
         }
         // "1. " → numbered list
-        if (/^\d+\.\s$/.test(lineText)) {
-          const rest = text.substring(sel.anchorOffset);
-          const li = document.createElement("li");
-          li.innerHTML = rest || "<br>";
-          const ol = document.createElement("ol");
-          ol.appendChild(li);
-          blockEl.replaceWith(ol);
-          placeCursorAtStart(li);
-          syncContent();
+        if (/^\d+\.\s$/.test(textBefore) || /^\d+\.\s$/.test(blockText)) {
+          const triggerMatch = blockText.match(/^(\d+\.\s)/);
+          const triggerLen = triggerMatch ? triggerMatch[1].length : 3;
+          const rest = blockText.substring(triggerLen);
+          doConvert(() => {
+            const li = document.createElement("li");
+            li.innerHTML = rest || "<br>";
+            const ol = document.createElement("ol");
+            ol.appendChild(li);
+            blockEl.replaceWith(ol);
+            placeCursorAtStart(li);
+            syncContent();
+          });
           return;
         }
         // "[] " → to-do
-        if (lineText === "[] ") {
-          const rest = text.substring(sel.anchorOffset);
-          const todoDiv = document.createElement("div");
-          todoDiv.className = "editor-todo";
-          todoDiv.setAttribute("data-checked", "false");
-          const checkbox = document.createElement("span");
-          checkbox.contentEditable = "false";
-          checkbox.className = "editor-todo-check";
-          todoDiv.appendChild(checkbox);
-          const textSpan = document.createElement("span");
-          textSpan.className = "editor-todo-text";
-          textSpan.innerHTML = rest || "<br>";
-          todoDiv.appendChild(textSpan);
-          blockEl.replaceWith(todoDiv);
-          placeCursorAtStart(textSpan);
-          syncContent();
+        if (textBefore === "[] " || /^\[\]\s$/.test(blockText)) {
+          const triggerLen = blockText.match(/^\[\]\s/)?.[0]?.length || 3;
+          const rest = blockText.substring(triggerLen);
+          doConvert(() => {
+            const todoDiv = document.createElement("div");
+            todoDiv.className = "editor-todo";
+            todoDiv.setAttribute("data-checked", "false");
+            const checkbox = document.createElement("span");
+            checkbox.contentEditable = "false";
+            checkbox.className = "editor-todo-check";
+            todoDiv.appendChild(checkbox);
+            const textSpan = document.createElement("span");
+            textSpan.className = "editor-todo-text";
+            textSpan.innerHTML = rest || "<br>";
+            todoDiv.appendChild(textSpan);
+            blockEl.replaceWith(todoDiv);
+            placeCursorAtStart(textSpan);
+            syncContent();
+          });
           return;
         }
         // "# " → H1, "## " → H2, "### " → H3
-        if (lineText === "# ") {
-          const rest = text.substring(sel.anchorOffset);
-          const h = document.createElement("h1"); h.innerHTML = rest || "<br>"; blockEl.replaceWith(h); placeCursorAtStart(h); syncContent(); return;
+        if (textBefore === "# " || /^#\s$/.test(blockText)) {
+          const rest = blockText.substring(2);
+          doConvert(() => {
+            const h = document.createElement("h1"); h.innerHTML = rest || "<br>"; blockEl.replaceWith(h); placeCursorAtStart(h); syncContent();
+          });
+          return;
         }
-        if (lineText === "## ") {
-          const rest = text.substring(sel.anchorOffset);
-          const h = document.createElement("h2"); h.innerHTML = rest || "<br>"; blockEl.replaceWith(h); placeCursorAtStart(h); syncContent(); return;
+        if (textBefore === "## " || /^##\s$/.test(blockText)) {
+          const rest = blockText.substring(3);
+          doConvert(() => {
+            const h = document.createElement("h2"); h.innerHTML = rest || "<br>"; blockEl.replaceWith(h); placeCursorAtStart(h); syncContent();
+          });
+          return;
         }
-        if (lineText === "### ") {
-          const rest = text.substring(sel.anchorOffset);
-          const h = document.createElement("h3"); h.innerHTML = rest || "<br>"; blockEl.replaceWith(h); placeCursorAtStart(h); syncContent(); return;
+        if (textBefore === "### " || /^###\s$/.test(blockText)) {
+          const rest = blockText.substring(4);
+          doConvert(() => {
+            const h = document.createElement("h3"); h.innerHTML = rest || "<br>"; blockEl.replaceWith(h); placeCursorAtStart(h); syncContent();
+          });
+          return;
         }
       }
     }
