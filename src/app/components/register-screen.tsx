@@ -29,25 +29,25 @@ export function RegisterScreen({ onSwitchToLogin }: RegisterScreenProps) {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-6 bg-white font-sans">
+    <div className="min-h-screen flex flex-col items-center justify-center px-6 font-sans" style={{ background: "var(--zu-bg)" }}>
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-8">
-          <div className="w-16 h-16 bg-orange-500 rounded-xl flex items-center justify-center mb-4 shadow-sm">
+          <div className="w-16 h-16 bg-accent rounded-xl flex items-center justify-center mb-4" style={{ boxShadow: "var(--shadow-card)" }}>
             <Home className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">Zuhause</h1>
-          <p className="text-gray-500 mt-1">Konto erstellen</p>
+          <h1 className="text-2xl font-bold text-text-1">Zuhause</h1>
+          <p className="text-text-2 mt-1">Konto erstellen</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
-            <div className="bg-red-50 text-red-500 text-sm rounded-xl p-3 font-medium">
+            <div className="text-sm font-medium" style={{ background: "var(--danger-light)", color: "var(--danger)", borderRadius: "var(--radius-card)", padding: 12 }}>
               {error}
             </div>
           )}
 
           <div>
-            <label className="block text-sm font-medium text-gray-900 mb-1.5">
+            <label className="block text-sm font-medium text-text-1 mb-1.5">
               Name
             </label>
             <input
@@ -63,12 +63,13 @@ export function RegisterScreen({ onSwitchToLogin }: RegisterScreenProps) {
               onChange={(e) => setName(e.target.value)}
               placeholder="Dein Name"
               required
-              className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-100 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-500/30 focus:border-orange-500/50 transition"
+              className="w-full px-4 py-3 bg-surface-2 text-text-1 placeholder:text-text-3 focus:outline-none transition"
+              style={{ borderRadius: "var(--radius-input)", border: "1px solid var(--zu-border)" }}
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-900 mb-1.5">
+            <label className="block text-sm font-medium text-text-1 mb-1.5">
               E-Mail
             </label>
             <input
@@ -84,12 +85,13 @@ export function RegisterScreen({ onSwitchToLogin }: RegisterScreenProps) {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="name@beispiel.de"
               required
-              className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-100 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-500/30 focus:border-orange-500/50 transition"
+              className="w-full px-4 py-3 bg-surface-2 text-text-1 placeholder:text-text-3 focus:outline-none transition"
+              style={{ borderRadius: "var(--radius-input)", border: "1px solid var(--zu-border)" }}
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-900 mb-1.5">
+            <label className="block text-sm font-medium text-text-1 mb-1.5">
               Passwort
             </label>
             <input
@@ -106,24 +108,26 @@ export function RegisterScreen({ onSwitchToLogin }: RegisterScreenProps) {
               placeholder="Mind. 6 Zeichen"
               required
               minLength={6}
-              className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-100 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-500/30 focus:border-orange-500/50 transition"
+              className="w-full px-4 py-3 bg-surface-2 text-text-1 placeholder:text-text-3 focus:outline-none transition"
+              style={{ borderRadius: "var(--radius-input)", border: "1px solid var(--zu-border)" }}
             />
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3 rounded-full bg-orange-500 text-white font-semibold hover:bg-orange-600 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full py-3 bg-accent text-white font-semibold hover:bg-accent-dark transition disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ borderRadius: "var(--radius-btn)" }}
           >
             {loading ? "Wird registriert..." : "Registrieren"}
           </button>
         </form>
 
-        <p className="text-center text-sm text-gray-500 mt-6">
+        <p className="text-center text-sm text-text-2 mt-6">
           Bereits ein Konto?{" "}
           <button
             onClick={onSwitchToLogin}
-            className="text-orange-500 font-semibold hover:underline"
+            className="text-accent font-semibold hover:underline"
           >
             Anmelden
           </button>

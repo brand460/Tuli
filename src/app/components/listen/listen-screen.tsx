@@ -463,16 +463,20 @@ export function ListenScreen() {
   }, [searchQuery, pages, pageContents]);
 
   // ── DnD sensors (for sidebar page reordering) ─────────────────
+  const sensorOptions = useMemo(() => ({
+    pointer: { activationConstraint: { distance: 5 } },
+    touch: { activationConstraint: { delay: 200, tolerance: 5 } },
+  }), []);
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } })
+    useSensor(PointerSensor, sensorOptions.pointer),
+    useSensor(TouchSensor, sensorOptions.touch)
   );
 
   // ── Render ─────────────────────────────────────────────────────
   if (!loaded) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <div className="w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+        <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
@@ -538,7 +542,7 @@ export function ListenScreen() {
     <div className="flex-1 flex min-h-0 relative">
       {/* Desktop sidebar */}
       {!isMobile && (
-        <div className="w-60 flex-shrink-0 border-r border-gray-100 bg-gray-50/50 flex flex-col min-h-0">
+        <div className="w-60 flex-shrink-0 flex flex-col min-h-0" style={{ background: "var(--surface)", borderRight: "1px solid var(--zu-border)" }}>
           {sidebar}
         </div>
       )}
@@ -550,11 +554,11 @@ export function ListenScreen() {
             className="fixed inset-0 bg-black/30 z-40"
             onClick={() => setSidebarOpen(false)}
           />
-          <div className="fixed inset-y-0 left-0 w-72 bg-white z-50 shadow-xl flex flex-col">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-              <span className="text-sm font-bold text-gray-900">Seiten</span>
-              <button onClick={() => setSidebarOpen(false)} className="p-1 rounded-lg hover:bg-gray-100">
-                <X className="w-5 h-5 text-gray-500" />
+          <div className="fixed inset-y-0 right-0 w-72 bg-surface z-50 flex flex-col" style={{ boxShadow: "var(--shadow-elevated)" }}>
+            <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: "1px solid var(--zu-border)" }}>
+              <span className="text-sm font-bold text-text-1">Seiten</span>
+              <button onClick={() => setSidebarOpen(false)} className="p-1 rounded-lg hover:bg-surface-2">
+                <X className="w-5 h-5 text-text-3" />
               </button>
             </div>
             {sidebar}
@@ -564,14 +568,15 @@ export function ListenScreen() {
 
       {/* Content area */}
       <div className="flex-1 flex flex-col min-h-0 min-w-0">
-        {/* Mobile header — only hamburger, emoji+title are in the content area */}
+        {/* Mobile header */}
         {isMobile && (
-          <div className="flex-shrink-0 flex items-center px-4 py-2 bg-white border-b border-gray-100">
+          <div className="flex-shrink-0 flex items-center justify-between px-4 pt-4 pb-2" style={{ background: "var(--zu-bg)" }}>
+            <h2 className="text-lg font-bold text-text-1">Listen</h2>
             <button
               onClick={() => setSidebarOpen(true)}
-              className="p-1.5 rounded-lg hover:bg-gray-100"
+              className="p-1.5 rounded-lg hover:bg-surface-2"
             >
-              <Menu className="w-5 h-5 text-gray-600" />
+              <Menu className="w-5 h-5 text-text-2" />
             </button>
           </div>
         )}
@@ -592,7 +597,7 @@ export function ListenScreen() {
             onOpenEmojiPicker={() => setEmojiPickerPageId(activePage.id)}
           />
         ) : (
-          <div className="flex-1 flex items-center justify-center text-gray-400">
+          <div className="flex-1 flex items-center justify-center text-text-3">
             <p className="text-sm">Keine Seite ausgew\u00e4hlt</p>
           </div>
         )}
@@ -642,8 +647,8 @@ export function ListenScreen() {
                 el.style.left = `${newLeft}px`;
                 el.style.top = `${newTop}px`;
               }}
-              className="fixed z-[70] bg-white rounded-xl shadow-lg border border-gray-100 p-1.5 min-w-[192px]"
-              style={{ left: contextMenu.x + 4, top: contextMenu.y }}
+              className="fixed z-[70] bg-surface rounded-xl p-1.5 min-w-[192px]"
+              style={{ left: contextMenu.x + 4, top: contextMenu.y, boxShadow: "var(--shadow-elevated)", border: "1px solid var(--zu-border)" }}
             >
               <button
                 onPointerDown={(e) => {
@@ -652,15 +657,15 @@ export function ListenScreen() {
                   createPage(contextMenu.pageId);
                   setContextMenu(null);
                 }}
-                className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-50 cursor-pointer w-full text-sm text-gray-700 transition whitespace-nowrap"
+                className="flex items-center gap-3 px-4 py-3 rounded-[10px] hover:bg-surface-2 cursor-pointer w-full text-sm text-text-1 transition whitespace-nowrap"
               >
-                <FolderPlus className="w-4 h-4 text-gray-400" /> Unterseite erstellen
+                <FolderPlus className="w-4 h-4 text-text-3" /> Unterseite erstellen
               </button>
 
               {/* Mobile-only move options */}
               {isTouchDevice && (
                 <>
-                  <div className="border-t border-gray-100 my-1" />
+                  <div className="my-1" style={{ borderTop: "1px solid var(--zu-border)" }} />
                   <button
                     disabled={!canMoveUp}
                     onPointerDown={(e) => {
@@ -671,9 +676,9 @@ export function ListenScreen() {
                         setContextMenu(null);
                       }
                     }}
-                    className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-50 cursor-pointer w-full text-sm text-gray-700 transition whitespace-nowrap disabled:opacity-30 disabled:cursor-default"
+                    className="flex items-center gap-3 px-4 py-3 rounded-[10px] hover:bg-surface-2 cursor-pointer w-full text-sm text-text-1 transition whitespace-nowrap disabled:opacity-30 disabled:cursor-default"
                   >
-                    <ArrowUp className="w-4 h-4 text-gray-400" /> Nach oben
+                    <ArrowUp className="w-4 h-4 text-text-3" /> Nach oben
                   </button>
                   <button
                     disabled={!canMoveDown}
@@ -685,9 +690,9 @@ export function ListenScreen() {
                         setContextMenu(null);
                       }
                     }}
-                    className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-50 cursor-pointer w-full text-sm text-gray-700 transition whitespace-nowrap disabled:opacity-30 disabled:cursor-default"
+                    className="flex items-center gap-3 px-4 py-3 rounded-[10px] hover:bg-surface-2 cursor-pointer w-full text-sm text-text-1 transition whitespace-nowrap disabled:opacity-30 disabled:cursor-default"
                   >
-                    <ArrowDown className="w-4 h-4 text-gray-400" /> Nach unten
+                    <ArrowDown className="w-4 h-4 text-text-3" /> Nach unten
                   </button>
                   <button
                     disabled={!canIndent}
@@ -703,9 +708,9 @@ export function ListenScreen() {
                         setContextMenu(null);
                       }
                     }}
-                    className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-50 cursor-pointer w-full text-sm text-gray-700 transition whitespace-nowrap disabled:opacity-30 disabled:cursor-default"
+                    className="flex items-center gap-3 px-4 py-3 rounded-[10px] hover:bg-surface-2 cursor-pointer w-full text-sm text-text-1 transition whitespace-nowrap disabled:opacity-30 disabled:cursor-default"
                   >
-                    <IndentIncrease className="w-4 h-4 text-gray-400" /> Einr{"\u00fc"}cken
+                    <IndentIncrease className="w-4 h-4 text-text-3" /> Einr{"\u00fc"}cken
                   </button>
                   <button
                     disabled={!canOutdent}
@@ -723,14 +728,14 @@ export function ListenScreen() {
                         setContextMenu(null);
                       }
                     }}
-                    className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-50 cursor-pointer w-full text-sm text-gray-700 transition whitespace-nowrap disabled:opacity-30 disabled:cursor-default"
+                    className="flex items-center gap-3 px-4 py-3 rounded-[10px] hover:bg-surface-2 cursor-pointer w-full text-sm text-text-1 transition whitespace-nowrap disabled:opacity-30 disabled:cursor-default"
                   >
-                    <IndentDecrease className="w-4 h-4 text-gray-400" /> Ausr{"\u00fc"}cken
+                    <IndentDecrease className="w-4 h-4 text-text-3" /> Ausr{"\u00fc"}cken
                   </button>
                 </>
               )}
 
-              <div className="border-t border-gray-100 my-1" />
+              <div className="my-1" style={{ borderTop: "1px solid var(--zu-border)" }} />
               <button
                 onPointerDown={(e) => {
                   e.preventDefault();
@@ -738,7 +743,7 @@ export function ListenScreen() {
                   setDeleteConfirmPageId(contextMenu.pageId);
                   setContextMenu(null);
                 }}
-                className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-red-50 cursor-pointer w-full text-sm text-red-500 transition whitespace-nowrap"
+                className="flex items-center gap-3 px-4 py-3 rounded-[10px] hover:bg-danger-light cursor-pointer w-full text-sm text-danger transition whitespace-nowrap"
               >
                 <Trash2 className="w-4 h-4" /> L{"\u00f6"}schen
               </button>
@@ -753,15 +758,15 @@ export function ListenScreen() {
         const hasSubpages = pages.some((p) => p.parent_id === deleteConfirmPageId);
         return (
           <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40" onClick={() => setDeleteConfirmPageId(null)}>
-            <div className="bg-white rounded-xl shadow-lg w-[320px] mx-4 p-6" onClick={(e) => e.stopPropagation()}>
-              <h3 className="text-base font-bold text-gray-900 text-center">Seite l&ouml;schen?</h3>
-              <p className="text-sm text-gray-500 text-center mt-2">
+            <div className="bg-surface w-[320px] mx-4 p-6" style={{ borderRadius: "var(--radius-card)", boxShadow: "var(--shadow-elevated)" }} onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-base font-bold text-text-1 text-center">Seite l&ouml;schen?</h3>
+              <p className="text-sm text-text-2 text-center mt-2">
                 {targetPage ? `\u201E${targetPage.icon} ${targetPage.title}\u201C` : "Diese Seite"}{hasSubpages ? " und alle Unterseiten werden" : " wird"} unwiderruflich gel&ouml;scht.
               </p>
               <div className="flex justify-center gap-3 mt-5">
                 <button
                   onClick={() => setDeleteConfirmPageId(null)}
-                  className="flex-1 py-2.5 rounded-full bg-gray-100 text-gray-700 text-sm font-semibold hover:bg-gray-200 transition cursor-pointer"
+                  className="flex-1 py-2.5 rounded-full bg-surface-2 text-text-1 text-sm font-semibold hover:opacity-80 transition cursor-pointer"
                 >
                   Abbrechen
                 </button>
@@ -770,7 +775,7 @@ export function ListenScreen() {
                     deletePage(deleteConfirmPageId);
                     setDeleteConfirmPageId(null);
                   }}
-                  className="flex-1 py-2.5 rounded-full bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition cursor-pointer"
+                  className="flex-1 py-2.5 rounded-full bg-danger text-white text-sm font-semibold hover:opacity-90 transition cursor-pointer"
                 >
                   L&ouml;schen
                 </button>
@@ -857,6 +862,8 @@ function SidebarContent(props: SidebarContentProps) {
     return map;
   }, [pages]);
 
+  const dndModifiers = useMemo(() => [restrictToVerticalAxis], []);
+
   // ── Intelligent DnD state ──
   const [dragActiveId, setDragActiveId] = useState<string | null>(null);
   const [dragActiveWidth, setDragActiveWidth] = useState<number>(0);
@@ -887,6 +894,18 @@ function SidebarContent(props: SidebarContentProps) {
     return result;
   }, [pages, expandedPages]);
 
+  // Refs for stable DnD callbacks (avoids useLayoutEffect size-change warning in DndContext)
+  const dragActiveIdRef = useRef(dragActiveId);
+  dragActiveIdRef.current = dragActiveId;
+  const flatVisibleIdsRef = useRef(flatVisibleIds);
+  flatVisibleIdsRef.current = flatVisibleIds;
+  const dropPreviewRef = useRef(dropPreview);
+  dropPreviewRef.current = dropPreview;
+  const pagesRef = useRef(pages);
+  pagesRef.current = pages;
+  const onMovePageRef = useRef(onMovePage);
+  onMovePageRef.current = onMovePage;
+
   const handleDragStart = useCallback(
     (event: DragStartEvent) => {
       const id = String(event.active.id);
@@ -902,7 +921,7 @@ function SidebarContent(props: SidebarContentProps) {
 
   const handleDragMove = useCallback(
     (event: DragMoveEvent) => {
-      if (!dragActiveId) return;
+      if (!dragActiveIdRef.current) return;
       // Calculate cursor Y position
       const activatorEvent = event.activatorEvent as MouseEvent | TouchEvent;
       let startY = 0;
@@ -915,8 +934,8 @@ function SidebarContent(props: SidebarContentProps) {
 
       // Find which row the cursor is over
       let found: DropPreview | null = null;
-      for (const pageId of flatVisibleIds) {
-        if (pageId === dragActiveId) continue;
+      for (const pageId of flatVisibleIdsRef.current) {
+        if (pageId === dragActiveIdRef.current) continue;
         const el = rowRefsMap.current.get(pageId);
         if (!el) continue;
         const rect = el.getBoundingClientRect();
@@ -937,27 +956,26 @@ function SidebarContent(props: SidebarContentProps) {
       }
       setDropPreview(found);
     },
-    [dragActiveId, flatVisibleIds]
+    []
   );
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       const activeId = String(event.active.id);
-      if (dropPreview) {
-        const targetPage = pages.find((p) => p.id === dropPreview.targetId);
+      const currentDropPreview = dropPreviewRef.current;
+      if (currentDropPreview) {
+        const targetPage = pagesRef.current.find((p) => p.id === currentDropPreview.targetId);
         if (targetPage) {
-          if (dropPreview.zone === "middle") {
-            // Make child of target page, position 0
-            onMovePage(activeId, dropPreview.targetId, 0);
+          if (currentDropPreview.zone === "middle") {
+            onMovePageRef.current(activeId, currentDropPreview.targetId, 0);
           } else {
-            // Insert above or below target, same parent as target
             const parentId = targetPage.parent_id;
-            const siblings = pages
+            const siblings = pagesRef.current
               .filter((p) => p.parent_id === parentId && p.id !== activeId)
               .sort((a, b) => a.position - b.position);
-            const targetIdx = siblings.findIndex((p) => p.id === dropPreview.targetId);
-            const newPosition = dropPreview.zone === "top" ? targetIdx : targetIdx + 1;
-            onMovePage(activeId, parentId, Math.max(0, newPosition));
+            const targetIdx = siblings.findIndex((p) => p.id === currentDropPreview.targetId);
+            const newPosition = currentDropPreview.zone === "top" ? targetIdx : targetIdx + 1;
+            onMovePageRef.current(activeId, parentId, Math.max(0, newPosition));
           }
         }
       }
@@ -965,7 +983,7 @@ function SidebarContent(props: SidebarContentProps) {
       setDragActiveWidth(0);
       setDropPreview(null);
     },
-    [dropPreview, pages, onMovePage]
+    []
   );
 
   const handleDragCancel = useCallback(() => {
@@ -984,13 +1002,13 @@ function SidebarContent(props: SidebarContentProps) {
       {/* Search */}
       <div className="px-3 pt-3 pb-2">
         <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-3" />
           <input
             type="text"
             placeholder="Seiten durchsuchen..."
             value={searchQuery}
             onChange={(e) => onSetSearchQuery(e.target.value)}
-            className="w-full pl-8 pr-8 py-1.5 text-sm bg-gray-100 rounded-lg border-0 outline-none focus:ring-2 focus:ring-orange-300 placeholder:text-gray-400"
+            className="w-full pl-8 pr-8 py-1.5 text-sm bg-surface-2 rounded-lg border-0 outline-none focus:outline-none placeholder:text-text-3"
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="off"
@@ -1002,9 +1020,9 @@ function SidebarContent(props: SidebarContentProps) {
           {searchQuery && (
             <button
               onClick={() => onSetSearchQuery("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-gray-200"
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-surface-2"
             >
-              <X className="w-3 h-3 text-gray-400" />
+              <X className="w-3 h-3 text-text-3" />
             </button>
           )}
         </div>
@@ -1014,13 +1032,13 @@ function SidebarContent(props: SidebarContentProps) {
       {searchQuery.trim() && (
         <div className="px-2 pb-2 max-h-60 overflow-y-auto">
           {searchResults.length === 0 ? (
-            <p className="text-xs text-gray-400 px-2 py-2">Keine Ergebnisse</p>
+            <p className="text-xs text-text-3 px-2 py-2">Keine Ergebnisse</p>
           ) : (
             searchResults.map((r, i) => (
               <button
                 key={i}
                 onClick={() => onSearchResultClick(r.pageId)}
-                className="w-full text-left px-2 py-1.5 text-sm text-gray-700 rounded-lg hover:bg-orange-50 transition truncate"
+                className="w-full text-left px-2 py-1.5 text-sm text-text-2 rounded-lg hover:bg-accent-light transition truncate"
               >
                 {r.snippet}
               </button>
@@ -1031,32 +1049,32 @@ function SidebarContent(props: SidebarContentProps) {
 
       {/* New page button */}
       {!searchQuery.trim() && (
-        <>
-          <div className="px-3 pb-2">
-            <button
-              onClick={() => onCreatePage(null)}
-              className="flex items-center gap-2 w-full px-2 py-1.5 text-sm text-gray-500 rounded-lg hover:bg-gray-100 transition"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Neue Seite</span>
-            </button>
-          </div>
+        <div className="px-3 pb-2">
+          <button
+            onClick={() => onCreatePage(null)}
+            className="flex items-center gap-2 w-full px-2 py-1.5 text-sm text-text-3 rounded-lg hover:bg-surface-2 transition"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Neue Seite</span>
+          </button>
+        </div>
+      )}
 
-          {/* Page tree */}
-          <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-2 scrollbar-hide">
-            <DndContext
-              sensors={sensors}
-              modifiers={[restrictToVerticalAxis]}
-              onDragStart={handleDragStart}
-              onDragMove={handleDragMove}
-              onDragEnd={handleDragEnd}
-              onDragCancel={handleDragCancel}
-            >
-              {rootPages.map((page) => (
-                <PageTreeItem
-                  key={page.id}
-                  page={page}
-                  pages={pages}
+      {/* Page tree — DndContext always mounted to prevent useLayoutEffect size-change warning */}
+      <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-2 scrollbar-hide" style={{ display: searchQuery.trim() ? "none" : undefined }}>
+        <DndContext
+          sensors={sensors}
+          modifiers={dndModifiers}
+          onDragStart={handleDragStart}
+          onDragMove={handleDragMove}
+          onDragEnd={handleDragEnd}
+          onDragCancel={handleDragCancel}
+        >
+          {rootPages.map((page) => (
+            <PageTreeItem
+              key={page.id}
+              page={page}
+              pages={pages}
                   depth={0}
                   activePageId={activePageId}
                   expandedPages={expandedPages}
@@ -1079,19 +1097,17 @@ function SidebarContent(props: SidebarContentProps) {
               <DragOverlay dropAnimation={null}>
                 {dragActivePage ? (
                   <div
-                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white shadow-lg border border-orange-200 text-sm text-gray-700 opacity-90"
+                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-surface border border-accent-mid text-sm text-text-2 opacity-90"
                     style={{ width: dragActiveWidth || "auto" }}
                   >
-                    <GripVertical className="w-3 h-3 text-gray-300 flex-shrink-0" />
+                    <GripVertical className="w-3 h-3 text-text-3 flex-shrink-0" />
                     <span className="text-sm flex-shrink-0">{dragActivePage.icon}</span>
                     <span className="flex-1 min-w-0 truncate">{dragActivePage.title}</span>
                   </div>
                 ) : null}
               </DragOverlay>
-            </DndContext>
-          </div>
-        </>
-      )}
+        </DndContext>
+      </div>
     </div>
   );
 }
@@ -1212,17 +1228,17 @@ function PageTreeItem(props: PageTreeItemProps) {
     <div className="relative">
       {/* Top drop indicator line */}
       {showTopLine && (
-        <div className="absolute top-0 right-2 h-0.5 bg-orange-500 z-10 rounded-full pointer-events-none" style={{ left: indent }} />
+        <div className="absolute top-0 right-2 h-0.5 bg-accent z-10 rounded-full pointer-events-none" style={{ left: indent }} />
       )}
 
       <div
         ref={(el) => { rowRef.current = el; }}
         className={`group flex items-center py-1 pr-1 rounded-lg cursor-pointer transition text-sm ${
           showMiddleHighlight
-            ? "bg-orange-50 border border-orange-200"
+            ? "bg-accent-light border border-accent-mid"
             : isActive
-              ? "bg-orange-50 text-orange-600"
-              : "text-gray-700 hover:bg-gray-100"
+              ? "bg-accent-light text-accent-dark"
+              : "text-text-2 hover:bg-surface-2"
         } ${isDragging ? "opacity-30" : ""}`}
         style={{ paddingLeft: indent }}
         onClick={() => !isRenaming && onSelect(page.id)}
@@ -1243,7 +1259,7 @@ function PageTreeItem(props: PageTreeItemProps) {
           className="flex-shrink-0 flex items-center justify-center cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity touch-none"
           style={{ width: COL_DRAG }}
         >
-          <GripVertical className="w-3.5 h-3.5 text-gray-300" />
+          <GripVertical className="w-3.5 h-3.5 text-text-3" />
         </div>
 
         {/* Chevron — 20px column, only rendered when sibling group needs it */}
@@ -1253,7 +1269,7 @@ function PageTreeItem(props: PageTreeItemProps) {
               e.stopPropagation();
               if (hasChildren) onToggleExpand(page.id);
             }}
-            className={`flex-shrink-0 flex items-center justify-center text-gray-400 ${
+            className={`flex-shrink-0 flex items-center justify-center text-text-3 ${
               hasChildren ? "" : "pointer-events-none"
             }`}
             style={{ width: COL_CHEVRON, visibility: hasChildren ? "visible" : "hidden" }}
@@ -1272,7 +1288,7 @@ function PageTreeItem(props: PageTreeItemProps) {
           <input
             ref={renameRef}
             defaultValue={page.title}
-            className="flex-1 min-w-0 text-sm bg-white border border-orange-300 rounded px-1 py-0 outline-none"
+            className="flex-1 min-w-0 text-sm bg-surface border border-accent-mid rounded px-1 py-0 outline-none"
             onBlur={(e) => onFinishRename(page.id, e.target.value || "Unbenannt")}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
@@ -1299,15 +1315,15 @@ function PageTreeItem(props: PageTreeItemProps) {
             e.stopPropagation();
             onContextMenu(page.id, e.clientX, e.clientY);
           }}
-          className="w-5 h-5 flex items-center justify-center flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity rounded hover:bg-gray-200"
+          className="w-5 h-5 flex items-center justify-center flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity rounded hover:bg-surface-2"
         >
-          <MoreHorizontal className="w-3.5 h-3.5 text-gray-400" />
+          <MoreHorizontal className="w-3.5 h-3.5 text-text-3" />
         </button>
       </div>
 
       {/* Bottom drop indicator line */}
       {showBottomLine && (
-        <div className="absolute bottom-0 right-2 h-0.5 bg-orange-500 z-10 rounded-full pointer-events-none" style={{ left: indent }} />
+        <div className="absolute bottom-0 right-2 h-0.5 bg-accent z-10 rounded-full pointer-events-none" style={{ left: indent }} />
       )}
 
       {/* Children — no vertical lines, just indentation */}
@@ -2731,7 +2747,7 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
         {/* Page icon */}
         <button
           onClick={onOpenEmojiPicker}
-          className="text-4xl mb-2 hover:bg-gray-50 rounded-xl p-2 -ml-2 transition"
+          className="text-4xl mb-2 hover:bg-surface-2 rounded-xl p-2 -ml-2 transition"
         >
           {page.icon}
         </button>
@@ -2762,7 +2778,7 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
               }
             }
           }}
-          className="w-full text-2xl font-bold text-gray-900 bg-transparent border-0 outline-none resize-none placeholder:text-gray-300 mb-4"
+          className="w-full text-2xl font-bold text-text-1 bg-transparent border-0 outline-none resize-none placeholder:text-text-3 mb-4"
           placeholder="Unbenannt"
           rows={1}
           autoComplete="off"
@@ -2794,7 +2810,7 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
               <div
                 draggable
                 onDragStart={handleDragStart}
-                className="w-6 h-6 flex items-center justify-center rounded hover:bg-gray-100 text-gray-400 cursor-grab active:cursor-grabbing"
+                className="w-6 h-6 flex items-center justify-center rounded hover:bg-surface-2 text-text-3 cursor-grab active:cursor-grabbing"
               >
                 <GripVertical className="w-3.5 h-3.5" />
               </div>
@@ -2804,7 +2820,7 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
           {/* Drop indicator line */}
           {dropIndicatorTop !== null && (
             <div
-              className="absolute left-8 right-0 h-0.5 bg-orange-500 z-20 pointer-events-none"
+              className="absolute left-8 right-0 h-0.5 bg-accent z-20 pointer-events-none"
               style={{ top: dropIndicatorTop }}
             />
           )}
@@ -2844,14 +2860,14 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
           {slashOpen && slashFiltered.length > 0 && (
             <div
               ref={slashMenuRef}
-              className="absolute z-30 bg-white rounded-xl shadow-lg border border-gray-200 py-1 min-w-[200px] max-h-[60vh] overflow-y-auto"
-              style={{ top: slashPos.top, left: slashPos.left }}
+              className="absolute z-30 bg-surface rounded-xl py-1 min-w-[200px] max-h-[60vh] overflow-y-auto"
+              style={{ boxShadow: "var(--shadow-elevated)", border: "1px solid var(--zu-border)", top: slashPos.top, left: slashPos.left }}
             >
               {slashFiltered.map((item, i) => (
                 <button
                   key={item.id}
                   className={`flex items-center gap-3 w-full px-3 py-2 text-sm text-left transition ${
-                    i === slashIdx ? "bg-orange-50 text-orange-600" : "text-gray-700 hover:bg-gray-50"
+                    i === slashIdx ? "bg-accent-light text-accent-dark" : "text-text-2 hover:bg-surface-2"
                   }`}
                   onMouseDown={(e) => {
                     e.preventDefault(); // Prevent blur
@@ -2859,7 +2875,7 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
                   }}
                   onMouseEnter={() => setSlashIdx(i)}
                 >
-                  <span className="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-100 text-xs font-semibold flex-shrink-0">
+                  <span className="w-7 h-7 flex items-center justify-center rounded-lg bg-surface-2 text-xs font-semibold flex-shrink-0">
                     {item.icon}
                   </span>
                   <span>{item.label}</span>
@@ -2873,14 +2889,14 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
             <div key={`th-${ti}`} className="contents">
               {/* Corner square */}
               <div
-                className="absolute bg-gray-200 z-10 pointer-events-none"
+                className="absolute bg-border z-10 pointer-events-none"
                 style={{ top: info.top - 8, left: info.left - 8, width: 8, height: 8, userSelect: "none" }}
               />
               {/* Column handles */}
               {info.cols.map((col, ci) => (
                 <div
                   key={`col-${ci}`}
-                  className="absolute bg-gray-100 border-b border-gray-200 z-10 cursor-default"
+                  className="absolute bg-surface-2 border-b border-border z-10 cursor-default"
                   style={{ top: info.top - 8, left: col.left, width: col.width, height: 8, userSelect: "none" }}
                   onTouchStart={(e) => handleTableDoubleTap(e, "col", info.tableEl, ci)}
                   onMouseDown={(e) => handleTableDoubleTap(e, "col", info.tableEl, ci)}
@@ -2890,7 +2906,7 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
               {info.rows.map((row, ri) => (
                 <div
                   key={`row-${ri}`}
-                  className="absolute bg-gray-100 border-r border-gray-200 z-10 cursor-default"
+                  className="absolute bg-surface-2 border-r border-border z-10 cursor-default"
                   style={{ top: row.top, left: info.left - 8, width: 8, height: row.height, userSelect: "none" }}
                   onTouchStart={(e) => handleTableDoubleTap(e, "row", info.tableEl, ri)}
                   onMouseDown={(e) => handleTableDoubleTap(e, "row", info.tableEl, ri)}
@@ -2904,32 +2920,32 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
             <>
               <div className="fixed inset-0 z-[60]" onClick={() => setTablePopover(null)} />
               <div
-                className="fixed z-[65] bg-white rounded-xl shadow-lg p-2 min-w-[200px]"
-                style={{ left: tablePopover.x, top: tablePopover.y }}
+                className="fixed z-[65] bg-surface rounded-xl p-2 min-w-[200px]"
+                style={{ left: tablePopover.x, top: tablePopover.y, boxShadow: 'var(--shadow-elevated)' }}
               >
                 {tablePopover.type === "col" ? (
                   <>
                     <button
                       onClick={() => insertColRight(tablePopover.tableEl, tablePopover.index)}
-                      className="flex items-center w-full py-3 px-4 text-sm text-gray-700 rounded-lg hover:bg-gray-50 transition"
+                      className="flex items-center w-full py-3 px-4 text-sm text-text-2 rounded-lg hover:bg-surface-2 transition"
                     >
                       Spalte rechts einf{"\u00fc"}gen
                     </button>
                     <button
                       onClick={() => duplicateCol(tablePopover.tableEl, tablePopover.index)}
-                      className="flex items-center w-full py-3 px-4 text-sm text-gray-700 rounded-lg hover:bg-gray-50 transition"
+                      className="flex items-center w-full py-3 px-4 text-sm text-text-2 rounded-lg hover:bg-surface-2 transition"
                     >
                       Spalte duplizieren
                     </button>
                     <button
                       onClick={() => moveColRight(tablePopover.tableEl, tablePopover.index)}
-                      className="flex items-center w-full py-3 px-4 text-sm text-gray-700 rounded-lg hover:bg-gray-50 transition"
+                      className="flex items-center w-full py-3 px-4 text-sm text-text-2 rounded-lg hover:bg-surface-2 transition"
                     >
                       Spalte verschieben &rarr;
                     </button>
                     <button
                       onClick={() => deleteCol(tablePopover.tableEl, tablePopover.index)}
-                      className="flex items-center w-full py-3 px-4 text-sm text-red-500 rounded-lg hover:bg-red-50 transition"
+                      className="flex items-center w-full py-3 px-4 text-sm text-danger rounded-lg hover:bg-danger-light transition"
                     >
                       Spalte l{"\u00f6"}schen
                     </button>
@@ -2938,19 +2954,19 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
                   <>
                     <button
                       onClick={() => insertRowBelow(tablePopover.tableEl, tablePopover.index)}
-                      className="flex items-center w-full py-3 px-4 text-sm text-gray-700 rounded-lg hover:bg-gray-50 transition"
+                      className="flex items-center w-full py-3 px-4 text-sm text-text-2 rounded-lg hover:bg-surface-2 transition"
                     >
                       Zeile darunter einf{"\u00fc"}gen
                     </button>
                     <button
                       onClick={() => duplicateRow(tablePopover.tableEl, tablePopover.index)}
-                      className="flex items-center w-full py-3 px-4 text-sm text-gray-700 rounded-lg hover:bg-gray-50 transition"
+                      className="flex items-center w-full py-3 px-4 text-sm text-text-2 rounded-lg hover:bg-surface-2 transition"
                     >
                       Zeile duplizieren
                     </button>
                     <button
                       onClick={() => deleteRow(tablePopover.tableEl, tablePopover.index)}
-                      className="flex items-center w-full py-3 px-4 text-sm text-red-500 rounded-lg hover:bg-red-50 transition"
+                      className="flex items-center w-full py-3 px-4 text-sm text-danger rounded-lg hover:bg-danger-light transition"
                     >
                       Zeile l{"\u00f6"}schen
                     </button>
@@ -2965,19 +2981,19 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
       {/* Mobile indent/outdent toolbar above keyboard */}
       {cursorInLi && keyboardHeight > 0 && (
         <div
-          className="fixed left-0 right-0 z-50 flex items-center justify-center gap-1 bg-gray-100 border-t border-gray-200 px-3 py-1.5"
+          className="fixed left-0 right-0 z-50 flex items-center justify-center gap-1 bg-surface-2 border-t border-border px-3 py-1.5"
           style={{ bottom: keyboardHeight }}
         >
           <button
             onPointerDown={(e) => { e.preventDefault(); handleMobileOutdent(); }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-sm text-gray-700 active:bg-orange-50 active:border-orange-300 transition shadow-sm"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface border border-border text-sm text-text-2 active:bg-accent-light active:border-accent-mid transition shadow-sm"
           >
             <IndentDecrease className="w-4 h-4" />
             <span className="text-xs">{"\u2190"} Ausr{"\u00fc"}cken</span>
           </button>
           <button
             onPointerDown={(e) => { e.preventDefault(); handleMobileIndent(); }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-sm text-gray-700 active:bg-orange-50 active:border-orange-300 transition shadow-sm"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface border border-border text-sm text-text-2 active:bg-accent-light active:border-accent-mid transition shadow-sm"
           >
             <IndentIncrease className="w-4 h-4" />
             <span className="text-xs">Einr{"\u00fc"}cken {"\u2192"}</span>

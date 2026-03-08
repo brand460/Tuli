@@ -298,7 +298,7 @@ const MonthGrid = React.memo(function MonthGrid({ data, selectedDate, highlightM
     <div style={{ flex: "0 0 33.3333%" }}>
       <div className="grid grid-cols-7 mb-0.5">
         {WEEKDAYS.map((wd) => (
-          <div key={wd} className="text-center text-[11px] font-semibold text-gray-400 py-1">
+          <div key={wd} className="text-center text-[11px] font-semibold text-text-3 py-1">
             {wd}
           </div>
         ))}
@@ -308,7 +308,16 @@ const MonthGrid = React.memo(function MonthGrid({ data, selectedDate, highlightM
         const maxLanes = bands.length > 0 ? Math.max(...bands.map((b) => b.lane)) + 1 : 0;
         const bandAreaHeight = maxLanes * (BAND_HEIGHT + BAND_GAP);
         return (
-          <div key={weekIdx} className="relative grid grid-cols-7" style={{ height: 72 }}>
+          <div
+              key={weekIdx}
+              className="relative grid grid-cols-7"
+              style={{ height: 72 }}
+              onClick={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                const col = Math.min(6, Math.max(0, Math.floor((e.clientX - rect.left) / (rect.width / 7))));
+                onDayClick(week[col].date);
+              }}
+            >
             {bands.map((seg) => {
               const pillStyle = getEventPillStyle(seg.event.color);
               const sMid = dateMidnight(new Date(seg.event.start_time));
@@ -327,6 +336,7 @@ const MonthGrid = React.memo(function MonthGrid({ data, selectedDate, highlightM
                     top: DAY_NUM_HEIGHT + seg.lane * (BAND_HEIGHT + BAND_GAP),
                     height: BAND_HEIGHT,
                     backgroundColor: pillStyle.bg,
+                    pointerEvents: "none",
                   }}
                 >
                   <span className="text-[10px] font-medium truncate w-full px-1 leading-none" style={{ color: pillStyle.text }}>
@@ -356,24 +366,29 @@ const MonthGrid = React.memo(function MonthGrid({ data, selectedDate, highlightM
               return (
                 <button
                   key={colIdx}
-                  onClick={() => onDayClick(date)}
+                  onClick={(e) => { e.stopPropagation(); onDayClick(date); }}
                   className={`flex flex-col items-center pt-1 relative overflow-hidden ${
-                    isSelected ? "bg-orange-50 rounded-lg" : ""
+                    isSelected ? "rounded-lg" : ""
                   }`}
-                  style={{ height: 72 }}
+                  style={{ height: 72, backgroundColor: isSelected ? "var(--surface-2)" : undefined }}
                 >
                   <div
                     className={`w-6 h-6 flex items-center justify-center rounded-full text-xs relative z-10 flex-shrink-0 ${
-                      isSelected && isToday
-                        ? "bg-orange-500 text-white font-bold"
+                      isToday
+                        ? "text-white font-bold"
                         : isSelected
-                        ? "bg-gray-900 text-white font-bold"
-                        : isToday
-                        ? "ring-2 ring-orange-500 text-orange-500 font-bold"
+                        ? "font-bold"
                         : inMonth
-                        ? "text-gray-900"
-                        : "text-gray-300"
+                        ? "text-text-1"
+                        : "text-text-3"
                     }`}
+                    style={
+                      isToday
+                        ? { background: "var(--today-circle)" }
+                        : isSelected
+                        ? { color: "var(--text-1)", fontWeight: 700 }
+                        : undefined
+                    }
                   >
                     {date.getDate()}
                   </div>
@@ -406,7 +421,7 @@ const MonthGrid = React.memo(function MonthGrid({ data, selectedDate, highlightM
                       {hiddenColors.map((c) => (
                         <div key={c} className="w-1 h-1 rounded-full flex-shrink-0" style={{ backgroundColor: getColorHex(c) }} />
                       ))}
-                      <span className="text-[9px] text-gray-400 leading-none ml-px">+{hiddenCount}</span>
+                      <span className="text-[9px] text-text-3 leading-none ml-px">+{hiddenCount}</span>
                     </div>
                   )}
                 </button>
@@ -787,20 +802,25 @@ export function KalenderScreen() {
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
+      {/* Screen Header */}
+      <div className="flex-shrink-0 px-4 pt-4 pb-2" style={{ background: "var(--zu-bg)" }}>
+        <h2 className="text-lg font-bold text-text-1">Kalender</h2>
+      </div>
+
       {/* Month Header */}
-      <div className="flex-shrink-0 flex items-center justify-between px-5 py-2 bg-white border-b border-gray-100">
+      <div className="flex-shrink-0 flex items-center justify-between px-5 py-2 bg-surface">
         <button
           onClick={() => animateToMonth("prev")}
-          className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-900 hover:bg-gray-50 transition"
+          className="w-7 h-7 rounded-lg flex items-center justify-center text-text-3 hover:text-text-1 hover:bg-surface-2 transition"
         >
           <ChevronLeft className="w-4 h-4" />
         </button>
-        <h2 className="text-sm font-bold text-gray-900">
+        <h2 className="text-sm font-bold text-text-1">
           {MONTHS_DE[currentMonth]} {currentYear}
         </h2>
         <button
           onClick={() => animateToMonth("next")}
-          className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-900 hover:bg-gray-50 transition"
+          className="w-7 h-7 rounded-lg flex items-center justify-center text-text-3 hover:text-text-1 hover:bg-surface-2 transition"
         >
           <ChevronRight className="w-4 h-4" />
         </button>
@@ -808,7 +828,8 @@ export function KalenderScreen() {
 
       {/* Calendar Grid — 3-panel track: [prev] [current] [next] */}
       <div
-        className="flex-shrink-0 bg-white px-1 pb-1 pt-1 overflow-hidden"
+        className="flex-shrink-0 bg-surface px-1 pb-1 pt-1 overflow-hidden rounded-b-[16px]"
+        style={{ boxShadow: "var(--shadow-card)" }}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
@@ -846,12 +867,12 @@ export function KalenderScreen() {
       </div>
 
       {/* Event Panel */}
-      <div className="flex-1 min-h-0 flex flex-col bg-gray-50 border-t border-gray-100">
+      <div className="flex-1 min-h-0 flex flex-col" style={{ background: "var(--zu-bg)" }}>
         <div className="flex-shrink-0 flex items-center justify-between px-5 py-3">
-          <h3 className="text-sm font-bold text-gray-900">{formatDateLong(selectedDate)}</h3>
+          <h3 className="text-sm font-bold text-text-1">{formatDateLong(selectedDate)}</h3>
           <button
             onClick={handleNewEvent}
-            className="w-8 h-8 rounded-full bg-orange-500 flex items-center justify-center text-white shadow-sm hover:bg-orange-600 transition active:scale-95"
+            className="w-8 h-8 rounded-full bg-accent flex items-center justify-center text-white shadow-sm hover:bg-accent-dark transition active:scale-95"
           >
             <Plus className="w-4 h-4" />
           </button>
@@ -859,7 +880,7 @@ export function KalenderScreen() {
 
         <div className={`flex-1 min-h-0 px-4 pb-4 ${selectedDayEvents.length > 0 ? "overflow-y-auto" : "overflow-hidden"}`}>
           {selectedDayEvents.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-8 text-gray-400">
+            <div className="flex flex-col items-center justify-center py-8 text-text-3">
               <p className="text-sm">Keine Termine</p>
             </div>
           ) : (
@@ -875,19 +896,20 @@ export function KalenderScreen() {
                   <button
                     key={`${ev.id}-${toDateKey(selectedDate)}`}
                     onClick={() => handleEditEvent(ev)}
-                    className="w-full flex items-stretch bg-white rounded-xl shadow-sm overflow-hidden transition hover:shadow-md active:scale-[0.98]"
+                    className="w-full flex items-stretch bg-surface rounded-xl overflow-hidden transition active:scale-[0.98]"
+                    style={{ boxShadow: "var(--shadow-card)" }}
                   >
                     <div className="w-1.5 flex-shrink-0" style={{ backgroundColor: getColorHex(ev.color) }} />
                     <div className="flex-1 flex items-center gap-3 px-3 py-2.5 min-w-0">
-                      <div className="flex-shrink-0 text-xs text-gray-500 w-12 text-right">
+                      <div className="flex-shrink-0 text-xs text-text-3 w-12 text-right">
                         {ev.all_day ? (
-                          <span className="font-medium text-gray-400">Ganzt.</span>
+                          <span className="font-medium text-text-3">Ganzt.</span>
                         ) : (
                           <span>{formatTime(ev.start_time)}</span>
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-gray-900 truncate text-left">{ev.title}</p>
+                        <p className="text-sm font-semibold text-text-1 truncate text-left">{ev.title}</p>
                       </div>
                       {hasMeta && (
                         <div className="flex items-center gap-1 flex-shrink-0">
@@ -902,13 +924,13 @@ export function KalenderScreen() {
                                     key={member.id}
                                     src={member.avatar_url}
                                     alt={member.display_name}
-                                    className="w-6 h-6 rounded-full object-cover ring-2 ring-white"
+                                    className="w-6 h-6 rounded-full object-cover ring-2 ring-surface"
                                     style={{ marginLeft: idx > 0 ? -8 : 0 }}
                                   />
                                 ) : (
                                   <div
                                     key={member.id}
-                                    className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white ring-2 ring-white"
+                                    className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white ring-2 ring-surface"
                                     style={{ backgroundColor: member.initials_color, marginLeft: idx > 0 ? -8 : 0 }}
                                   >
                                     {initial}
@@ -917,9 +939,9 @@ export function KalenderScreen() {
                               })}
                             </div>
                           )}
-                          {hasNote && <FileText className="w-4 h-4 text-gray-400 flex-shrink-0" />}
-                          {hasLink && <Link className="w-4 h-4 text-gray-400 flex-shrink-0" />}
-                          {hasRepeat && <Repeat className="w-4 h-4 text-gray-400 flex-shrink-0" />}
+                          {hasNote && <FileText className="w-4 h-4 text-text-3 flex-shrink-0" />}
+                          {hasLink && <Link className="w-4 h-4 text-text-3 flex-shrink-0" />}
+                          {hasRepeat && <Repeat className="w-4 h-4 text-text-3 flex-shrink-0" />}
                         </div>
                       )}
                     </div>
@@ -986,25 +1008,26 @@ function RecurringPrompt({
     >
       <div className="absolute inset-0 bg-black/40" onClick={onCancel} />
       <motion.div
-        className="relative w-full max-w-[400px] bg-white rounded-t-2xl shadow-lg p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))]"
+        className="relative w-full max-w-[400px] bg-surface rounded-t-[20px] p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))]"
+        style={{ boxShadow: "var(--shadow-elevated)" }}
         initial={{ y: "100%" }}
         animate={{ y: 0 }}
         exit={{ y: "100%" }}
         transition={{ type: "spring", damping: 25, stiffness: 300 }}
       >
         <div className="flex justify-center mb-4">
-          <div className="w-10 h-1 bg-gray-300 rounded-full" />
+          <div className="w-9 h-1 rounded-full" style={{ background: "var(--zu-border)" }} />
         </div>
         <div className="space-y-2">
           <button
             onClick={onEditSingle}
-            className="w-full py-3 rounded-full bg-gray-100 text-gray-700 font-semibold text-sm hover:bg-gray-200 transition"
+            className="w-full py-3 rounded-full bg-surface-2 text-text-2 font-semibold text-sm hover:bg-surface-2 transition"
           >
             Nur dieses Event ändern
           </button>
           <button
             onClick={onEditAll}
-            className="w-full py-3 rounded-full bg-orange-500 text-white font-semibold text-sm hover:bg-orange-600 transition"
+            className="w-full py-3 rounded-full bg-accent text-white font-semibold text-sm hover:bg-accent-dark transition"
           >
             Alle Wiederholungen ändern
           </button>
@@ -1186,7 +1209,7 @@ function DrumWheel({
             <div key={i} style={{ height: ITEM_HEIGHT }} className="flex items-center justify-center">
               <span
                 className={`transition-all duration-100 text-sm ${
-                  isCenter ? "font-medium text-gray-900" : "font-normal text-gray-400"
+                  isCenter ? "font-medium text-text-1" : "font-normal text-text-3"
                 }`}
               >
                 {renderItem(item, i)}
@@ -1254,7 +1277,8 @@ function DateTimePickerSheet({
     >
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <motion.div
-        className="relative w-full max-w-[400px] bg-white rounded-t-2xl shadow-lg flex flex-col"
+        className="relative w-full max-w-[400px] bg-surface rounded-t-[20px] flex flex-col"
+        style={{ boxShadow: "var(--shadow-elevated)" }}
         initial={{ y: "100%" }}
         animate={{ y: 0 }}
         exit={{ y: "100%" }}
@@ -1262,13 +1286,13 @@ function DateTimePickerSheet({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-center pt-3 pb-2">
-          <div className="w-10 h-1 bg-gray-300 rounded-full" />
+          <div className="w-9 h-1 rounded-full" style={{ background: "var(--zu-border)" }} />
         </div>
 
         {/* Drum wheels container */}
         <div className="relative px-3 pb-4">
           <div
-            className="absolute left-3 right-3 bg-orange-50 border-y border-orange-200 pointer-events-none z-10 rounded-lg"
+            className="absolute left-3 right-3 bg-accent-light border-y border-accent-mid pointer-events-none z-10 rounded-lg"
             style={{
               top: `${Math.floor(VISIBLE_ITEMS / 2) * ITEM_HEIGHT}px`,
               height: `${ITEM_HEIGHT}px`,
@@ -1302,7 +1326,7 @@ function DateTimePickerSheet({
             </div>
             {!allDay && (
               <>
-                <div className="w-px bg-gray-100 my-4 flex-shrink-0" />
+                <div className="w-px my-4 flex-shrink-0" style={{ background: "var(--zu-border)" }} />
                 <div className="flex-1 relative z-20">
                   <DrumWheel
                     items={Array.from({ length: 24 }, (_, i) => i)}
@@ -1312,7 +1336,7 @@ function DateTimePickerSheet({
                   />
                 </div>
                 <div className="flex items-center justify-center w-3 relative z-20">
-                  <span className="text-sm font-medium text-gray-900">:</span>
+                  <span className="text-sm font-medium text-text-1">:</span>
                 </div>
                 <div className="flex-1 relative z-20">
                   <DrumWheel
@@ -1330,7 +1354,7 @@ function DateTimePickerSheet({
         <div className="px-5 pb-[calc(1rem+env(safe-area-inset-bottom))]">
           <button
             onClick={handleDone}
-            className="w-full py-3 rounded-full bg-orange-500 text-white font-semibold text-sm hover:bg-orange-600 transition"
+            className="w-full py-3 rounded-full bg-accent text-white font-semibold text-sm hover:bg-accent-dark transition"
           >
             Fertig
           </button>
@@ -1375,7 +1399,8 @@ function CustomNotificationSheet({
     >
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <motion.div
-        className="relative w-full max-w-[400px] bg-white rounded-t-2xl shadow-lg flex flex-col"
+        className="relative w-full max-w-[400px] bg-surface rounded-t-[20px] flex flex-col"
+        style={{ boxShadow: "var(--shadow-elevated)" }}
         initial={{ y: "100%" }}
         animate={{ y: 0 }}
         exit={{ y: "100%" }}
@@ -1383,12 +1408,12 @@ function CustomNotificationSheet({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-center pt-3 pb-2">
-          <div className="w-10 h-1 bg-gray-300 rounded-full" />
+          <div className="w-9 h-1 rounded-full" style={{ background: "var(--zu-border)" }} />
         </div>
 
         <div className="relative px-3 pb-4">
           <div
-            className="absolute left-3 right-3 bg-orange-50 border-y border-orange-200 pointer-events-none z-10 rounded-lg"
+            className="absolute left-3 right-3 bg-accent-light border-y border-accent-mid pointer-events-none z-10 rounded-lg"
             style={{
               top: `${Math.floor(VISIBLE_ITEMS / 2) * ITEM_HEIGHT}px`,
               height: `${ITEM_HEIGHT}px`,
@@ -1417,7 +1442,7 @@ function CustomNotificationSheet({
         <div className="px-5 pb-[calc(1rem+env(safe-area-inset-bottom))]">
           <button
             onClick={handleDone}
-            className="w-full py-3 rounded-full bg-orange-500 text-white font-semibold text-sm hover:bg-orange-600 transition"
+            className="w-full py-3 rounded-full bg-accent text-white font-semibold text-sm hover:bg-accent-dark transition"
           >
             Fertig
           </button>
@@ -1445,8 +1470,8 @@ function PopupSheet({
     >
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <motion.div
-        className="relative w-full max-w-[400px] bg-white rounded-t-2xl shadow-lg flex flex-col"
-        style={{ maxHeight: "60dvh" }}
+        className="relative w-full max-w-[400px] bg-surface rounded-t-[20px] flex flex-col"
+        style={{ maxHeight: "60dvh", boxShadow: "var(--shadow-elevated)" }}
         initial={{ y: "100%" }}
         animate={{ y: 0 }}
         exit={{ y: "100%" }}
@@ -1454,7 +1479,7 @@ function PopupSheet({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-center pt-3 pb-1">
-          <div className="w-10 h-1 bg-gray-300 rounded-full" />
+          <div className="w-9 h-1 rounded-full" style={{ background: "var(--zu-border)" }} />
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto pb-[calc(1rem+env(safe-area-inset-bottom))]">
           {children}
@@ -1489,7 +1514,8 @@ function DeleteConfirmModal({
       <div className="absolute inset-0 bg-black/40" onClick={(e) => { e.stopPropagation(); onCancel(); }} />
       {isRecurring ? (
         <motion.div
-          className="relative w-full max-w-[400px] bg-white rounded-t-2xl shadow-lg p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))]"
+          className="relative w-full max-w-[400px] bg-surface rounded-t-[20px] p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))]"
+          style={{ boxShadow: "var(--shadow-elevated)" }}
           initial={{ y: "100%" }}
           animate={{ y: 0 }}
           exit={{ y: "100%" }}
@@ -1497,28 +1523,28 @@ function DeleteConfirmModal({
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex justify-center mb-4">
-            <div className="w-10 h-1 bg-gray-300 rounded-full" />
+            <div className="w-9 h-1 rounded-full" style={{ background: "var(--zu-border)" }} />
           </div>
-          <h3 className="text-base font-bold text-gray-900 text-center mb-1">Wiederkehrendes Event löschen</h3>
-          <p className="text-sm text-gray-500 text-center mb-4">
+          <h3 className="text-base font-bold text-text-1 text-center mb-1">Wiederkehrendes Event löschen</h3>
+          <p className="text-sm text-text-3 text-center mb-4">
             Wie soll dieses wiederkehrende Event gelöscht werden?
           </p>
           <div className="space-y-2">
             <button
               onClick={onDeleteSingle}
-              className="w-full py-3 rounded-full bg-gray-100 text-gray-700 font-semibold text-sm hover:bg-gray-200 transition"
+              className="w-full py-3 rounded-full bg-surface-2 text-text-2 font-semibold text-sm hover:bg-surface-2 transition"
             >
               Nur dieses Event löschen
             </button>
             <button
               onClick={onDeleteFuture}
-              className="w-full py-3 rounded-full bg-gray-100 text-gray-700 font-semibold text-sm hover:bg-gray-200 transition"
+              className="w-full py-3 rounded-full bg-surface-2 text-text-2 font-semibold text-sm hover:bg-surface-2 transition"
             >
               Dieses und alle folgenden löschen
             </button>
             <button
               onClick={onDeleteAll}
-              className="w-full py-3 rounded-full bg-red-500 text-white font-semibold text-sm hover:bg-red-600 transition"
+              className="w-full py-3 rounded-full bg-danger text-white font-semibold text-sm hover:bg-danger transition"
             >
               Alle Wiederholungen löschen
             </button>
@@ -1526,27 +1552,28 @@ function DeleteConfirmModal({
         </motion.div>
       ) : (
         <motion.div
-          className="relative w-full max-w-[320px] bg-white rounded-2xl shadow-xl p-6 mb-8"
+          className="relative w-full max-w-[320px] bg-surface rounded-[var(--radius-card)] p-6 mb-8"
+          style={{ boxShadow: "var(--shadow-elevated)" }}
           initial={{ scale: 0.9, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           exit={{ scale: 0.9, opacity: 0 }}
           transition={{ type: "spring", damping: 25, stiffness: 400 }}
           onClick={(e) => e.stopPropagation()}
         >
-          <h3 className="text-base font-bold text-gray-900 text-center">Event löschen?</h3>
-          <p className="text-sm text-gray-500 text-center mt-2">
+          <h3 className="text-base font-bold text-text-1 text-center">Event löschen?</h3>
+          <p className="text-sm text-text-3 text-center mt-2">
             Diese Aktion kann nicht rückgängig gemacht werden.
           </p>
           <div className="flex gap-3 mt-5">
             <button
               onClick={onCancel}
-              className="flex-1 py-2.5 rounded-full bg-gray-100 text-gray-700 text-sm font-semibold hover:bg-gray-200 transition"
+              className="flex-1 py-2.5 rounded-full bg-surface-2 text-text-2 text-sm font-semibold transition"
             >
               Abbrechen
             </button>
             <button
               onClick={onDeleteAll}
-              className="flex-1 py-2.5 rounded-full bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition"
+              className="flex-1 py-2.5 rounded-full bg-danger text-white text-sm font-semibold transition"
             >
               Löschen
             </button>
@@ -1731,10 +1758,11 @@ function EventEditorSheet({
       <Tag
         onClick={onClick}
         className={`w-full flex items-center px-4 py-3 ${
-          noBorder ? "" : "border-b border-gray-100"
-        } ${onClick ? "active:bg-gray-50 transition-colors" : ""}`}
+          noBorder ? "" : ""
+        } ${onClick ? "active:bg-surface-2 transition-colors" : ""}`}
+        style={noBorder ? undefined : { borderBottom: "1px solid var(--zu-border)" }}
       >
-        <div className="w-5 h-5 flex items-center justify-center text-gray-400 mr-3 flex-shrink-0">
+        <div className="w-5 h-5 flex items-center justify-center text-text-3 mr-3 flex-shrink-0">
           {icon}
         </div>
         <div className="flex-1 min-w-0 flex items-center">{children}</div>
@@ -1751,8 +1779,8 @@ function EventEditorSheet({
     >
       <div className="absolute inset-0 bg-black/40" onClick={handleCloseAttempt} />
       <motion.div
-        className="relative w-full max-w-[400px] bg-white rounded-t-2xl shadow-lg flex flex-col"
-        style={{ maxHeight: "90dvh" }}
+        className="relative w-full max-w-[400px] bg-surface rounded-t-[20px] flex flex-col"
+        style={{ maxHeight: "90dvh", boxShadow: "var(--shadow-elevated)" }}
         initial={{ y: "100%" }}
         animate={{ y: 0 }}
         exit={{ y: "100%" }}
@@ -1767,7 +1795,7 @@ function EventEditorSheet({
       >
         {/* Handle bar */}
         <div className="flex justify-center pt-3 pb-1 cursor-grab active:cursor-grabbing">
-          <div className="w-10 h-1 bg-gray-300 rounded-full" />
+          <div className="w-9 h-1 rounded-full" style={{ background: "var(--zu-border)" }} />
         </div>
 
         {/* Header — different for new vs edit */}
@@ -1776,7 +1804,7 @@ function EventEditorSheet({
             <button
               onClick={handleSave}
               disabled={!title.trim()}
-              className="text-sm font-semibold text-orange-500 disabled:opacity-40 transition"
+              className="text-sm font-semibold text-accent disabled:opacity-40 transition"
             >
               Speichern
             </button>
@@ -1789,7 +1817,7 @@ function EventEditorSheet({
         {/* Scrollable form rows */}
         <div className="flex-1 min-h-0 overflow-y-auto">
           {/* Title */}
-          <div className="px-4 py-3 border-b border-gray-100">
+          <div className="px-4 py-3" style={{ borderBottom: "1px solid var(--zu-border)" }}>
             <input
               type="text"
               autoComplete="off"
@@ -1802,24 +1830,26 @@ function EventEditorSheet({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Titel hinzufügen"
-              className="w-full text-lg text-gray-900 placeholder:text-gray-400 outline-none bg-transparent"
+              className="w-full text-lg text-text-1 placeholder:text-text-3 outline-none bg-transparent"
               autoFocus={isNew}
             />
           </div>
 
           {/* Ganztägig */}
           <FormRow icon={<Clock className="w-5 h-5" />}>
-            <span className="flex-1 text-sm text-gray-900">Ganztägig</span>
+            <span className="flex-1 text-sm text-text-1">Ganztägig</span>
             <button
               onClick={() => setAllDay(!allDay)}
               className={`w-11 h-6 rounded-full transition-colors relative flex-shrink-0 ${
-                allDay ? "bg-orange-500" : "bg-gray-300"
+                allDay ? "bg-accent" : ""
               }`}
+              style={!allDay ? { background: "var(--switch-background)" } : undefined}
             >
               <div
-                className={`w-5 h-5 bg-white rounded-full shadow absolute top-0.5 transition-transform ${
+                className={`w-5 h-5 rounded-full shadow absolute top-0.5 transition-transform ${
                   allDay ? "translate-x-[22px]" : "translate-x-0.5"
                 }`}
+                style={{ background: "var(--surface)" }}
               />
             </button>
           </FormRow>
@@ -1827,19 +1857,19 @@ function EventEditorSheet({
           {/* Start */}
           <FormRow icon={<Calendar className="w-5 h-5" />} onClick={() => setShowStartPicker(true)}>
             <div className="flex-1 text-left">
-              <div className="text-xs text-gray-400">Start</div>
-              <div className="text-sm text-gray-900">{formatEventDateTime(startTime, allDay)}</div>
+              <div className="text-xs text-text-3">Start</div>
+              <div className="text-sm text-text-1">{formatEventDateTime(startTime, allDay)}</div>
             </div>
-            <ChevronRight className="w-4 h-4 text-gray-300 flex-shrink-0" />
+            <ChevronRight className="w-4 h-4 text-text-3 flex-shrink-0" />
           </FormRow>
 
           {/* Ende */}
           <FormRow icon={<Calendar className="w-5 h-5" />} onClick={() => setShowEndPicker(true)}>
             <div className="flex-1 text-left">
-              <div className="text-xs text-gray-400">Ende</div>
-              <div className="text-sm text-gray-900">{formatEventDateTime(endTime, allDay)}</div>
+              <div className="text-xs text-text-3">Ende</div>
+              <div className="text-sm text-text-1">{formatEventDateTime(endTime, allDay)}</div>
             </div>
-            <ChevronRight className="w-4 h-4 text-gray-300 flex-shrink-0" />
+            <ChevronRight className="w-4 h-4 text-text-3 flex-shrink-0" />
           </FormRow>
 
           {/* Label */}
@@ -1849,15 +1879,15 @@ function EventEditorSheet({
                 className="w-3 h-3 rounded-full flex-shrink-0"
                 style={{ backgroundColor: currentLabel?.hex || getColorHex(color) }}
               />
-              <span className="text-sm text-gray-900">{currentLabel?.name || "Kein Label"}</span>
+              <span className="text-sm text-text-1">{currentLabel?.name || "Kein Label"}</span>
             </div>
-            <ChevronRight className="w-4 h-4 text-gray-300 flex-shrink-0" />
+            <ChevronRight className="w-4 h-4 text-text-3 flex-shrink-0" />
           </FormRow>
 
           {/* Zugewiesen an */}
           <FormRow icon={<Users className="w-5 h-5" />}>
             <div className="flex items-center gap-2 flex-1">
-              <span className="text-sm text-gray-900 mr-1">Zugewiesen</span>
+              <span className="text-sm text-text-1 mr-1">Zugewiesen</span>
               <div className="flex items-center gap-1.5">
                 {householdMembers.map((member) => {
                   const isActive = assignedTo.includes(member.id);
@@ -1889,7 +1919,7 @@ function EventEditorSheet({
                       )}
                       {/* Orange checkmark badge — same style as Einkaufen store item-count badge */}
                       {isActive && (
-                        <div className="absolute -bottom-0.5 -right-0.5 bg-orange-500 rounded-full w-[16px] h-[16px] flex items-center justify-center ring-2 ring-white">
+                        <div className="absolute -bottom-0.5 -right-0.5 bg-accent rounded-full w-[16px] h-[16px] flex items-center justify-center ring-2 ring-surface">
                           <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />
                         </div>
                       )}
@@ -1902,19 +1932,19 @@ function EventEditorSheet({
 
           {/* Wiederholung */}
           <FormRow icon={<Repeat className="w-5 h-5" />} onClick={() => setShowRepeatPopup(true)}>
-            <span className="flex-1 text-sm text-gray-900 text-left">
+            <span className="flex-1 text-sm text-text-1 text-left">
               {repeatRule === "none" ? "Keine Wiederholung" : repeatLabel}
             </span>
-            <ChevronRight className="w-4 h-4 text-gray-300 flex-shrink-0" />
+            <ChevronRight className="w-4 h-4 text-text-3 flex-shrink-0" />
           </FormRow>
 
           {/* Existing notifications */}
           {notifications.map((n) => (
             <FormRow key={n} icon={<Bell className="w-5 h-5" />}>
-              <span className="flex-1 text-sm text-gray-900">{formatNotification(n)}</span>
+              <span className="flex-1 text-sm text-text-1">{formatNotification(n)}</span>
               <button
                 onClick={() => removeNotification(n)}
-                className="text-gray-400 hover:text-gray-900 transition flex-shrink-0 p-1"
+                className="text-text-3 hover:text-text-1 transition flex-shrink-0 p-1"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1923,14 +1953,14 @@ function EventEditorSheet({
 
           {/* Add notification */}
           <FormRow icon={<Bell className="w-5 h-5" />} onClick={() => setShowNotificationPopup(true)}>
-            <span className="flex-1 text-sm text-gray-400 text-left">+ Benachrichtigung hinzufügen</span>
+            <span className="flex-1 text-sm text-text-3 text-left">+ Benachrichtigung hinzufügen</span>
           </FormRow>
 
           {/* Notiz */}
           {editingNote ? (
-            <div className="px-4 py-3 border-b border-gray-100">
+            <div className="px-4 py-3" style={{ borderBottom: "1px solid var(--zu-border)" }}>
               <div className="flex items-start">
-                <div className="w-5 h-5 flex items-center justify-center text-gray-400 mr-3 flex-shrink-0 mt-0.5">
+                <div className="w-5 h-5 flex items-center justify-center text-text-3 mr-3 flex-shrink-0 mt-0.5">
                   <FileText className="w-5 h-5" />
                 </div>
                 <textarea
@@ -1945,14 +1975,14 @@ function EventEditorSheet({
                   data-lpignore="true"
                   data-1p-ignore="true"
                   data-form-type="other"
-                  className="flex-1 text-sm text-gray-900 placeholder:text-gray-400 outline-none bg-transparent resize-none"
+                  className="flex-1 text-sm text-text-1 placeholder:text-text-3 outline-none bg-transparent resize-none"
                   autoFocus
                 />
               </div>
             </div>
           ) : (
             <FormRow icon={<FileText className="w-5 h-5" />} onClick={() => setEditingNote(true)}>
-              <span className={`flex-1 text-sm text-left ${description ? "text-gray-900" : "text-gray-400"}`}>
+              <span className={`flex-1 text-sm text-left ${description ? "text-text-1" : "text-text-3"}`}>
                 {description || "Notiz hinzufügen..."}
               </span>
             </FormRow>
@@ -1960,7 +1990,7 @@ function EventEditorSheet({
 
           {/* Verknüpfungen */}
           <FormRow icon={<Link className="w-5 h-5" />} onClick={() => setShowLinkPopup(true)}>
-            <span className="flex-1 text-sm text-gray-400 text-left">+ Verknüpfung hinzufügen</span>
+            <span className="flex-1 text-sm text-text-3 text-left">+ Verknüpfung hinzufügen</span>
           </FormRow>
 
           {/* Delete — only for existing events */}
@@ -1968,7 +1998,7 @@ function EventEditorSheet({
             <div className="px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
               <button
                 onClick={() => setShowDeleteConfirm(true)}
-                className="w-full flex items-center justify-center gap-2 py-3 text-red-500 text-sm font-medium hover:text-red-600 transition"
+                className="w-full flex items-center justify-center gap-2 py-3 text-danger text-sm font-medium hover:text-danger transition"
               >
                 <Trash2 className="w-4 h-4" />
                 Event löschen
@@ -2013,18 +2043,18 @@ function EventEditorSheet({
                   setColor(label.color);
                   setShowLabelPopup(false);
                 }}
-                className="w-full flex items-center px-5 py-3 active:bg-gray-50 transition-colors"
+                className="w-full flex items-center px-5 py-3 active:bg-surface-2 transition-colors"
               >
                 <div
                   className="w-4 h-4 rounded-full mr-3 flex-shrink-0"
                   style={{ backgroundColor: label.hex }}
                 />
-                <span className="flex-1 text-sm text-gray-900 text-left">{label.name}</span>
-                {label.color === color && <Check className="w-4 h-4 text-orange-500 flex-shrink-0" />}
+                <span className="flex-1 text-sm text-text-1 text-left">{label.name}</span>
+                {label.color === color && <Check className="w-4 h-4 text-accent flex-shrink-0" />}
               </button>
             ))}
             <div className="px-5 pt-3 pb-1">
-              <span className="text-xs text-gray-400">Labels verwalten (kommt bald)</span>
+              <span className="text-xs text-text-3">Labels verwalten (kommt bald)</span>
             </div>
           </PopupSheet>
         )}
@@ -2041,13 +2071,13 @@ function EventEditorSheet({
                   setRepeatRule(opt.value);
                   setShowRepeatPopup(false);
                 }}
-                className="w-full flex items-center px-5 py-3 active:bg-gray-50 transition-colors"
+                className="w-full flex items-center px-5 py-3 active:bg-surface-2 transition-colors"
               >
-                <span className="flex-1 text-sm text-gray-900 text-left">
+                <span className="flex-1 text-sm text-text-1 text-left">
                   {opt.value === "none" ? "Keine Wiederholung" : opt.label}
                 </span>
                 {repeatRule === opt.value && (
-                  <Check className="w-4 h-4 text-orange-500 flex-shrink-0" />
+                  <Check className="w-4 h-4 text-accent flex-shrink-0" />
                 )}
               </button>
             ))}
@@ -2063,11 +2093,11 @@ function EventEditorSheet({
               <button
                 key={opt.value}
                 onClick={() => addNotification(opt.value)}
-                className="w-full flex items-center px-5 py-3 active:bg-gray-50 transition-colors"
+                className="w-full flex items-center px-5 py-3 active:bg-surface-2 transition-colors"
               >
-                <span className="flex-1 text-sm text-gray-900 text-left">{opt.label}</span>
+                <span className="flex-1 text-sm text-text-1 text-left">{opt.label}</span>
                 {notifications.includes(opt.value) && (
-                  <Check className="w-4 h-4 text-orange-500 flex-shrink-0" />
+                  <Check className="w-4 h-4 text-accent flex-shrink-0" />
                 )}
               </button>
             ))}
@@ -2076,9 +2106,9 @@ function EventEditorSheet({
                 setShowNotificationPopup(false);
                 setTimeout(() => setShowCustomNotification(true), 200);
               }}
-              className="w-full flex items-center px-5 py-3 active:bg-gray-50 transition-colors"
+              className="w-full flex items-center px-5 py-3 active:bg-surface-2 transition-colors"
             >
-              <span className="flex-1 text-sm text-gray-900 text-left">Benutzerdefiniert...</span>
+              <span className="flex-1 text-sm text-text-1 text-left">Benutzerdefiniert...</span>
             </button>
           </PopupSheet>
         )}
@@ -2102,15 +2132,15 @@ function EventEditorSheet({
           <PopupSheet onClose={() => setShowLinkPopup(false)}>
             <button
               onClick={() => setShowLinkPopup(false)}
-              className="w-full flex items-center px-5 py-3 active:bg-gray-50 transition-colors"
+              className="w-full flex items-center px-5 py-3 active:bg-surface-2 transition-colors"
             >
-              <span className="flex-1 text-sm text-gray-400 text-left">Rezept verknüpfen (kommt bald)</span>
+              <span className="flex-1 text-sm text-text-3 text-left">Rezept verknüpfen (kommt bald)</span>
             </button>
             <button
               onClick={() => setShowLinkPopup(false)}
-              className="w-full flex items-center px-5 py-3 active:bg-gray-50 transition-colors"
+              className="w-full flex items-center px-5 py-3 active:bg-surface-2 transition-colors"
             >
-              <span className="flex-1 text-sm text-gray-400 text-left">Liste verknüpfen (kommt bald)</span>
+              <span className="flex-1 text-sm text-text-3 text-left">Liste verknüpfen (kommt bald)</span>
             </button>
           </PopupSheet>
         )}
@@ -2151,27 +2181,28 @@ function EventEditorSheet({
           >
             <div className="absolute inset-0 bg-black/40" onClick={(e) => { e.stopPropagation(); setShowDiscardConfirm(false); }} />
             <motion.div
-              className="relative w-full max-w-[320px] bg-white rounded-2xl shadow-xl p-6"
+              className="relative w-full max-w-[320px] rounded-2xl p-6"
+              style={{ background: "var(--surface)", boxShadow: "var(--shadow-elevated)" }}
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
               transition={{ type: "spring", damping: 25, stiffness: 400 }}
               onClick={(e) => e.stopPropagation()}
             >
-              <h3 className="text-base font-bold text-gray-900 text-center">Termin verwerfen?</h3>
-              <p className="text-sm text-gray-500 text-center mt-2">
+              <h3 className="text-base font-bold text-text-1 text-center">Termin verwerfen?</h3>
+              <p className="text-sm text-text-3 text-center mt-2">
                 Du hast Änderungen vorgenommen. Möchtest du diese verwerfen?
               </p>
               <div className="flex gap-3 mt-5">
                 <button
                   onClick={() => setShowDiscardConfirm(false)}
-                  className="flex-1 py-2.5 rounded-full bg-gray-100 text-gray-700 text-sm font-semibold hover:bg-gray-200 transition"
+                  className="flex-1 py-2.5 rounded-full bg-surface-2 text-text-2 text-sm font-semibold transition"
                 >
                   Abbrechen
                 </button>
                 <button
                   onClick={forceClose}
-                  className="flex-1 py-2.5 rounded-full bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition"
+                  className="flex-1 py-2.5 rounded-full bg-danger text-white text-sm font-semibold transition"
                 >
                   Verwerfen
                 </button>

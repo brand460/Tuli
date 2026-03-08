@@ -43,18 +43,18 @@ export function HouseholdSetup() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-6 bg-white font-sans">
+    <div className="min-h-screen flex flex-col items-center justify-center px-6 font-sans" style={{ background: "var(--zu-bg)" }}>
       <div className="w-full max-w-sm">
         {mode === "choice" && (
           <>
             <div className="flex flex-col items-center mb-8">
-              <div className="w-16 h-16 bg-orange-500 rounded-xl flex items-center justify-center mb-4 shadow-sm">
+              <div className="w-16 h-16 bg-accent rounded-xl flex items-center justify-center mb-4" style={{ boxShadow: "var(--shadow-card)" }}>
                 <Home className="w-8 h-8 text-white" />
               </div>
-              <h1 className="text-2xl font-bold text-gray-900">
+              <h1 className="text-2xl font-bold text-text-1">
                 Hallo, {profile?.display_name || "dort"}!
               </h1>
-              <p className="text-gray-500 mt-1 text-center">
+              <p className="text-text-2 mt-1 text-center">
                 Erstelle einen neuen Haushalt oder tritt einem bestehenden bei.
               </p>
             </div>
@@ -62,34 +62,36 @@ export function HouseholdSetup() {
             <div className="space-y-3">
               <button
                 onClick={() => setMode("create")}
-                className="w-full flex items-center gap-4 p-4 rounded-xl border-2 border-gray-100 hover:border-orange-500 hover:bg-orange-50 transition group"
+                className="w-full flex items-center gap-4 p-4 hover:border-accent hover:bg-accent-light transition group"
+                style={{ borderRadius: "var(--radius-card)", border: "2px solid var(--zu-border)" }}
               >
-                <div className="w-12 h-12 rounded-xl bg-orange-50 flex items-center justify-center group-hover:bg-orange-100 transition">
-                  <Plus className="w-6 h-6 text-orange-500" />
+                <div className="w-12 h-12 rounded-xl bg-accent-light flex items-center justify-center group-hover:bg-accent-mid transition">
+                  <Plus className="w-6 h-6 text-accent" />
                 </div>
                 <div className="text-left">
-                  <p className="font-semibold text-gray-900">Haushalt erstellen</p>
-                  <p className="text-sm text-gray-500">Einen neuen Haushalt anlegen</p>
+                  <p className="font-semibold text-text-1">Haushalt erstellen</p>
+                  <p className="text-sm text-text-2">Einen neuen Haushalt anlegen</p>
                 </div>
               </button>
 
               <button
                 onClick={() => setMode("join")}
-                className="w-full flex items-center gap-4 p-4 rounded-xl border-2 border-gray-100 hover:border-orange-500 hover:bg-orange-50 transition group"
+                className="w-full flex items-center gap-4 p-4 hover:border-accent hover:bg-accent-light transition group"
+                style={{ borderRadius: "var(--radius-card)", border: "2px solid var(--zu-border)" }}
               >
-                <div className="w-12 h-12 rounded-xl bg-orange-50 flex items-center justify-center group-hover:bg-orange-100 transition">
-                  <UserPlus className="w-6 h-6 text-orange-500" />
+                <div className="w-12 h-12 rounded-xl bg-accent-light flex items-center justify-center group-hover:bg-accent-mid transition">
+                  <UserPlus className="w-6 h-6 text-accent" />
                 </div>
                 <div className="text-left">
-                  <p className="font-semibold text-gray-900">Haushalt beitreten</p>
-                  <p className="text-sm text-gray-500">Mit Einladungscode beitreten</p>
+                  <p className="font-semibold text-text-1">Haushalt beitreten</p>
+                  <p className="text-sm text-text-2">Mit Einladungscode beitreten</p>
                 </div>
               </button>
             </div>
 
             <button
               onClick={signOut}
-              className="w-full mt-6 text-sm text-gray-500 hover:text-gray-900 transition text-center"
+              className="w-full mt-6 text-sm text-text-3 hover:text-text-1 transition text-center"
             >
               Abmelden
             </button>
@@ -100,25 +102,25 @@ export function HouseholdSetup() {
           <>
             <button
               onClick={() => { setMode("choice"); setError(""); }}
-              className="flex items-center gap-1 text-gray-500 hover:text-gray-900 mb-6 transition"
+              className="flex items-center gap-1 text-text-3 hover:text-text-1 mb-6 transition"
             >
               <ArrowLeft className="w-4 h-4" />
               <span className="text-sm">Zurück</span>
             </button>
 
-            <h2 className="text-xl font-bold text-gray-900 mb-1">Haushalt erstellen</h2>
-            <p className="text-gray-500 text-sm mb-6">
+            <h2 className="text-xl font-bold text-text-1 mb-1">Haushalt erstellen</h2>
+            <p className="text-text-2 text-sm mb-6">
               Gib deinem Haushalt einen Namen.
             </p>
 
             <form onSubmit={handleCreate} className="space-y-4">
               {error && (
-                <div className="bg-red-50 text-red-500 text-sm rounded-xl p-3 font-medium">
+                <div className="text-sm font-medium" style={{ background: "var(--danger-light)", color: "var(--danger)", borderRadius: "var(--radius-card)", padding: 12 }}>
                   {error}
                 </div>
               )}
               <div>
-                <label className="block text-sm font-medium text-gray-900 mb-1.5">
+                <label className="block text-sm font-medium text-text-1 mb-1.5">
                   Haushaltsname
                 </label>
                 <input
@@ -130,13 +132,15 @@ export function HouseholdSetup() {
                   value={householdName}
                   onChange={(e) => setHouseholdName(e.target.value)}
                   placeholder="z.B. Familie Müller"
-                  className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-100 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-500/30 focus:border-orange-500/50 transition"
+                  className="w-full px-4 py-3 bg-surface-2 text-text-1 placeholder:text-text-3 focus:outline-none transition"
+                  style={{ borderRadius: "var(--radius-input)", border: "1px solid var(--zu-border)" }}
                 />
               </div>
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-3 rounded-full bg-orange-500 text-white font-semibold hover:bg-orange-600 transition disabled:opacity-50"
+                className="w-full py-3 bg-accent text-white font-semibold hover:bg-accent-dark transition disabled:opacity-50"
+                style={{ borderRadius: "var(--radius-btn)" }}
               >
                 {loading ? "Wird erstellt..." : "Haushalt erstellen"}
               </button>
@@ -148,25 +152,25 @@ export function HouseholdSetup() {
           <>
             <button
               onClick={() => { setMode("choice"); setError(""); }}
-              className="flex items-center gap-1 text-gray-500 hover:text-gray-900 mb-6 transition"
+              className="flex items-center gap-1 text-text-3 hover:text-text-1 mb-6 transition"
             >
               <ArrowLeft className="w-4 h-4" />
               <span className="text-sm">Zurück</span>
             </button>
 
-            <h2 className="text-xl font-bold text-gray-900 mb-1">Haushalt beitreten</h2>
-            <p className="text-gray-500 text-sm mb-6">
+            <h2 className="text-xl font-bold text-text-1 mb-1">Haushalt beitreten</h2>
+            <p className="text-text-2 text-sm mb-6">
               Gib den Einladungscode ein, den du erhalten hast.
             </p>
 
             <form onSubmit={handleJoin} className="space-y-4">
               {error && (
-                <div className="bg-red-50 text-red-500 text-sm rounded-xl p-3 font-medium">
+                <div className="text-sm font-medium" style={{ background: "var(--danger-light)", color: "var(--danger)", borderRadius: "var(--radius-card)", padding: 12 }}>
                   {error}
                 </div>
               )}
               <div>
-                <label className="block text-sm font-medium text-gray-900 mb-1.5">
+                <label className="block text-sm font-medium text-text-1 mb-1.5">
                   Einladungscode
                 </label>
                 <input
@@ -179,13 +183,15 @@ export function HouseholdSetup() {
                   onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
                   placeholder="z.B. ABC123"
                   required
-                  className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-100 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-500/30 focus:border-orange-500/50 transition tracking-widest text-center font-mono text-lg"
+                  className="w-full px-4 py-3 bg-surface-2 text-text-1 placeholder:text-text-3 focus:outline-none transition tracking-widest text-center font-mono text-lg"
+                  style={{ borderRadius: "var(--radius-input)", border: "1px solid var(--zu-border)" }}
                 />
               </div>
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-3 rounded-full bg-orange-500 text-white font-semibold hover:bg-orange-600 transition disabled:opacity-50"
+                className="w-full py-3 bg-accent text-white font-semibold hover:bg-accent-dark transition disabled:opacity-50"
+                style={{ borderRadius: "var(--radius-btn)" }}
               >
                 {loading ? "Wird beigetreten..." : "Beitreten"}
               </button>

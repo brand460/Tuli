@@ -2,6 +2,11 @@
 @import './tailwind.css';
 @import './theme.css';
 
+/* Global font */
+* {
+  font-family: var(--font);
+}
+
 /* Global: Text-Selektion deaktivieren (Mobile UX) */
 * {
   -webkit-user-select: none;
@@ -12,7 +17,17 @@
 input, textarea, [contenteditable] {
   -webkit-user-select: text;
   user-select: text;
-  caret-color: #F97316;
+  caret-color: var(--accent);
+}
+
+/* Focus-Ring komplett entfernen */
+*, *:focus, *:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+input:focus, textarea:focus, [contenteditable]:focus {
+  outline: none;
+  box-shadow: none;
 }
 
 /* PWA: Pull-to-Refresh deaktivieren & App-Shell fixieren */
@@ -23,6 +38,8 @@ html, body {
   padding: 0;
   overflow: hidden;
   height: 100%;
+  background: var(--zu-bg);
+  color: var(--text-1);
 }
 
 #root {

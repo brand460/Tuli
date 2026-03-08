@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 // DEV MODE: auth import removed temporarily
-import { Calendar, ShoppingCart, List, ChefHat, Settings } from "lucide-react";
+import { Calendar, ShoppingCart, FileText, ChefHat, Menu } from "lucide-react";
 import { Toaster } from "sonner";
 import { EinkaufenScreen } from "./einkaufen/einkaufen-screen";
 import { KalenderScreen } from "./kalender/kalender-screen";
@@ -19,20 +19,20 @@ interface Tab {
 const tabs: Tab[] = [
   { id: "kalender", label: "Kalender", icon: Calendar },
   { id: "einkaufen", label: "Einkaufen", icon: ShoppingCart },
-  { id: "listen", label: "Listen", icon: List },
+  { id: "listen", label: "Listen", icon: FileText },
   { id: "kochen", label: "Kochen", icon: ChefHat },
-  { id: "mehr", label: "Menü", icon: Settings },
+  { id: "mehr", label: "Menü", icon: Menu },
 ];
 
 function PlaceholderScreen({ title }: { title: string }) {
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-6">
-      <div className="w-16 h-16 rounded-xl bg-orange-50 flex items-center justify-center mb-4">
-        {title === "Listen" && <List className="w-8 h-8 text-orange-500" />}
-        {title === "Kochen" && <ChefHat className="w-8 h-8 text-orange-500" />}
+      <div className="w-16 h-16 rounded-xl bg-accent-light flex items-center justify-center mb-4">
+        {title === "Listen" && <FileText className="w-8 h-8 text-accent" />}
+        {title === "Kochen" && <ChefHat className="w-8 h-8 text-accent" />}
       </div>
-      <h2 className="text-xl font-bold text-gray-900">{title}</h2>
-      <p className="text-gray-500 text-sm mt-1">Kommt bald</p>
+      <h2 className="text-xl font-bold text-text-1">{title}</h2>
+      <p className="text-text-3 text-sm mt-1">Kommt bald</p>
     </div>
   );
 }
@@ -95,8 +95,8 @@ export function MainShell() {
 
   return (
     <div
-      className="flex flex-col bg-white overflow-hidden font-sans"
-      style={{ height: stableHeight, position: "fixed", top: 0, left: 0, right: 0 }}
+      className="flex flex-col overflow-hidden font-sans"
+      style={{ height: stableHeight, position: "fixed", top: 0, left: 0, right: 0, background: "var(--zu-bg)" }}
     >
       <Toaster position="top-center" richColors />
 
@@ -120,7 +120,7 @@ export function MainShell() {
       </div>
 
       {/* Bottom Navigation */}
-      <nav className="flex-shrink-0 border-t border-gray-100 bg-white pb-[env(safe-area-inset-bottom)]">
+      <nav className="flex-shrink-0 bg-surface pb-[env(safe-area-inset-bottom)]" style={{ borderTop: "1px solid var(--zu-border)" }}>
         <div className="flex items-center justify-around px-2 pt-2 pb-2">
           {tabs.map((tab) => {
             const isActive = activeTab === tab.id;
@@ -129,17 +129,38 @@ export function MainShell() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`relative flex items-center justify-center w-12 h-12 rounded-xl transition ${
-                  isActive
-                    ? "text-orange-500 bg-orange-50"
-                    : "text-gray-400 hover:text-gray-900"
-                }`}
+                className="relative flex items-center justify-center w-12 h-12 transition"
+                style={{
+                  color: isActive ? "var(--color-accent)" : "var(--color-text-2)",
+                }}
               >
-                <Icon className="w-5 h-5" strokeWidth={isActive ? 2.5 : 2} />
+                {isActive && (
+                  <div
+                    className="absolute rounded-full"
+                    style={{
+                      background: "var(--color-accent)",
+                      opacity: 0.15,
+                      top: "50%",
+                      left: "50%",
+                      transform: "translate(-50%, -50%)",
+                      padding: "4px 14px",
+                      minWidth: 44,
+                      minHeight: 32,
+                    }}
+                  />
+                )}
+                <Icon className="w-5 h-5 relative z-10" strokeWidth={isActive ? 2.5 : 1.5} />
                 {tab.id === "einkaufen" && einkaufenCount > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 bg-orange-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
-                    {einkaufenCount}
-                  </span>
+                  <span
+                    className="absolute z-10 rounded-full"
+                    style={{
+                      width: 8,
+                      height: 8,
+                      background: "var(--color-accent)",
+                      top: 8,
+                      right: 8,
+                    }}
+                  />
                 )}
               </button>
             );

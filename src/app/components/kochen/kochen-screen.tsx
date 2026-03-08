@@ -127,6 +127,9 @@ export function KochenScreen() {
   const weekScrollRef = useRef<HTMLDivElement>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Segmented control
+  const [kochenTab, setKochenTab] = useState<"rezepte" | "wochenplaner">("rezepte");
+
   // ── Load data ──────────────────────────────────────────────────────
 
   const loadData = useCallback(async () => {
@@ -149,9 +152,9 @@ export function KochenScreen() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Center today in the week scroller on mount
+  // Center today in the week scroller on mount and when switching to wochenplaner tab
   useEffect(() => {
-    if (weekScrollRef.current) {
+    if (kochenTab === "wochenplaner" && weekScrollRef.current) {
       // Today is at index 3 (0-based), each card ~120px wide + 12px gap
       const cardWidth = 120;
       const gap = 12;
@@ -159,7 +162,7 @@ export function KochenScreen() {
       const scrollLeft = idx * (cardWidth + gap) - weekScrollRef.current.clientWidth / 2 + cardWidth / 2;
       weekScrollRef.current.scrollLeft = Math.max(0, scrollLeft);
     }
-  }, [loading]);
+  }, [loading, kochenTab]);
 
   // ── Save helpers ───────────────────────────────────────────────────
 
@@ -449,7 +452,7 @@ export function KochenScreen() {
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <Loader2 className="w-6 h-6 animate-spin text-orange-500" />
+        <Loader2 className="w-6 h-6 animate-spin text-accent" />
       </div>
     );
   }
@@ -501,11 +504,46 @@ export function KochenScreen() {
   // ── Main View (Wochenplaner + Kochbuch) ────────────────────────────
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      {/* WOCHENPLANER */}
-      <div className="flex-shrink-0 bg-white border-b border-gray-100">
-        <div className="px-4 pt-4 pb-1">
-          <h2 className="text-lg font-bold text-gray-900">Wochenplaner</h2>
+      {/* Header + Segmented Control */}
+      <div className="flex-shrink-0 flex flex-col items-center gap-3 px-4 pt-4 pb-2" style={{ background: 'var(--zu-bg)' }}>
+        <div className="w-full flex items-center justify-between">
+          <h2 className="text-lg font-bold text-text-1">Kochen</h2>
         </div>
+        {/* Segmented Control */}
+        <div
+          className="flex items-center"
+          style={{
+            width: 220,
+            padding: 3,
+            borderRadius: 999,
+            background: "var(--color-surface-2)",
+          }}
+        >
+          {(["rezepte", "wochenplaner"] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setKochenTab(tab)}
+              className="flex-1 text-center text-xs py-1.5 transition-all"
+              style={{
+                borderRadius: 999,
+                fontWeight: kochenTab === tab ? 600 : 400,
+                color: kochenTab === tab ? "var(--color-text-1)" : "var(--color-text-3)",
+                background: kochenTab === tab
+                  ? "var(--color-surface)"
+                  : "transparent",
+                boxShadow: kochenTab === tab ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+              }}
+            >
+              {tab === "rezepte" ? "Rezepte" : "Wochenplaner"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* WOCHENPLANER — only when tab active */}
+      {kochenTab === "wochenplaner" && (
+      <div className="flex-shrink-0 border-b border-border" style={{ background: 'var(--surface)' }}>
+        <div className="px-4 pt-3 pb-1" />
         <div
           ref={weekScrollRef}
           className="flex gap-3 overflow-x-auto px-4 pb-4 pt-1 scrollbar-hide"
@@ -523,13 +561,13 @@ export function KochenScreen() {
                 style={{ width: 120, scrollSnapAlign: "center" }}
               >
                 {/* Day label */}
-                <div className={`text-xs font-medium mb-1 ${today ? "text-orange-500" : "text-gray-500"}`}>
+                <div className={`text-xs font-medium mb-1 ${today ? "text-accent" : "text-text-3"}`}>
                   {dayLabel(d)} {dateNum(d)}
                 </div>
                 {/* Card */}
                 <div
                   className={`w-full rounded-xl overflow-hidden cursor-pointer transition-all ${
-                    today ? "ring-2 ring-orange-500 ring-offset-1" : "border border-gray-200"
+                    today ? "ring-2 ring-accent ring-offset-1" : "border border-border"
                   }`}
                   style={{ height: 140 }}
                   onClick={() => handleDayTap(dateStr)}
@@ -545,7 +583,7 @@ export function KochenScreen() {
                 >
                   {recipe ? (
                     <div className="h-full flex flex-col">
-                      <div className="flex-1 bg-gray-100">
+                      <div className="flex-1 bg-surface-2">
                         {recipe.image_url ? (
                           <ImageWithFallback
                             src={recipe.image_url}
@@ -558,18 +596,18 @@ export function KochenScreen() {
                           </div>
                         )}
                       </div>
-                      <div className="px-2 py-1.5 bg-white">
-                        <p className="text-xs font-medium text-gray-900 truncate">{recipe.title}</p>
+                      <div className="px-2 py-1.5 bg-surface">
+                        <p className="text-xs font-medium text-text-1 truncate">{recipe.title}</p>
                       </div>
                     </div>
                   ) : entry?.free_text ? (
-                    <div className="h-full flex flex-col items-center justify-center bg-orange-50 px-2">
+                    <div className="h-full flex flex-col items-center justify-center bg-accent-light px-2">
                       <span className="text-2xl mb-1">📝</span>
-                      <p className="text-xs text-gray-600 text-center truncate w-full">{entry.free_text}</p>
+                      <p className="text-xs text-text-2 text-center truncate w-full">{entry.free_text}</p>
                     </div>
                   ) : (
-                    <div className="h-full flex items-center justify-center bg-gray-50">
-                      <Plus className="w-6 h-6 text-gray-300" />
+                    <div className="h-full flex items-center justify-center bg-surface-2">
+                      <Plus className="w-6 h-6 text-text-3" />
                     </div>
                   )}
                 </div>
@@ -578,15 +616,16 @@ export function KochenScreen() {
           })}
         </div>
       </div>
+      )}
 
-      {/* KOCHBUCH */}
+      {/* KOCHBUCH — visible in both tabs (recipes always, wochenplaner shows it below) */}
+      {kochenTab === "rezepte" && (
       <div className="flex-1 min-h-0 flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 pt-4 pb-2">
-          <h2 className="text-lg font-bold text-gray-900">Kochbuch</h2>
+        {/* + Button only, no title — screen title "Kochen" is enough */}
+        <div className="flex items-center justify-end px-4 pt-2 pb-2">
           <button
             onClick={() => setShowAddSheet(true)}
-            className="w-8 h-8 rounded-full bg-orange-500 flex items-center justify-center text-white"
+            className="w-8 h-8 rounded-full bg-accent flex items-center justify-center text-white"
           >
             <Plus className="w-4 h-4" />
           </button>
@@ -599,11 +638,24 @@ export function KochenScreen() {
               <button
                 key={cat}
                 onClick={() => setCategoryFilter(cat)}
-                className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium transition ${
+                className={`flex-shrink-0 px-3 py-1 rounded-full text-xs transition ${
                   categoryFilter === cat
-                    ? "bg-orange-500 text-white"
-                    : "bg-gray-100 text-gray-600"
+                    ? "font-semibold"
+                    : "font-medium"
                 }`}
+                style={
+                  categoryFilter === cat
+                    ? {
+                        background: "var(--accent-light)",
+                        color: "var(--accent)",
+                        border: "1.5px solid var(--accent)",
+                      }
+                    : {
+                        background: "var(--surface-2)",
+                        color: "var(--text-2)",
+                        border: "1px solid var(--zu-border)",
+                      }
+                }
               >
                 {cat === "Schnell" ? "Schnell (<30 Min)" : cat}
               </button>
@@ -614,7 +666,7 @@ export function KochenScreen() {
         {/* Search */}
         <div className="flex-shrink-0 px-4 pb-3">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-3" />
             <input
               type="search"
               autoComplete="off"
@@ -627,7 +679,7 @@ export function KochenScreen() {
               placeholder="Rezepte oder Zutaten suchen..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 bg-gray-50 rounded-xl text-sm border-0 outline-none focus:ring-2 focus:ring-orange-200"
+              className="w-full pl-9 pr-4 py-2 bg-surface-2 rounded-[var(--radius-input)] text-sm border-0 outline-none"
             />
           </div>
         </div>
@@ -635,7 +687,7 @@ export function KochenScreen() {
         {/* Recipe Grid */}
         <div className="flex-1 overflow-y-auto px-4 pb-4">
           {filteredRecipes.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-gray-400">
+            <div className="flex flex-col items-center justify-center py-12 text-text-3">
               <span className="text-4xl mb-3">📖</span>
               <p className="text-sm">Noch keine Rezepte</p>
               <p className="text-xs mt-1">Tippe auf + um ein Rezept hinzuzufügen</p>
@@ -645,10 +697,10 @@ export function KochenScreen() {
               {filteredRecipes.map((recipe) => (
                 <div
                   key={recipe.id}
-                  className="rounded-xl overflow-hidden bg-white border border-gray-100 cursor-pointer active:scale-[0.98] transition"
+                  className="rounded-xl overflow-hidden bg-surface border border-border cursor-pointer active:scale-[0.98] transition"
                   onClick={() => openRecipeDetail(recipe.id)}
                 >
-                  <div className="relative aspect-square bg-gray-100">
+                  <div className="relative aspect-square bg-surface-2">
                     {recipe.image_url ? (
                       <ImageWithFallback
                         src={recipe.image_url}
@@ -663,23 +715,23 @@ export function KochenScreen() {
                         e.stopPropagation();
                         toggleFavorite(recipe.id);
                       }}
-                      className="absolute top-2 right-2 w-7 h-7 rounded-full bg-white/80 flex items-center justify-center"
+                      className="absolute top-2 right-2 w-7 h-7 rounded-full bg-surface/80 flex items-center justify-center"
                     >
                       <Heart
-                        className={`w-4 h-4 ${recipe.is_favorite ? "fill-orange-500 text-orange-500" : "text-gray-400"}`}
+                        className={`w-4 h-4 ${recipe.is_favorite ? "fill-accent text-accent" : "text-text-3"}`}
                       />
                     </button>
                   </div>
                   <div className="p-2">
-                    <p className="text-sm font-medium text-gray-900 truncate">{recipe.title}</p>
+                    <p className="text-sm font-medium text-text-1 truncate">{recipe.title}</p>
                     <div className="flex items-center gap-1 mt-0.5">
                       {totalTime(recipe) && (
-                        <span className="text-xs text-gray-400 flex items-center gap-0.5">
+                        <span className="text-xs text-text-3 flex items-center gap-0.5">
                           <Clock className="w-3 h-3" /> {totalTime(recipe)}
                         </span>
                       )}
                       {recipe.categories[0] && (
-                        <span className="text-xs text-gray-400 ml-auto">{recipe.categories[0]}</span>
+                        <span className="text-xs text-text-3 ml-auto">{recipe.categories[0]}</span>
                       )}
                     </div>
                   </div>
@@ -689,6 +741,7 @@ export function KochenScreen() {
           )}
         </div>
       </div>
+      )}
 
       {/* ── OVERLAYS / MODALS ─────────────────────────────────────── */}
 
@@ -697,14 +750,17 @@ export function KochenScreen() {
         <div className="contents">
           <div className="fixed inset-0 z-50" onClick={() => setDayPopover(null)} />
           <div
-            className="fixed z-50 bg-white rounded-xl shadow-xl border border-gray-200 py-2 min-w-[200px]"
+            className="fixed z-50 rounded-xl py-2 min-w-[200px]"
             style={{
               top: Math.min(dayPopover.y, window.innerHeight - 200),
               left: Math.min(dayPopover.x, window.innerWidth - 220),
+              background: 'var(--surface)',
+              boxShadow: 'var(--shadow-elevated)',
+              border: '1px solid var(--zu-border)',
             }}
           >
             <button
-              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
+              className="w-full text-left px-4 py-2.5 text-sm text-text-2 hover:bg-surface-2 rounded-lg"
               onClick={() => {
                 const entry = mealByDate.get(dayPopover.date);
                 if (entry?.recipe_id) {
@@ -717,7 +773,7 @@ export function KochenScreen() {
               Rezept ändern
             </button>
             <button
-              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
+              className="w-full text-left px-4 py-2.5 text-sm text-text-2 hover:bg-surface-2 rounded-lg"
               onClick={() => {
                 setMoveSourceDate(dayPopover.date);
                 setShowMoveSheet(true);
@@ -726,7 +782,7 @@ export function KochenScreen() {
               Verschieben
             </button>
             <button
-              className="w-full text-left px-4 py-2.5 text-sm text-red-500 hover:bg-red-50"
+              className="w-full text-left px-4 py-2.5 text-sm text-danger hover:bg-danger-light rounded-lg"
               onClick={() => setDeleteConfirm(dayPopover.date)}
             >
               Löschen
@@ -739,18 +795,18 @@ export function KochenScreen() {
       {deleteConfirm && (
         <div className="contents">
           <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center" onClick={() => setDeleteConfirm(null)}>
-            <div className="bg-white rounded-2xl p-6 mx-6 max-w-sm w-full shadow-xl" onClick={(e) => e.stopPropagation()}>
-              <h3 className="text-base font-semibold text-gray-900 mb-2">Eintrag löschen?</h3>
-              <p className="text-sm text-gray-500 mb-5">Der Wochenplan-Eintrag wird entfernt.</p>
+            <div className="rounded-2xl p-6 mx-6 max-w-sm w-full" style={{ background: 'var(--surface)', boxShadow: 'var(--shadow-elevated)' }} onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-base font-semibold text-text-1 mb-2">Eintrag löschen?</h3>
+              <p className="text-sm text-text-3 mb-5">Der Wochenplan-Eintrag wird entfernt.</p>
               <div className="flex gap-3">
                 <button
-                  className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-gray-100 text-gray-600"
+                  className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-surface-2 text-text-2"
                   onClick={() => setDeleteConfirm(null)}
                 >
                   Abbrechen
                 </button>
                 <button
-                  className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-red-500 text-white"
+                  className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-danger text-white"
                   onClick={() => deleteMealEntry(deleteConfirm)}
                 >
                   Löschen
@@ -765,11 +821,11 @@ export function KochenScreen() {
       {showMoveSheet && moveSourceDate && (
         <div className="contents">
           <div className="fixed inset-0 bg-black/40 z-50" onClick={() => { setShowMoveSheet(false); setMoveSourceDate(null); }} />
-          <div className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl pb-[env(safe-area-inset-bottom)] max-h-[50vh]">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+          <div className="fixed bottom-0 left-0 right-0 z-50 rounded-t-2xl pb-[env(safe-area-inset-bottom)] max-h-[50vh]" style={{ background: 'var(--surface)' }}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
               <h3 className="text-base font-semibold">Verschieben nach</h3>
               <button onClick={() => { setShowMoveSheet(false); setMoveSourceDate(null); }}>
-                <X className="w-5 h-5 text-gray-400" />
+                <X className="w-5 h-5 text-text-3" />
               </button>
             </div>
             <div className="flex gap-3 overflow-x-auto px-4 py-4">
@@ -784,10 +840,10 @@ export function KochenScreen() {
                     onClick={() => moveMealEntry(moveSourceDate, dateStr)}
                     className={`flex-shrink-0 w-16 h-16 rounded-xl flex flex-col items-center justify-center text-xs font-medium transition ${
                       isSrc
-                        ? "bg-orange-100 text-orange-500 border-2 border-orange-300"
+                        ? "bg-accent-light text-accent border-2 border-accent-mid"
                         : occupied
-                          ? "bg-gray-100 text-gray-300"
-                          : "bg-gray-50 text-gray-700 hover:bg-orange-50 hover:text-orange-500"
+                          ? "bg-surface-2 text-text-3"
+                          : "bg-surface-2 text-text-2 hover:bg-accent-light hover:text-accent"
                     }`}
                   >
                     <span className="font-bold">{dayLabel(d)}</span>
@@ -804,31 +860,31 @@ export function KochenScreen() {
       {showMealPicker && mealPickerDate && (
         <div className="contents">
           <div className="fixed inset-0 bg-black/40 z-50" onClick={() => { setShowMealPicker(false); setMealPickerDate(null); setMealPickerSearch(""); }} />
-          <div className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl pb-[env(safe-area-inset-bottom)] max-h-[70vh] flex flex-col">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+          <div className="fixed bottom-0 left-0 right-0 z-50 rounded-t-2xl pb-[env(safe-area-inset-bottom)] max-h-[70vh] flex flex-col" style={{ background: 'var(--surface)' }}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
               <h3 className="text-base font-semibold">Was gibt's zu essen?</h3>
               <button onClick={() => { setShowMealPicker(false); setMealPickerDate(null); setMealPickerSearch(""); }}>
-                <X className="w-5 h-5 text-gray-400" />
+                <X className="w-5 h-5 text-text-3" />
               </button>
             </div>
             {/* Options */}
             <div className="flex gap-2 px-4 py-3">
               <button
-                className="flex-1 py-3 rounded-xl bg-gray-50 text-sm font-medium text-gray-700 flex flex-col items-center gap-1"
+                className="flex-1 py-3 rounded-xl bg-surface-2 text-sm font-medium text-text-2 flex flex-col items-center gap-1"
                 onClick={() => {
                   // Switch to freetext
                   setShowMealPicker(false);
                   setShowFreetextInput(true);
                 }}
               >
-                <FileText className="w-5 h-5 text-gray-400" />
+                <FileText className="w-5 h-5 text-text-3" />
                 Freitext
               </button>
             </div>
             {/* Search */}
             <div className="px-4 pb-2">
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-3" />
                 <input
                   type="search"
                   autoComplete="off"
@@ -841,7 +897,7 @@ export function KochenScreen() {
                   placeholder="Rezept suchen..."
                   value={mealPickerSearch}
                   onChange={(e) => setMealPickerSearch(e.target.value)}
-                  className="w-full pl-9 pr-4 py-2 bg-gray-50 rounded-xl text-sm border-0 outline-none focus:ring-2 focus:ring-orange-200"
+                  className="w-full pl-9 pr-4 py-2 bg-surface-2 rounded-[var(--radius-input)] text-sm border-0 outline-none"
                 />
               </div>
             </div>
@@ -854,10 +910,10 @@ export function KochenScreen() {
                 .map((recipe) => (
                   <button
                     key={recipe.id}
-                    className="w-full flex items-center gap-3 py-2.5 border-b border-gray-50 text-left"
+                    className="w-full flex items-center gap-3 py-2.5 border-b border-border text-left"
                     onClick={() => assignRecipeToDate(recipe.id, mealPickerDate)}
                   >
-                    <div className="w-10 h-10 rounded-lg bg-gray-100 flex-shrink-0 overflow-hidden">
+                    <div className="w-10 h-10 rounded-lg bg-surface-2 flex-shrink-0 overflow-hidden">
                       {recipe.image_url ? (
                         <ImageWithFallback src={recipe.image_url} alt="" className="w-full h-full object-cover" />
                       ) : (
@@ -865,15 +921,15 @@ export function KochenScreen() {
                       )}
                     </div>
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">{recipe.title}</p>
+                      <p className="text-sm font-medium text-text-1 truncate">{recipe.title}</p>
                       {totalTime(recipe) && (
-                        <p className="text-xs text-gray-400">{totalTime(recipe)}</p>
+                        <p className="text-xs text-text-3">{totalTime(recipe)}</p>
                       )}
                     </div>
                   </button>
                 ))}
               {recipes.length === 0 && (
-                <p className="text-center text-gray-400 text-sm py-8">Noch keine Rezepte im Kochbuch</p>
+                <p className="text-center text-text-3 text-sm py-8">Noch keine Rezepte im Kochbuch</p>
               )}
             </div>
           </div>
@@ -884,7 +940,7 @@ export function KochenScreen() {
       {showFreetextInput && mealPickerDate && (
         <div className="contents">
           <div className="fixed inset-0 bg-black/40 z-50" onClick={() => { setShowFreetextInput(false); setFreetextValue(""); setMealPickerDate(null); }} />
-          <div className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl pb-[env(safe-area-inset-bottom)] p-4">
+          <div className="fixed bottom-0 left-0 right-0 z-50 rounded-t-2xl pb-[env(safe-area-inset-bottom)] p-4" style={{ background: 'var(--surface)' }}>
             <h3 className="text-base font-semibold mb-3">Freitext-Eintrag</h3>
             <input
               type="text"
@@ -898,13 +954,13 @@ export function KochenScreen() {
               placeholder='z.B. "Restaurant", "Reste"...'
               value={freetextValue}
               onChange={(e) => setFreetextValue(e.target.value)}
-              className="w-full px-4 py-2.5 bg-gray-50 rounded-xl text-sm border-0 outline-none focus:ring-2 focus:ring-orange-200 mb-3"
+              className="w-full px-4 py-2.5 bg-surface-2 rounded-xl text-sm border-0 outline-none mb-3"
               autoFocus
             />
             <button
               disabled={!freetextValue.trim()}
               onClick={() => assignFreetextToDate(freetextValue.trim(), mealPickerDate)}
-              className="w-full py-2.5 rounded-xl bg-orange-500 text-white text-sm font-medium disabled:opacity-40"
+              className="w-full py-2.5 rounded-xl bg-accent text-white text-sm font-medium disabled:opacity-40"
             >
               Speichern
             </button>
@@ -916,24 +972,24 @@ export function KochenScreen() {
       {showAddSheet && (
         <div className="contents">
           <div className="fixed inset-0 bg-black/40 z-50" onClick={() => setShowAddSheet(false)} />
-          <div className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl pb-[env(safe-area-inset-bottom)] p-4">
-            <div className="w-10 h-1 rounded-full bg-gray-200 mx-auto mb-4" />
+          <div className="fixed bottom-0 left-0 right-0 z-50 rounded-t-2xl pb-[env(safe-area-inset-bottom)] p-4" style={{ background: 'var(--surface)' }}>
+            <div className="w-10 h-1 rounded-full mx-auto mb-4" style={{ background: 'var(--zu-border)' }} />
             <h3 className="text-base font-semibold mb-3">Rezept hinzufügen</h3>
             <div className="flex flex-col gap-2">
               <button
-                className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 hover:bg-orange-50 transition text-left"
+                className="flex items-center gap-3 p-3 rounded-xl bg-surface-2 hover:bg-accent-light transition text-left"
                 onClick={() => { setShowAddSheet(false); setShowUrlImport(true); }}
               >
-                <div className="w-10 h-10 rounded-xl bg-orange-100 flex items-center justify-center">
-                  <Link2 className="w-5 h-5 text-orange-500" />
+                <div className="w-10 h-10 rounded-xl bg-accent-light flex items-center justify-center">
+                  <Link2 className="w-5 h-5 text-accent" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-gray-900">URL einfügen</p>
-                  <p className="text-xs text-gray-400">Website, TikTok oder Instagram</p>
+                  <p className="text-sm font-medium text-text-1">URL einfügen</p>
+                  <p className="text-xs text-text-3">Website, TikTok oder Instagram</p>
                 </div>
               </button>
               <button
-                className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 hover:bg-orange-50 transition text-left"
+                className="flex items-center gap-3 p-3 rounded-xl bg-surface-2 hover:bg-accent-light transition text-left"
                 onClick={() => {
                   const r = emptyRecipe();
                   setEditRecipe(r);
@@ -941,24 +997,24 @@ export function KochenScreen() {
                   setShowAddSheet(false);
                 }}
               >
-                <div className="w-10 h-10 rounded-xl bg-orange-100 flex items-center justify-center">
-                  <Pencil className="w-5 h-5 text-orange-500" />
+                <div className="w-10 h-10 rounded-xl bg-accent-light flex items-center justify-center">
+                  <Pencil className="w-5 h-5 text-accent" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-gray-900">Manuell erstellen</p>
-                  <p className="text-xs text-gray-400">Alle Felder selbst ausfüllen</p>
+                  <p className="text-sm font-medium text-text-1">Manuell erstellen</p>
+                  <p className="text-xs text-text-3">Alle Felder selbst ausfüllen</p>
                 </div>
               </button>
               <button
-                className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 hover:bg-orange-50 transition text-left"
+                className="flex items-center gap-3 p-3 rounded-xl bg-surface-2 hover:bg-accent-light transition text-left"
                 onClick={() => toast.info("Foto-Upload kommt bald")}
               >
-                <div className="w-10 h-10 rounded-xl bg-orange-100 flex items-center justify-center">
-                  <Camera className="w-5 h-5 text-orange-500" />
+                <div className="w-10 h-10 rounded-xl bg-accent-light flex items-center justify-center">
+                  <Camera className="w-5 h-5 text-accent" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-gray-900">Foto hochladen</p>
-                  <p className="text-xs text-gray-400">Rezept aus einem Foto extrahieren</p>
+                  <p className="text-sm font-medium text-text-1">Foto hochladen</p>
+                  <p className="text-xs text-text-3">Rezept aus einem Foto extrahieren</p>
                 </div>
               </button>
             </div>
@@ -970,7 +1026,7 @@ export function KochenScreen() {
       {showUrlImport && (
         <div className="contents">
           <div className="fixed inset-0 bg-black/40 z-50" onClick={() => { setShowUrlImport(false); setUrlInput(""); }} />
-          <div className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl pb-[env(safe-area-inset-bottom)] p-4">
+          <div className="fixed bottom-0 left-0 right-0 z-50 rounded-t-2xl pb-[env(safe-area-inset-bottom)] p-4" style={{ background: 'var(--surface)' }}>
             <h3 className="text-base font-semibold mb-3">URL importieren</h3>
             <input
               type="url"
@@ -984,13 +1040,13 @@ export function KochenScreen() {
               placeholder="https://..."
               value={urlInput}
               onChange={(e) => setUrlInput(e.target.value)}
-              className="w-full px-4 py-2.5 bg-gray-50 rounded-xl text-sm border-0 outline-none focus:ring-2 focus:ring-orange-200 mb-3"
+              className="w-full px-4 py-2.5 bg-surface-2 rounded-xl text-sm border-0 outline-none mb-3"
               autoFocus
             />
             <button
               disabled={!urlInput.trim() || importing}
               onClick={handleUrlImport}
-              className="w-full py-2.5 rounded-xl bg-orange-500 text-white text-sm font-medium disabled:opacity-40 flex items-center justify-center gap-2"
+              className="w-full py-2.5 rounded-xl bg-accent text-white text-sm font-medium disabled:opacity-40 flex items-center justify-center gap-2"
             >
               {importing ? (
                 <div className="contents">
@@ -1070,20 +1126,20 @@ function RecipeDetailView({
         {recipe.image_url ? (
           <ImageWithFallback src={recipe.image_url} alt={recipe.title} className="w-full h-full object-cover" />
         ) : (
-          <div className="w-full h-full bg-gradient-to-br from-orange-100 to-orange-50 flex items-center justify-center text-5xl">
+          <div className="w-full h-full bg-gradient-to-br from-accent-light to-accent-light/50 flex items-center justify-center text-5xl">
             🍽️
           </div>
         )}
         <div className="absolute top-3 left-3 right-3 flex items-center justify-between">
-          <button onClick={onBack} className="w-8 h-8 rounded-full bg-white/80 flex items-center justify-center">
-            <ChevronLeft className="w-5 h-5 text-gray-700" />
+          <button onClick={onBack} className="w-8 h-8 rounded-full bg-surface/80 flex items-center justify-center">
+            <ChevronLeft className="w-5 h-5 text-text-2" />
           </button>
           <div className="flex gap-2">
-            <button onClick={onToggleFavorite} className="w-8 h-8 rounded-full bg-white/80 flex items-center justify-center">
-              <Heart className={`w-4 h-4 ${recipe.is_favorite ? "fill-orange-500 text-orange-500" : "text-gray-500"}`} />
+            <button onClick={onToggleFavorite} className="w-8 h-8 rounded-full bg-surface/80 flex items-center justify-center">
+              <Heart className={`w-4 h-4 ${recipe.is_favorite ? "fill-accent text-accent" : "text-text-3"}`} />
             </button>
-            <button onClick={onEdit} className="w-8 h-8 rounded-full bg-white/80 flex items-center justify-center">
-              <Pencil className="w-4 h-4 text-gray-500" />
+            <button onClick={onEdit} className="w-8 h-8 rounded-full bg-surface/80 flex items-center justify-center">
+              <Pencil className="w-4 h-4 text-text-3" />
             </button>
           </div>
         </div>
@@ -1091,21 +1147,21 @@ function RecipeDetailView({
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-4 pb-6">
-        <h1 className="text-2xl font-bold text-gray-900 mt-4">{recipe.title}</h1>
+        <h1 className="text-2xl font-bold text-text-1 mt-4">{recipe.title}</h1>
 
         {/* Rating */}
         <div className="flex items-center gap-1 mt-2">
           {[1, 2, 3, 4, 5].map((s) => (
             <button key={s} onClick={() => onSetRating(s)}>
               <Star
-                className={`w-5 h-5 ${s <= recipe.rating ? "fill-orange-400 text-orange-400" : "text-gray-300"}`}
+                className={`w-5 h-5 ${s <= recipe.rating ? "fill-accent text-accent" : "text-text-3"}`}
               />
             </button>
           ))}
           {recipe.categories.length > 0 && (
             <div className="flex gap-1 ml-3">
               {recipe.categories.map((c) => (
-                <span key={c} className="px-2 py-0.5 bg-orange-50 text-orange-600 text-xs rounded-full">
+                <span key={c} className="px-2 py-0.5 bg-accent-light text-accent-dark text-xs rounded-full">
                   {c}
                 </span>
               ))}
@@ -1114,18 +1170,18 @@ function RecipeDetailView({
         </div>
 
         {/* Time + Servings */}
-        <div className="flex items-center gap-4 mt-3 text-sm text-gray-500">
+        <div className="flex items-center gap-4 mt-3 text-sm text-text-2">
           {totalTime(recipe) && (
             <span className="flex items-center gap-1">
               <Clock className="w-4 h-4" /> {totalTime(recipe)}
             </span>
           )}
           <div className="flex items-center gap-2">
-            <button onClick={() => setServings(Math.max(1, servings - 1))} className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center">
+            <button onClick={() => setServings(Math.max(1, servings - 1))} className="w-6 h-6 rounded-full bg-surface-2 flex items-center justify-center">
               <Minus className="w-3 h-3" />
             </button>
-            <span className="font-medium text-gray-900">{servings} Portionen</span>
-            <button onClick={() => setServings(servings + 1)} className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center">
+            <span className="font-medium text-text-1">{servings} Portionen</span>
+            <button onClick={() => setServings(servings + 1)} className="w-6 h-6 rounded-full bg-surface-2 flex items-center justify-center">
               <Plus className="w-3 h-3" />
             </button>
           </div>
@@ -1137,7 +1193,7 @@ function RecipeDetailView({
             href={recipe.source_url}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-xs text-orange-500 mt-2 hover:underline"
+            className="inline-flex items-center gap-1 text-xs text-accent mt-2 hover:underline"
           >
             <ExternalLink className="w-3 h-3" /> Original-Link
           </a>
@@ -1145,17 +1201,17 @@ function RecipeDetailView({
 
         {/* Description */}
         {recipe.description && (
-          <p className="text-sm text-gray-600 mt-3">{recipe.description}</p>
+          <p className="text-sm text-text-2 mt-3">{recipe.description}</p>
         )}
 
         {/* Ingredients */}
         {recipe.ingredients.length > 0 && (
           <div className="mt-5">
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-base font-semibold text-gray-900">Zutaten</h3>
+              <h3 className="text-base font-semibold text-text-1">Zutaten</h3>
               <button
                 onClick={onAddToShopping}
-                className="text-xs text-orange-500 font-medium flex items-center gap-1"
+                className="text-xs text-accent font-medium flex items-center gap-1"
               >
                 <Plus className="w-3 h-3" /> Zur Einkaufsliste
               </button>
@@ -1166,8 +1222,8 @@ function RecipeDetailView({
                 const scaledQty = !isNaN(qty) ? (qty * scale).toFixed(qty * scale % 1 === 0 ? 0 : 1) : ing.quantity;
                 return (
                   <div key={i} className="flex items-center gap-2 text-sm">
-                    <span className="w-1.5 h-1.5 rounded-full bg-orange-400 flex-shrink-0" />
-                    <span className="text-gray-700">
+                    <span className="w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0" />
+                    <span className="text-text-2">
                       {scaledQty && <span className="font-medium">{scaledQty} </span>}
                       {ing.unit && <span>{ing.unit} </span>}
                       {ing.name}
@@ -1182,16 +1238,16 @@ function RecipeDetailView({
         {/* Steps */}
         {recipe.steps.length > 0 && (
           <div className="mt-5">
-            <h3 className="text-base font-semibold text-gray-900 mb-2">Zubereitung</h3>
+            <h3 className="text-base font-semibold text-text-1 mb-2">Zubereitung</h3>
             <div className="space-y-3">
               {recipe.steps
                 .sort((a, b) => a.position - b.position)
                 .map((step, i) => (
                   <div key={i} className="flex gap-3">
-                    <div className="w-6 h-6 rounded-full bg-orange-100 flex items-center justify-center flex-shrink-0 mt-0.5">
-                      <span className="text-xs font-bold text-orange-600">{i + 1}</span>
+                    <div className="w-6 h-6 rounded-full bg-accent-light flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <span className="text-xs font-bold text-accent-dark">{i + 1}</span>
                     </div>
-                    <p className="text-sm text-gray-700 leading-relaxed">{step.description}</p>
+                    <p className="text-sm text-text-2 leading-relaxed">{step.description}</p>
                   </div>
                 ))}
             </div>
@@ -1200,7 +1256,7 @@ function RecipeDetailView({
 
         {/* Comment */}
         <div className="mt-5">
-          <h3 className="text-base font-semibold text-gray-900 mb-2">Kommentare</h3>
+          <h3 className="text-base font-semibold text-text-1 mb-2">Kommentare</h3>
           <textarea
             value={comment}
             onChange={(e) => handleCommentChange(e.target.value)}
@@ -1212,7 +1268,7 @@ function RecipeDetailView({
             data-lpignore="true"
             data-1p-ignore="true"
             data-form-type="other"
-            className="w-full px-3 py-2 bg-gray-50 rounded-xl text-sm border-0 outline-none focus:ring-2 focus:ring-orange-200 resize-none"
+            className="w-full px-3 py-2 bg-surface-2 rounded-xl text-sm border-0 outline-none resize-none"
             rows={3}
           />
         </div>
@@ -1220,7 +1276,7 @@ function RecipeDetailView({
         {/* Delete */}
         <button
           onClick={() => setShowDeleteConfirm(true)}
-          className="flex items-center gap-2 text-sm text-red-500 mt-6"
+          className="flex items-center gap-2 text-sm text-danger mt-6"
         >
           <Trash2 className="w-4 h-4" /> Rezept löschen
         </button>
@@ -1230,20 +1286,20 @@ function RecipeDetailView({
       {showDeleteConfirm && (
         <div className="contents">
           <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center" onClick={() => setShowDeleteConfirm(false)}>
-            <div className="bg-white rounded-2xl p-6 mx-6 max-w-sm w-full shadow-xl" onClick={(e) => e.stopPropagation()}>
-              <h3 className="text-base font-semibold text-gray-900 mb-2">Rezept löschen?</h3>
-              <p className="text-sm text-gray-500 mb-5">
+            <div className="rounded-2xl p-6 mx-6 max-w-sm w-full" style={{ background: "var(--surface)", boxShadow: "var(--shadow-elevated)" }} onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-base font-semibold text-text-1 mb-2">Rezept löschen?</h3>
+              <p className="text-sm text-text-3 mb-5">
                 „{recipe.title}" wird unwiderruflich gelöscht.
               </p>
               <div className="flex gap-3">
                 <button
-                  className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-gray-100 text-gray-600"
+                  className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-surface-2 text-text-2"
                   onClick={() => setShowDeleteConfirm(false)}
                 >
                   Abbrechen
                 </button>
                 <button
-                  className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-red-500 text-white"
+                  className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-danger text-white"
                   onClick={() => { setShowDeleteConfirm(false); onDelete(); }}
                 >
                   Löschen
@@ -1318,16 +1374,21 @@ function RecipeEditView({
   return (
     <div className="flex-1 flex flex-col min-h-0">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 flex-shrink-0">
-        <button onClick={onCancel} className="text-sm text-gray-500">Abbrechen</button>
+      <div className="flex items-center justify-between px-4 py-3 flex-shrink-0" style={{ borderBottom: "1px solid var(--zu-border)" }}>
+        <button onClick={onCancel} className="text-sm text-text-3">Abbrechen</button>
         <h3 className="text-base font-semibold">Rezept bearbeiten</h3>
-        <button onClick={onSave} className="text-sm font-semibold text-orange-500">Speichern</button>
+        <button
+          onClick={onSave}
+          disabled={isNull(recipe.title)}
+          className="text-sm font-semibold text-accent"
+          style={isNull(recipe.title) ? { opacity: 0.4, cursor: "not-allowed" } : undefined}
+        >Speichern</button>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 pb-6">
         {/* Title */}
         <div className="mt-4">
-          <label className="text-xs text-gray-500 mb-1 block">Titel</label>
+          <label className="text-xs text-text-3 mb-1 block">Titel{isNull(recipe.title) && <span style={{ color: "var(--danger)" }}> *</span>}</label>
           <input
             value={recipe.title}
             onChange={(e) => update({ title: e.target.value })}
@@ -1339,16 +1400,13 @@ function RecipeEditView({
             data-lpignore="true"
             data-1p-ignore="true"
             data-form-type="other"
-            className={`w-full px-3 py-2 bg-gray-50 rounded-xl text-sm outline-none focus:ring-2 focus:ring-orange-200 ${
-              isNull(recipe.title) ? "border-2 border-orange-300" : "border-0"
-            }`}
+            className="w-full px-3 py-2 bg-surface-2 rounded-xl text-sm border-0 outline-none"
           />
-          {isNull(recipe.title) && <p className="text-xs text-orange-500 mt-1">Bitte ergänzen</p>}
         </div>
 
         {/* Description */}
         <div className="mt-3">
-          <label className="text-xs text-gray-500 mb-1 block">Beschreibung</label>
+          <label className="text-xs text-text-3 mb-1 block">Beschreibung</label>
           <textarea
             value={recipe.description || ""}
             onChange={(e) => update({ description: e.target.value })}
@@ -1360,14 +1418,14 @@ function RecipeEditView({
             data-lpignore="true"
             data-1p-ignore="true"
             data-form-type="other"
-            className="w-full px-3 py-2 bg-gray-50 rounded-xl text-sm border-0 outline-none focus:ring-2 focus:ring-orange-200 resize-none"
+            className="w-full px-3 py-2 bg-surface-2 rounded-xl text-sm border-0 outline-none resize-none"
             rows={2}
           />
         </div>
 
         {/* Image URL */}
         <div className="mt-3">
-          <label className="text-xs text-gray-500 mb-1 block">Bild-URL</label>
+          <label className="text-xs text-text-3 mb-1 block">Bild-URL</label>
           <input
             value={recipe.image_url || ""}
             onChange={(e) => update({ image_url: e.target.value || null })}
@@ -1379,13 +1437,13 @@ function RecipeEditView({
             data-lpignore="true"
             data-1p-ignore="true"
             data-form-type="other"
-            className="w-full px-3 py-2 bg-gray-50 rounded-xl text-sm border-0 outline-none focus:ring-2 focus:ring-orange-200"
+            className="w-full px-3 py-2 bg-surface-2 rounded-xl text-sm border-0 outline-none"
           />
         </div>
 
         {/* Source URL */}
         <div className="mt-3">
-          <label className="text-xs text-gray-500 mb-1 block">Original-URL</label>
+          <label className="text-xs text-text-3 mb-1 block">Original-URL</label>
           <input
             value={recipe.source_url || ""}
             onChange={(e) => update({ source_url: e.target.value })}
@@ -1397,14 +1455,14 @@ function RecipeEditView({
             data-lpignore="true"
             data-1p-ignore="true"
             data-form-type="other"
-            className="w-full px-3 py-2 bg-gray-50 rounded-xl text-sm border-0 outline-none focus:ring-2 focus:ring-orange-200"
+            className="w-full px-3 py-2 bg-surface-2 rounded-xl text-sm border-0 outline-none"
           />
         </div>
 
         {/* Time + Servings row */}
         <div className="grid grid-cols-3 gap-3 mt-3">
           <div>
-            <label className="text-xs text-gray-500 mb-1 block">Vorbereit. (Min)</label>
+            <label className="text-xs text-text-3 mb-1 block">Vorbereit. (Min)</label>
             <input
               type="tel"
               autoComplete="off"
@@ -1416,13 +1474,11 @@ function RecipeEditView({
               data-form-type="other"
               value={recipe.prep_time_minutes ?? ""}
               onChange={(e) => update({ prep_time_minutes: e.target.value ? parseInt(e.target.value) : null })}
-              className={`w-full px-3 py-2 bg-gray-50 rounded-xl text-sm outline-none focus:ring-2 focus:ring-orange-200 ${
-                isNull(recipe.prep_time_minutes) ? "border-2 border-orange-300" : "border-0"
-              }`}
+              className="w-full px-3 py-2 bg-surface-2 rounded-xl text-sm border-0 outline-none"
             />
           </div>
           <div>
-            <label className="text-xs text-gray-500 mb-1 block">Kochzeit (Min)</label>
+            <label className="text-xs text-text-3 mb-1 block">Kochzeit (Min)</label>
             <input
               type="tel"
               autoComplete="off"
@@ -1434,35 +1490,46 @@ function RecipeEditView({
               data-form-type="other"
               value={recipe.cook_time_minutes ?? ""}
               onChange={(e) => update({ cook_time_minutes: e.target.value ? parseInt(e.target.value) : null })}
-              className={`w-full px-3 py-2 bg-gray-50 rounded-xl text-sm outline-none focus:ring-2 focus:ring-orange-200 ${
-                isNull(recipe.cook_time_minutes) ? "border-2 border-orange-300" : "border-0"
-              }`}
+              className="w-full px-3 py-2 bg-surface-2 rounded-xl text-sm border-0 outline-none"
             />
           </div>
           <div>
-            <label className="text-xs text-gray-500 mb-1 block">Portionen</label>
+            <label className="text-xs text-text-3 mb-1 block">Portionen</label>
             <input
               type="number"
               value={recipe.servings ?? ""}
               onChange={(e) => update({ servings: e.target.value ? parseInt(e.target.value) : null })}
-              className="w-full px-3 py-2 bg-gray-50 rounded-xl text-sm border-0 outline-none focus:ring-2 focus:ring-orange-200"
+              className="w-full px-3 py-2 bg-surface-2 rounded-xl text-sm border-0 outline-none"
             />
           </div>
         </div>
 
         {/* Categories */}
         <div className="mt-4">
-          <label className="text-xs text-gray-500 mb-1 block">Kategorien</label>
+          <label className="text-xs text-text-3 mb-1 block">Kategorien</label>
           <div className="flex flex-wrap gap-2">
             {RECIPE_CATEGORIES.filter((c) => c !== "Alle" && c !== "Favoriten" && c !== "Schnell").map((cat) => (
               <button
                 key={cat}
                 onClick={() => toggleCategory(cat)}
-                className={`px-3 py-1 rounded-full text-xs font-medium transition ${
+                className={`px-3 py-1 rounded-full text-xs transition ${
                   recipe.categories.includes(cat)
-                    ? "bg-orange-500 text-white"
-                    : "bg-gray-100 text-gray-600"
+                    ? "font-semibold"
+                    : "font-medium"
                 }`}
+                style={
+                  recipe.categories.includes(cat)
+                    ? {
+                        background: "var(--accent-light)",
+                        color: "var(--accent)",
+                        border: "1.5px solid var(--accent)",
+                      }
+                    : {
+                        background: "var(--surface-2)",
+                        color: "var(--text-2)",
+                        border: "1px solid var(--zu-border)",
+                      }
+                }
               >
                 {cat}
               </button>
@@ -1473,8 +1540,8 @@ function RecipeEditView({
         {/* Ingredients */}
         <div className="mt-4">
           <div className="flex items-center justify-between mb-2">
-            <label className="text-xs text-gray-500">Zutaten</label>
-            <button onClick={addIngredient} className="text-xs text-orange-500 font-medium flex items-center gap-1">
+            <label className="text-xs text-text-3">Zutaten</label>
+            <button onClick={addIngredient} className="text-xs text-accent font-medium flex items-center gap-1">
               <Plus className="w-3 h-3" /> Hinzufügen
             </button>
           </div>
@@ -1485,22 +1552,22 @@ function RecipeEditView({
                   value={ing.quantity}
                   onChange={(e) => updateIngredient(i, "quantity", e.target.value)}
                   placeholder="Menge"
-                  className="w-16 px-2 py-1.5 bg-gray-50 rounded-lg text-sm border-0 outline-none focus:ring-2 focus:ring-orange-200"
+                  className="w-16 px-2 py-1.5 bg-surface-2 rounded-lg text-sm border-0 outline-none"
                 />
                 <input
                   value={ing.unit}
                   onChange={(e) => updateIngredient(i, "unit", e.target.value)}
                   placeholder="Einh."
-                  className="w-14 px-2 py-1.5 bg-gray-50 rounded-lg text-sm border-0 outline-none focus:ring-2 focus:ring-orange-200"
+                  className="w-14 px-2 py-1.5 bg-surface-2 rounded-lg text-sm border-0 outline-none"
                 />
                 <input
                   value={ing.name}
                   onChange={(e) => updateIngredient(i, "name", e.target.value)}
                   placeholder="Zutat"
-                  className="flex-1 px-2 py-1.5 bg-gray-50 rounded-lg text-sm border-0 outline-none focus:ring-2 focus:ring-orange-200"
+                  className="flex-1 px-2 py-1.5 bg-surface-2 rounded-lg text-sm border-0 outline-none"
                 />
                 <button onClick={() => removeIngredient(i)} className="flex-shrink-0">
-                  <X className="w-4 h-4 text-gray-400" />
+                  <X className="w-4 h-4 text-text-3" />
                 </button>
               </div>
             ))}
@@ -1510,26 +1577,26 @@ function RecipeEditView({
         {/* Steps */}
         <div className="mt-4">
           <div className="flex items-center justify-between mb-2">
-            <label className="text-xs text-gray-500">Zubereitungsschritte</label>
-            <button onClick={addStep} className="text-xs text-orange-500 font-medium flex items-center gap-1">
+            <label className="text-xs text-text-3">Zubereitungsschritte</label>
+            <button onClick={addStep} className="text-xs text-accent font-medium flex items-center gap-1">
               <Plus className="w-3 h-3" /> Hinzufügen
             </button>
           </div>
           <div className="space-y-2">
             {recipe.steps.map((step, i) => (
               <div key={i} className="flex gap-2 items-start">
-                <div className="w-6 h-6 rounded-full bg-orange-100 flex items-center justify-center flex-shrink-0 mt-1">
-                  <span className="text-xs font-bold text-orange-600">{i + 1}</span>
+                <div className="w-6 h-6 rounded-full bg-accent-light flex items-center justify-center flex-shrink-0 mt-1">
+                  <span className="text-xs font-bold text-accent-dark">{i + 1}</span>
                 </div>
                 <textarea
                   value={step.description}
                   onChange={(e) => updateStep(i, e.target.value)}
                   placeholder={`Schritt ${i + 1}...`}
-                  className="flex-1 px-2 py-1.5 bg-gray-50 rounded-lg text-sm border-0 outline-none focus:ring-2 focus:ring-orange-200 resize-none"
+                  className="flex-1 px-2 py-1.5 bg-surface-2 rounded-lg text-sm border-0 outline-none resize-none"
                   rows={2}
                 />
                 <button onClick={() => removeStep(i)} className="flex-shrink-0 mt-1">
-                  <X className="w-4 h-4 text-gray-400" />
+                  <X className="w-4 h-4 text-text-3" />
                 </button>
               </div>
             ))}
@@ -1568,10 +1635,10 @@ function IngredientsModal({
   return (
     <div className="contents">
       <div className="fixed inset-0 bg-black/40 z-50" onClick={onSkip} />
-      <div className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl pb-[env(safe-area-inset-bottom)] max-h-[70vh] flex flex-col">
-        <div className="px-4 py-3 border-b border-gray-100 flex-shrink-0">
+      <div className="fixed bottom-0 left-0 right-0 z-50 bg-surface rounded-t-2xl pb-[env(safe-area-inset-bottom)] max-h-[70vh] flex flex-col">
+        <div className="px-4 py-3 border-b border-border flex-shrink-0">
           <h3 className="text-base font-semibold">Zutaten zur Einkaufsliste?</h3>
-          <p className="text-xs text-gray-400 mt-0.5">{recipe.title}</p>
+          <p className="text-xs text-text-3 mt-0.5">{recipe.title}</p>
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 py-3">
@@ -1581,9 +1648,9 @@ function IngredientsModal({
                 type="checkbox"
                 checked={selected[i]}
                 onChange={() => onToggle(i)}
-                className="w-4 h-4 rounded accent-orange-500"
+                className="w-4 h-4 rounded accent-accent"
               />
-              <span className="text-sm text-gray-700">
+              <span className="text-sm text-text-2">
                 {ing.quantity && <span className="font-medium">{ing.quantity} </span>}
                 {ing.unit && <span>{ing.unit} </span>}
                 {ing.name}
@@ -1594,11 +1661,11 @@ function IngredientsModal({
 
         {/* Store selector */}
         <div className="px-4 pb-3 flex-shrink-0">
-          <label className="text-xs text-gray-500 mb-1 block">Zu welchem Laden?</label>
+          <label className="text-xs text-text-3 mb-1 block">Zu welchem Laden?</label>
           <select
             value={store}
             onChange={(e) => onStoreChange(e.target.value)}
-            className="w-full px-3 py-2 bg-gray-50 rounded-xl text-sm border-0 outline-none"
+            className="w-full px-3 py-2 bg-surface-2 rounded-xl text-sm border-0 outline-none"
           >
             <option value="alle">Alle</option>
             {activeStores.map((s: any) => (
@@ -1608,10 +1675,10 @@ function IngredientsModal({
         </div>
 
         <div className="flex gap-3 px-4 pb-4 flex-shrink-0">
-          <button onClick={onSkip} className="flex-1 py-2.5 rounded-xl bg-gray-100 text-sm font-medium text-gray-600">
+          <button onClick={onSkip} className="flex-1 py-2.5 rounded-xl bg-surface-2 text-sm font-medium text-text-2">
             Überspringen
           </button>
-          <button onClick={onAdd} className="flex-1 py-2.5 rounded-xl bg-orange-500 text-white text-sm font-medium">
+          <button onClick={onAdd} className="flex-1 py-2.5 rounded-xl bg-accent text-white text-sm font-medium">
             Hinzufügen
           </button>
         </div>

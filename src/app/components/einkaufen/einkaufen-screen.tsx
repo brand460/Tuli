@@ -194,7 +194,7 @@ async function upsertGlobalItem(name: string, category: string): Promise<void> {
 // ── Store Logo Avatar ──────────────────────────────────────────────
 function StoreLogo({
   store,
-  size = 62,
+  size = 48,
   isSelected,
 }: {
   store: StoreInfo;
@@ -208,19 +208,17 @@ function StoreLogo({
 
   return (
     <div
-      className={`rounded-full flex items-center justify-center overflow-hidden transition-all ${
-        isSelected
-          ? "ring-2 ring-orange-500 ring-offset-2 scale-110"
-          : "opacity-80"
-      }`}
+      className="rounded-full flex items-center justify-center overflow-hidden transition-all"
       style={{
         width: size,
         height: size,
-        backgroundColor: isAlleStore ? "#F3F4F6" : (showLogo ? "#F3F4F6" : (imgError ? "#E5E7EB" : store.bgColor)),
+        backgroundColor: isAlleStore ? "var(--color-surface-2)" : (showLogo ? "var(--color-surface-2)" : (imgError ? "var(--color-surface-2)" : store.bgColor)),
+        border: isSelected ? "2.5px solid var(--color-accent)" : "2.5px solid transparent",
+        opacity: isSelected ? 1 : 0.45,
       }}
     >
       {isAlleStore ? (
-        <ShoppingBag style={{ width: size * 0.45, height: size * 0.45 }} className="text-gray-500" />
+        <ShoppingBag style={{ width: size * 0.45, height: size * 0.45 }} className="text-text-3" />
       ) : store.emoji ? (
         <span className="select-none" style={{ fontSize: size * 0.45 }}>{store.emoji}</span>
       ) : showLogo ? (
@@ -285,9 +283,9 @@ function SortableStoreButton({
         }`}
       >
         <div className="relative">
-          <StoreLogo store={store} size={62} isSelected={isSelected} />
+          <StoreLogo store={store} size={48} isSelected={isSelected} />
           {count > 0 && (
-            <span className="absolute -top-1 -right-1 bg-orange-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+            <span className="absolute -top-1 -right-1 bg-accent text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
               {count}
             </span>
           )}
@@ -324,12 +322,12 @@ function StoreSelector({
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressTriggered = useRef(false);
 
-  const pointerSensor = useSensor(PointerSensor, {
-    activationConstraint: { distance: 5 },
-  });
-  const touchSensor = useSensor(TouchSensor, {
-    activationConstraint: { delay: 100, tolerance: 5 },
-  });
+  const storeSensorOpts = useMemo(() => ({
+    pointer: { activationConstraint: { distance: 5 } },
+    touch: { activationConstraint: { delay: 100, tolerance: 5 } },
+  }), []);
+  const pointerSensor = useSensor(PointerSensor, storeSensorOpts.pointer);
+  const touchSensor = useSensor(TouchSensor, storeSensorOpts.touch);
   const sensors = useSensors(pointerSensor, touchSensor);
 
   const storeIds = useMemo(() => stores.map((s) => s.id), [stores]);
@@ -378,9 +376,9 @@ function StoreSelector({
   };
 
   return (
-    <div className="bg-white border-b border-gray-100">
+    <div>
       <div
-        className={`flex items-center gap-4 px-4 py-3 scrollbar-hide ${isReorderMode ? 'overflow-x-auto scroll-smooth' : 'overflow-x-auto'}`}
+        className={`flex items-center gap-2 px-4 py-3 scrollbar-hide ${isReorderMode ? 'overflow-x-auto scroll-smooth' : 'overflow-x-auto'}`}
         style={{ WebkitOverflowScrolling: "touch" }}
       >
         {isReorderMode ? (
@@ -427,14 +425,14 @@ function StoreSelector({
                 }`}
                 style={{ WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none" }}
               >
-                <div className={`relative ${isTransferHovered ? "ring-3 ring-orange-500 rounded-full shadow-lg" : ""}`}>
+                <div className={`relative ${isTransferHovered ? "ring-3 ring-accent rounded-full shadow-lg" : ""}`}>
                   <StoreLogo
                     store={store}
-                    size={62}
+                    size={48}
                     isSelected={isSelected || !!isTransferHovered}
                   />
                   {count > 0 && (
-                    <span className="absolute -top-1 -right-1 bg-orange-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+                    <span className="absolute -top-1 -right-1 bg-accent text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
                       {count}
                     </span>
                   )}
@@ -448,8 +446,8 @@ function StoreSelector({
             onClick={onAddStore}
             className="flex items-center justify-center flex-shrink-0"
           >
-            <div className="rounded-full border-2 border-dashed border-gray-200 flex items-center justify-center text-gray-400 hover:border-orange-500 hover:text-orange-500 transition" style={{ width: 62, height: 62 }}>
-              <Plus className="w-6 h-6" />
+            <div className="rounded-full border-2 border-dashed flex items-center justify-center text-text-3 hover:border-accent hover:text-accent transition" style={{ width: 48, height: 48, borderColor: "var(--zu-border)" }}>
+              <Plus className="w-5 h-5" />
             </div>
           </button>
         )}
@@ -514,8 +512,9 @@ function StorePopover({
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.9, y: -4 }}
         transition={{ duration: 0.15 }}
-        className="bg-white rounded-xl shadow-lg p-2 overflow-hidden"
+        className="bg-surface rounded-xl p-2 overflow-hidden"
         style={{
+          boxShadow: "var(--shadow-elevated)",
           position: "fixed",
           top: pos.top,
           left: pos.left,
@@ -530,9 +529,9 @@ function StorePopover({
               opt.action();
               onClose();
             }}
-            className="w-full flex items-center gap-2.5 p-3 text-sm text-gray-900 hover:bg-gray-50 rounded-lg transition whitespace-nowrap"
+            className="w-full flex items-center gap-2.5 p-3 text-sm text-text-1 hover:bg-surface-2 rounded-[10px] transition whitespace-nowrap"
           >
-            <span className="text-gray-500">{opt.icon}</span>
+            <span className="text-text-2">{opt.icon}</span>
             {opt.label}
           </button>
         ))}
@@ -606,13 +605,13 @@ function CategoryChip({
       onMouseDown={(e) => e.preventDefault()}
       className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-sm font-medium transition whitespace-nowrap ${
         selected
-          ? "bg-white border-2"
-          : "bg-gray-50 border border-gray-100 hover:bg-gray-100"
+          ? "bg-surface border-2"
+          : "bg-surface-2 border hover:opacity-80"
       }`}
       style={
         selected
           ? { borderColor: colors.dot, color: colors.text }
-          : { color: colors.text }
+          : { borderColor: "var(--zu-border)", color: colors.text }
       }
     >
       <span
@@ -771,7 +770,7 @@ function QuantityDrawer({
     >
       <div className="absolute inset-0 bg-black/40" onClick={handleBackdropClick} />
       <motion.div
-        className="relative bg-white rounded-t-2xl px-5 pt-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))]"
+        className="relative bg-surface rounded-t-[20px] px-5 pt-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))]"
         style={{ height: 160, minHeight: 160 }}
         initial={{ y: "100%" }}
         animate={{ y: 0 }}
@@ -780,10 +779,10 @@ function QuantityDrawer({
       >
         {/* Drag handle */}
         <div className="flex justify-center mb-4">
-          <div className="w-10 h-1 rounded-full bg-gray-200" />
+          <div className="w-9 h-1 rounded-full" style={{ background: "var(--zu-border)" }} />
         </div>
 
-        <p className="text-sm font-semibold text-gray-900 mb-3">{item.name}</p>
+        <p className="text-sm font-semibold text-text-1 mb-3">{item.name}</p>
 
         <div className="flex items-center gap-3">
           {/* Quantity input */}
@@ -801,12 +800,13 @@ function QuantityDrawer({
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            className="w-20 h-11 rounded-xl border border-gray-200 text-center text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+            className="w-20 h-11 rounded-[16px] text-center text-sm font-semibold text-text-1 bg-surface-2 focus:outline-none"
+            style={{ border: "1px solid var(--zu-border)" }}
           />
 
           {/* Unit segmented control — prevent focus steal to keep keyboard open */}
           <div
-            className="flex-1 flex bg-gray-100 rounded-xl p-1 gap-0.5"
+            className="flex-1 flex bg-surface-2 rounded-xl p-1 gap-0.5"
             onMouseDown={(e) => e.preventDefault()}
             onPointerDown={(e) => e.preventDefault()}
           >
@@ -818,8 +818,8 @@ function QuantityDrawer({
                 onClick={() => handleUnitChange(u.value)}
                 className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${
                   unit === u.value
-                    ? "bg-orange-500 text-white shadow-sm"
-                    : "text-gray-600 hover:text-gray-900"
+                    ? "bg-accent text-white shadow-sm"
+                    : "text-text-2 hover:text-text-1"
                 }`}
               >
                 {u.label}
@@ -942,12 +942,12 @@ function SortableShoppingItem({
       <div
         className={`flex items-center gap-2 px-4 py-2.5 transition-all ${
           isDragging && isTransferDragging
-            ? "shadow-xl rounded-xl scale-[1.08] opacity-95 bg-white ring-2 ring-orange-400"
+            ? "shadow-xl rounded-[16px] scale-[1.08] opacity-95 bg-surface ring-2 ring-accent-mid"
             : isDragging
-              ? "shadow-lg rounded-xl scale-[1.02] opacity-95 bg-white"
+              ? "rounded-[16px] scale-[1.02] opacity-95 bg-surface"
               : phase === "flash"
                 ? "bg-green-50"
-                : "bg-white"
+                : ""
         }`}
         style={
           phase === "flyout"
@@ -964,7 +964,7 @@ function SortableShoppingItem({
         <button
           {...attributes}
           {...listeners}
-          className="touch-none flex-shrink-0 p-1 text-gray-300 cursor-grab active:cursor-grabbing hover:text-gray-500"
+          className="touch-none flex-shrink-0 p-1 text-text-3 cursor-grab active:cursor-grabbing hover:text-text-2"
         >
           <GripVertical className="w-4 h-4" />
         </button>
@@ -972,10 +972,10 @@ function SortableShoppingItem({
           onClick={onToggle}
           className={`flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition ${
             phase === "flash" || phase === "flyout"
-              ? "bg-green-500 border-green-500"
+              ? "bg-accent border-accent"
               : item.is_checked
-                ? "bg-orange-500 border-orange-500"
-                : "border-gray-200 hover:border-orange-500"
+                ? "bg-accent border-accent"
+                : "hover:border-accent"
           }`}
         >
           {(item.is_checked || phase === "flash" || phase === "flyout") && <Check className="w-3.5 h-3.5 text-white" />}
@@ -997,7 +997,7 @@ function SortableShoppingItem({
               onChange={(e) => setEditNameValue(e.target.value)}
               onBlur={handleNameSave}
               onKeyDown={handleNameKeyDown}
-              className="w-full text-sm font-medium text-gray-900 bg-transparent outline-none border-b border-orange-300 py-0.5 leading-tight"
+              className="w-full text-sm font-medium text-text-1 bg-transparent outline-none border-b border-accent-mid py-0.5 leading-tight"
             />
           ) : (
             <p
@@ -1009,8 +1009,8 @@ function SortableShoppingItem({
               }}
               className={`text-sm leading-tight truncate cursor-text ${
                 item.is_checked
-                  ? "line-through text-gray-400"
-                  : "text-gray-900 font-medium"
+                  ? "line-through text-text-3"
+                  : "text-text-1 font-medium"
               }`}
             >
               {item.name}
@@ -1030,16 +1030,16 @@ function SortableShoppingItem({
               if (!longPressFired.current) onQuantityChange(-step);
             }}
             disabled={item.quantity <= min}
-            className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 hover:text-gray-900 disabled:opacity-30 transition"
+            className="w-7 h-7 rounded-lg bg-surface-2 flex items-center justify-center text-text-2 hover:text-text-1 disabled:opacity-30 transition"
           >
             <Minus className="w-3.5 h-3.5" />
           </button>
           <div className="flex items-baseline gap-0.5 min-w-[28px] justify-center">
-            <span className="text-sm font-semibold text-gray-900">
+            <span className="text-sm font-semibold text-text-1">
               {formatQuantity(item.quantity, item.unit)}
             </span>
             {unitLabel && (
-              <span className="text-xs text-gray-400">{unitLabel}</span>
+              <span className="text-xs text-text-3">{unitLabel}</span>
             )}
           </div>
           <button
@@ -1047,7 +1047,7 @@ function SortableShoppingItem({
               e.stopPropagation();
               if (!longPressFired.current) onQuantityChange(step);
             }}
-            className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 hover:text-gray-900 transition"
+            className="w-7 h-7 rounded-lg bg-surface-2 flex items-center justify-center text-text-2 hover:text-text-1 transition"
           >
             <Plus className="w-3.5 h-3.5" />
           </button>
@@ -1087,13 +1087,13 @@ function SortableCategoryItem({
     <div ref={setNodeRef} style={style}>
       <div
         className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl transition-shadow ${
-          isDragging ? "shadow-md bg-white" : "bg-white"
+          isDragging ? "bg-surface" : ""
         }`}
       >
         <button
           {...attributes}
           {...listeners}
-          className="touch-none flex-shrink-0 p-0.5 text-gray-300 cursor-grab active:cursor-grabbing"
+          className="touch-none flex-shrink-0 p-0.5 text-text-3 cursor-grab active:cursor-grabbing"
         >
           <GripVertical className="w-4 h-4" />
         </button>
@@ -1102,14 +1102,14 @@ function SortableCategoryItem({
             className="w-2.5 h-2.5 rounded-full flex-shrink-0"
             style={{ backgroundColor: colors.dot }}
           />
-          <span className="text-sm font-medium text-gray-900">
+          <span className="text-sm font-medium text-text-1">
             {category}
           </span>
         </div>
         <button
           onClick={onRemove}
           onMouseDown={(e) => e.preventDefault()}
-          className="flex-shrink-0 p-1 text-gray-300 hover:text-red-500 transition"
+          className="flex-shrink-0 p-1 text-text-3 hover:text-danger transition"
         >
           <X className="w-3.5 h-3.5" />
         </button>
@@ -1160,12 +1160,12 @@ function CategorySortModal({
     onAutoSave(categories);
   }, [categories]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const pointerSensor = useSensor(PointerSensor, {
-    activationConstraint: { distance: 5 },
-  });
-  const touchSensor = useSensor(TouchSensor, {
-    activationConstraint: { delay: 150, tolerance: 5 },
-  });
+  const catSensorOpts = useMemo(() => ({
+    pointer: { activationConstraint: { distance: 5 } },
+    touch: { activationConstraint: { delay: 150, tolerance: 5 } },
+  }), []);
+  const pointerSensor = useSensor(PointerSensor, catSensorOpts.pointer);
+  const touchSensor = useSensor(TouchSensor, catSensorOpts.touch);
   const sensors = useSensors(pointerSensor, touchSensor);
 
   const catModifiers = useMemo(() => [restrictToVerticalAxis], []);
@@ -1242,17 +1242,18 @@ function CategorySortModal({
         exit={{ y: 300 }}
         transition={{ type: "spring", damping: 28, stiffness: 300 }}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-sm bg-white rounded-t-2xl shadow-lg flex flex-col max-h-[80vh]"
+        className="w-full max-w-sm bg-surface rounded-t-[20px] flex flex-col max-h-[80vh]"
+        style={{ boxShadow: "var(--shadow-elevated)" }}
       >
         {/* Handle bar */}
         <div className="flex justify-center pt-3 pb-1">
-          <div className="w-10 h-1 rounded-full bg-gray-300" />
+          <div className="w-9 h-1 rounded-full" style={{ background: "var(--zu-border)" }} />
         </div>
         <div className="px-5 pb-3">
-          <h3 className="text-base font-bold text-gray-900">
+          <h3 className="text-base font-bold text-text-1">
             Kategorien für {storeName}
           </h3>
-          <p className="text-xs text-gray-500 mt-0.5">
+          <p className="text-xs text-text-2 mt-0.5">
             Ziehe Kategorien um die Sortierung zu ändern
           </p>
         </div>
@@ -1285,7 +1286,7 @@ function CategorySortModal({
         </div>
 
         {/* Add category section */}
-        <div className="flex-shrink-0 border-t border-gray-100">
+        <div className="flex-shrink-0" style={{ borderTop: "1px solid var(--zu-border)" }}>
           {/* Quick-add chips */}
           {availableChips.length > 0 && (!showSuggestions || !newCat.trim()) && (
             <div
@@ -1299,7 +1300,7 @@ function CategorySortModal({
                     key={chip}
                     onClick={() => handleAddCategory(chip)}
                     onMouseDown={(e) => e.preventDefault()}
-                    className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium hover:scale-105 active:scale-95 transition whitespace-nowrap bg-gray-50 border border-gray-100"
+                    className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium hover:scale-105 active:scale-95 transition whitespace-nowrap bg-surface-2"
                     style={{ color: colors.text }}
                   >
                     <span
@@ -1331,7 +1332,7 @@ function CategorySortModal({
                         key={result}
                         onClick={() => handleAddCategory(result)}
                         onMouseDown={(e) => e.preventDefault()}
-                        className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded-lg flex items-center gap-2 transition"
+                        className="w-full text-left px-3 py-2 hover:bg-surface-2 rounded-[10px] flex items-center gap-2 transition"
                       >
                         <span
                           className="w-2.5 h-2.5 rounded-full flex-shrink-0"
@@ -1347,9 +1348,9 @@ function CategorySortModal({
                     <button
                       onClick={() => handleAddCategory()}
                       onMouseDown={(e) => e.preventDefault()}
-                      className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded-lg transition"
+                      className="w-full text-left px-3 py-2 hover:bg-surface-2 rounded-[10px] transition"
                     >
-                      <span className="text-sm text-orange-500 font-medium">
+                      <span className="text-sm text-accent font-medium">
                         + &bdquo;{newCat.trim()}&ldquo; erstellen
                       </span>
                     </button>
@@ -1361,8 +1362,8 @@ function CategorySortModal({
 
           {/* Input bar */}
           <div className="flex items-center gap-2 px-5 py-2.5">
-            <div className="flex-1 flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2.5 border border-gray-100">
-              <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
+            <div className="flex-1 flex items-center gap-2 bg-surface-2 rounded-xl px-3 py-2.5" style={{ border: "1px solid var(--zu-border)" }}>
+              <Search className="w-4 h-4 text-text-3 flex-shrink-0" />
               <input
                 ref={inputRef}
                 type="search"
@@ -1392,7 +1393,7 @@ function CategorySortModal({
                   }
                 }}
                 placeholder="Kategorie suchen oder erstellen..."
-                className="flex-1 bg-transparent outline-none text-sm text-gray-900 placeholder:text-gray-400"
+                className="flex-1 bg-transparent outline-none text-sm text-text-1 placeholder:text-text-3"
               />
               {newCat && (
                 <button
@@ -1401,7 +1402,7 @@ function CategorySortModal({
                     setNewCat("");
                     setShowSuggestions(false);
                   }}
-                  className="text-gray-400 hover:text-gray-900"
+                  className="text-text-3 hover:text-text-1"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -1431,18 +1432,18 @@ function CheckedSection({
   if (items.length === 0) return null;
 
   return (
-    <div className="border-t border-gray-100 bg-gray-50/50">
+    <div className="bg-surface-2" style={{ borderTop: "1px solid var(--zu-border)" }}>
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center justify-between px-4 py-2.5"
       >
-        <span className="text-xs font-medium text-gray-500">
+        <span className="text-xs font-medium text-text-2">
           Erledigt ({items.length})
         </span>
         {expanded ? (
-          <ChevronUp className="w-3.5 h-3.5 text-gray-400" />
+          <ChevronUp className="w-3.5 h-3.5 text-text-3" />
         ) : (
-          <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+          <ChevronDown className="w-3.5 h-3.5 text-text-3" />
         )}
       </button>
       <AnimatePresence>
@@ -1462,14 +1463,14 @@ function CheckedSection({
                 >
                   <button
                     onClick={() => onToggle(item.id)}
-                    className="flex-shrink-0 w-5 h-5 rounded-full bg-orange-500 border-2 border-orange-500 flex items-center justify-center"
+                    className="flex-shrink-0 w-5 h-5 rounded-full bg-accent border-2 border-accent flex items-center justify-center"
                   >
                     <Check className="w-3 h-3 text-white" />
                   </button>
-                  <span className="text-xs line-through text-gray-500 flex-1 truncate">
+                  <span className="text-xs line-through text-text-3 flex-1 truncate">
                     {item.name}
                   </span>
-                  <span className="text-[10px] text-gray-400">
+                  <span className="text-[10px] text-text-3">
                     {formatQuantity(item.quantity, item.unit)}
                     {item.unit && item.unit !== "Stk." ? item.unit : "x"}
                   </span>
@@ -1479,7 +1480,7 @@ function CheckedSection({
             <div className="px-4 py-2">
               <button
                 onClick={onClearAll}
-                className="flex items-center gap-1.5 text-xs text-red-500 hover:text-red-600 transition"
+                className="flex items-center gap-1.5 text-xs text-danger hover:text-danger transition"
               >
                 <Trash2 className="w-3 h-3" />
                 Erledigte löschen
@@ -1580,7 +1581,7 @@ function AddItemBar({
 
   return (
     <>
-      <div className="border-t border-gray-100 bg-white">
+      <div className="bg-surface" style={{ borderTop: "1px solid var(--zu-border)" }}>
         {quickChips.length > 0 && (
           <div
             className="flex gap-2 px-4 pt-2.5 pb-1 overflow-x-auto scrollbar-hide"
@@ -1601,7 +1602,12 @@ function AddItemBar({
                 onPointerDown={(e) => e.preventDefault()}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => handleSelect(chip)}
-                className="flex-shrink-0 px-3 py-1.5 rounded-full bg-orange-50 text-orange-700 text-xs font-medium hover:bg-orange-100 transition whitespace-nowrap"
+                className="flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition whitespace-nowrap"
+                style={{
+                  background: "var(--surface-2)",
+                  color: "var(--text-2)",
+                  border: "1px solid var(--zu-border)",
+                }}
               >
                 + {chip}
               </button>
@@ -1615,7 +1621,7 @@ function AddItemBar({
               animate={{ height: "auto", opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
               transition={{ duration: 0.15 }}
-              className="overflow-hidden border-t border-gray-100"
+              className="overflow-hidden" style={{ borderTop: "1px solid var(--zu-border)" }}
             >
               <div className="max-h-48 overflow-y-auto">
                 {searchResults.map((result) => {
@@ -1626,9 +1632,9 @@ function AddItemBar({
                       onPointerDown={(e) => e.preventDefault()}
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => handleSelect(result.name, result.category, true)}
-                      className="w-full text-left px-4 py-2.5 hover:bg-gray-50 flex items-center justify-between transition"
+                      className="w-full text-left px-4 py-2.5 hover:bg-surface-2 flex items-center justify-between transition"
                     >
-                      <span className="text-sm text-gray-900">
+                      <span className="text-sm text-text-1">
                         {result.name}
                       </span>
                       <span className="flex items-center gap-1.5 text-[10px] ml-2 flex-shrink-0 font-medium" style={{ color: colors.text }}>
@@ -1653,9 +1659,9 @@ function AddItemBar({
                       setQuery("");
                       setShowSuggestions(false);
                     }}
-                    className="w-full text-left px-4 py-2.5 hover:bg-gray-50 transition"
+                    className="w-full text-left px-4 py-2.5 hover:bg-surface-2 transition"
                   >
-                    <span className="text-sm text-orange-500 font-medium">
+                    <span className="text-sm text-accent font-medium">
                       + &bdquo;{query.trim()}&ldquo; hinzufügen&hellip;
                     </span>
                   </button>
@@ -1668,8 +1674,8 @@ function AddItemBar({
           onSubmit={handleSubmit}
           className="flex items-center gap-2 px-4 py-2.5"
         >
-          <div className="flex-1 flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2.5 border border-gray-100">
-            <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
+          <div className="flex-1 flex items-center gap-2 bg-surface-2 rounded-xl px-3 py-2.5" style={{ border: "1px solid var(--zu-border)" }}>
+            <Search className="w-4 h-4 text-text-3 flex-shrink-0" />
             <input
               ref={inputRef}
               type="search"
@@ -1688,7 +1694,7 @@ function AddItemBar({
               onFocus={() => setShowSuggestions(true)}
               onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
               placeholder="Artikel hinzufügen..."
-              className="flex-1 bg-transparent outline-none text-sm text-gray-900 placeholder:text-gray-400"
+              className="flex-1 bg-transparent outline-none text-sm text-text-1 placeholder:text-text-3"
             />
             {query && (
               <button
@@ -1697,7 +1703,7 @@ function AddItemBar({
                   setQuery("");
                   setShowSuggestions(false);
                 }}
-                className="text-gray-400 hover:text-gray-900"
+                className="text-text-3 hover:text-text-1"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1780,29 +1786,30 @@ function CategoryPickerModal({
         exit={{ y: 300 }}
         transition={{ type: "spring", damping: 28, stiffness: 300 }}
         onClick={(e) => e.stopPropagation()}
-        className="fixed left-0 right-0 mx-auto w-full max-w-sm bg-white rounded-t-2xl shadow-lg flex flex-col"
+        className="fixed left-0 right-0 mx-auto w-full max-w-sm bg-surface rounded-t-[20px] flex flex-col"
         style={{
           bottom: bottomOffset,
           height: "40vh",
           maxHeight: `calc(100vh - ${bottomOffset}px - 40px)`,
+          boxShadow: "var(--shadow-elevated)",
         }}
       >
         {/* Handle bar */}
         <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
-          <div className="w-10 h-1 rounded-full bg-gray-300" />
+          <div className="w-9 h-1 rounded-full" style={{ background: "var(--zu-border)" }} />
         </div>
         <div className="px-5 pb-2 flex-shrink-0">
-          <h3 className="text-base font-bold text-gray-900">
+          <h3 className="text-base font-bold text-text-1">
             Kategorie wählen
           </h3>
-          <p className="text-sm text-gray-500 mt-0.5">
+          <p className="text-sm text-text-2 mt-0.5">
             Für &bdquo;{itemName}&ldquo;
           </p>
         </div>
         {/* Search field */}
         <div className="px-5 pb-2 flex-shrink-0">
-          <div className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2 border border-gray-100">
-            <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
+          <div className="flex items-center gap-2 bg-surface-2 rounded-xl px-3 py-2" style={{ border: "1px solid var(--zu-border)" }}>
+            <Search className="w-4 h-4 text-text-3 flex-shrink-0" />
             <input
               ref={filterInputRef}
               type="text"
@@ -1817,14 +1824,14 @@ function CategoryPickerModal({
               value={filterQuery}
               onChange={(e) => setFilterQuery(e.target.value)}
               placeholder="Kategorie suchen..."
-              className="flex-1 bg-transparent outline-none text-sm text-gray-900 placeholder:text-gray-400"
+              className="flex-1 bg-transparent outline-none text-sm text-text-1 placeholder:text-text-3"
             />
             {filterQuery && (
               <button
                 type="button"
                 onPointerDown={(e) => e.preventDefault()}
                 onClick={() => setFilterQuery("")}
-                className="text-gray-400 hover:text-gray-900"
+                className="text-text-3 hover:text-text-1"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1841,7 +1848,7 @@ function CategoryPickerModal({
               />
             ))}
             {filtered.length === 0 && (
-              <p className="text-sm text-gray-500 text-center py-4 w-full">
+              <p className="text-sm text-text-2 text-center py-4 w-full">
                 Keine Kategorien gefunden
               </p>
             )}
@@ -1934,26 +1941,27 @@ function AddStoreModal({
         exit={{ y: 300 }}
         transition={{ type: "spring", damping: 28, stiffness: 300 }}
         onClick={(e) => e.stopPropagation()}
-        className="fixed left-0 right-0 mx-auto w-full max-w-sm bg-white rounded-t-2xl shadow-lg flex flex-col"
+        className="fixed left-0 right-0 mx-auto w-full max-w-sm bg-surface rounded-t-[20px] flex flex-col"
         style={{
           bottom: bottomOffset,
           height: "60vh",
           minHeight: MIN_HEIGHT,
           maxHeight: `calc(100vh - ${bottomOffset}px - 40px)`,
+          boxShadow: "var(--shadow-elevated)",
         }}
       >
         {/* Handle bar */}
         <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
-          <div className="w-10 h-1 rounded-full bg-gray-300" />
+          <div className="w-9 h-1 rounded-full" style={{ background: "var(--zu-border)" }} />
         </div>
         <div className="px-5 pb-3 flex-shrink-0">
-          <h3 className="text-lg font-bold text-gray-900">
+          <h3 className="text-lg font-bold text-text-1">
             Geschäft hinzufügen
           </h3>
         </div>
         <div className="px-5 pb-3 flex-shrink-0">
-          <div className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2.5 border border-gray-100">
-            <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
+          <div className="flex items-center gap-2 bg-surface-2 rounded-xl px-3 py-2.5" style={{ border: "1px solid var(--zu-border)" }}>
+            <Search className="w-4 h-4 text-text-3 flex-shrink-0" />
             <input
               autoFocus
               type="search"
@@ -1967,12 +1975,12 @@ function AddStoreModal({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Laden suchen..."
-              className="flex-1 bg-transparent outline-none text-sm text-gray-900 placeholder:text-gray-400"
+              className="flex-1 bg-transparent outline-none text-sm text-text-1 placeholder:text-text-3"
             />
             {query && (
               <button
                 onClick={() => setQuery("")}
-                className="text-gray-400 hover:text-gray-900"
+                className="text-text-3 hover:text-text-1"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1995,20 +2003,20 @@ function AddStoreModal({
             {showCustomOption && (
               <button
                 onClick={handleCustomAdd}
-                className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-gray-50 transition"
+                className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-surface-2 transition"
               >
-                <div className="w-10 h-10 rounded-full border-2 border-dashed border-orange-300 flex items-center justify-center text-orange-500">
+                <div className="w-10 h-10 rounded-full border-2 border-dashed border-accent-mid flex items-center justify-center text-accent">
                   <Store className="w-5 h-5" />
                 </div>
                 <div className="text-left">
-                  <p className="text-sm font-medium text-orange-500">
+                  <p className="text-sm font-medium text-accent">
                     Eigenen Laden hinzufügen: &bdquo;{query.trim()}&ldquo;
                   </p>
                 </div>
               </button>
             )}
             {filtered.length === 0 && !showCustomOption && (
-              <p className="text-sm text-gray-500 text-center py-6">
+              <p className="text-sm text-text-2 text-center py-6">
                 Keine Vorschläge gefunden
               </p>
             )}
@@ -2041,7 +2049,7 @@ function StoreSuggestionRow({
   return (
     <button
       onClick={onSelect}
-      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-gray-50 active:bg-gray-100 transition"
+      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-surface-2 active:bg-surface-2 transition"
     >
       <div
         className="w-10 h-10 rounded-full flex items-center justify-center overflow-hidden flex-shrink-0"
@@ -2058,16 +2066,16 @@ function StoreSuggestionRow({
             onError={() => setImgError(true)}
           />
         ) : (
-          <span className="text-gray-500 text-xs font-bold">
+          <span className="text-text-3 text-xs font-bold">
             {suggestion.name.slice(0, 2).toUpperCase()}
           </span>
         )}
       </div>
       <div className="text-left flex-1 min-w-0">
-        <p className="text-sm font-medium text-gray-900 truncate">
+        <p className="text-sm font-medium text-text-1 truncate">
           {suggestion.name}
         </p>
-        <p className="text-[11px] text-gray-500">
+        <p className="text-[11px] text-text-2">
           {typeLabel[suggestion.type] || "Geschäft"}
         </p>
       </div>
@@ -2305,6 +2313,14 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
       .filter((i) => i.store === selectedStore && !i.is_checked)
       .sort((a, b) => a.position - b.position);
   }, [items, selectedStore]);
+
+  // Refs for stable DnD callbacks (avoids useLayoutEffect size-change warning in DndContext)
+  const sortedStoreItemsRef = useRef(sortedStoreItems);
+  sortedStoreItemsRef.current = sortedStoreItems;
+  const selectedStoreRefStable = useRef(selectedStore);
+  selectedStoreRefStable.current = selectedStore;
+  const updateItemsRef = useRef(updateItems);
+  updateItemsRef.current = updateItems;
 
   const checkedItems = useMemo(() => {
     return items.filter((i) => i.store === selectedStore && i.is_checked);
@@ -2752,12 +2768,12 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
   );
 
   // ── dnd-kit sensors for item list ──────────────────────────────
-  const pointerSensor = useSensor(PointerSensor, {
-    activationConstraint: { distance: 5 },
-  });
-  const touchSensor = useSensor(TouchSensor, {
-    activationConstraint: { delay: 150, tolerance: 5 },
-  });
+  const itemSensorOptions = useMemo(() => ({
+    pointer: { activationConstraint: { distance: 5 } },
+    touch: { activationConstraint: { delay: 150, tolerance: 5 } },
+  }), []);
+  const pointerSensor = useSensor(PointerSensor, itemSensorOptions.pointer);
+  const touchSensor = useSensor(TouchSensor, itemSensorOptions.touch);
   const sensors = useSensors(pointerSensor, touchSensor);
 
   const handleDndDragStart = useCallback((event: DragStartEvent) => {
@@ -2859,9 +2875,9 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
       setActiveDragId(null);
 
       // Handle store transfer
-      if (wasTransferMode && targetStore && targetStore !== selectedStore) {
+      if (wasTransferMode && targetStore && targetStore !== selectedStoreRefStable.current) {
         // Transfer the item to the new store
-        updateItems((prev) => {
+        updateItemsRef.current((prev) => {
           // Get the max position in the target store
           const targetItems = prev.filter(
             (i) => i.store === targetStore && !i.is_checked
@@ -2887,13 +2903,14 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
 
       const overId = over.id as string;
 
-      const oldIndex = sortedStoreItems.findIndex((i) => i.id === activeId);
-      const newIndex = sortedStoreItems.findIndex((i) => i.id === overId);
+      const currentSorted = sortedStoreItemsRef.current;
+      const oldIndex = currentSorted.findIndex((i) => i.id === activeId);
+      const newIndex = currentSorted.findIndex((i) => i.id === overId);
       if (oldIndex < 0 || newIndex < 0) return;
 
-      const reordered = arrayMove(sortedStoreItems, oldIndex, newIndex);
+      const reordered = arrayMove(currentSorted, oldIndex, newIndex);
 
-      updateItems((prev) => {
+      updateItemsRef.current((prev) => {
         const positionMap = new Map<
           string,
           { position: number; manually_positioned?: boolean }
@@ -2919,7 +2936,7 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
         });
       });
     },
-    [sortedStoreItems, updateItems, selectedStore]
+    []
   );
 
   const handleDndDragCancel = useCallback(() => {
@@ -2990,7 +3007,7 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
   }, []);
 
   return (
-    <div className="flex-1 flex flex-col bg-white min-h-0 relative">
+    <div className="flex-1 flex flex-col min-h-0 relative" style={{ background: "var(--zu-bg)" }}>
       {/* Wiggle animation for store reorder */}
       <style>{`
         @keyframes wiggle {
@@ -2998,6 +3015,11 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
           50% { transform: rotate(1.5deg); }
         }
       `}</style>
+
+      {/* Screen Header */}
+      <div className="flex-shrink-0 px-4 pt-4 pb-2" style={{ background: "var(--zu-bg)" }}>
+        <h2 className="text-lg font-bold text-text-1">Einkaufen</h2>
+      </div>
 
       {/* Store selector — stays at top, never moves */}
       <div className="flex-shrink-0 z-10" ref={storeSelectorRef}>
@@ -3023,29 +3045,29 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
       >
         {!loaded ? (
           <div className="flex-1 flex items-center justify-center py-20">
-            <div className="w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+            <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
           </div>
         ) : sortedStoreItems.length === 0 && checkedItems.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center py-20 px-6">
-            <div className="w-14 h-14 rounded-xl bg-orange-50 flex items-center justify-center mb-3">
-              <Search className="w-7 h-7 text-orange-500" />
+            <div className="w-14 h-14 rounded-xl bg-accent-light flex items-center justify-center mb-3">
+              <Search className="w-7 h-7 text-accent" />
             </div>
-            <p className="text-base font-semibold text-gray-900">
+            <p className="text-base font-semibold text-text-1">
               Liste ist leer
             </p>
-            <p className="text-sm text-gray-500 mt-1 text-center">
+            <p className="text-sm text-text-2 mt-1 text-center">
               Füge unten Artikel hinzu, um deine Einkaufsliste zu starten.
             </p>
           </div>
         ) : sortedStoreItems.length === 0 && checkedItems.length > 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center py-20 px-6">
-            <div className="w-14 h-14 rounded-xl bg-green-50 flex items-center justify-center mb-3">
-              <Check className="w-7 h-7 text-green-600" />
+            <div className="w-14 h-14 rounded-xl bg-accent-light flex items-center justify-center mb-3">
+              <Check className="w-7 h-7 text-accent" />
             </div>
-            <p className="text-base font-semibold text-gray-900">
+            <p className="text-base font-semibold text-text-1">
               Alles erledigt!
             </p>
-            <p className="text-sm text-gray-500 mt-1 text-center">
+            <p className="text-sm text-text-2 mt-1 text-center">
               {checkedItems.length}{" "}
               {checkedItems.length === 1
                 ? "Artikel wurde"
@@ -3054,26 +3076,28 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
             </p>
             <button
               onClick={handleClearChecked}
-              className="mt-4 flex items-center gap-2 px-6 py-3 rounded-full bg-orange-500 text-white text-sm font-semibold hover:bg-orange-600 active:scale-95 transition"
+              className="mt-4 flex items-center gap-2 px-6 py-3 rounded-full bg-accent text-white text-sm font-semibold hover:bg-accent-dark active:scale-95 transition"
             >
               <Trash2 className="w-4 h-4" />
               Liste bereinigen
             </button>
           </div>
-        ) : (
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            modifiers={itemModifiers}
-            onDragStart={handleDndDragStart}
-            onDragMove={handleDndDragMove}
-            onDragEnd={handleDndDragEnd}
-            onDragCancel={handleDndDragCancel}
+        ) : null}
+        {/* DndContext always mounted to prevent useLayoutEffect dep-array size change warning */}
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          modifiers={itemModifiers}
+          onDragStart={handleDndDragStart}
+          onDragMove={handleDndDragMove}
+          onDragEnd={handleDndDragEnd}
+          onDragCancel={handleDndDragCancel}
+        >
+          <SortableContext
+            items={sortableItemIds}
+            strategy={verticalListSortingStrategy}
           >
-            <SortableContext
-              items={sortableItemIds}
-              strategy={verticalListSortingStrategy}
-            >
+            {loaded && sortedStoreItems.length > 0 && (
               <div className="pt-1">
                 {sortedStoreItems.map((item) => (
                   <SortableShoppingItem
@@ -3094,9 +3118,9 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
                   />
                 ))}
               </div>
-            </SortableContext>
-          </DndContext>
-        )}
+            )}
+          </SortableContext>
+        </DndContext>
 
         {/* Spacer pushes checked section to bottom of visible scroll area (only when keyboard is closed) */}
         {keyboardHeight === 0 && <div className="flex-1" />}
@@ -3113,7 +3137,7 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
       {/* Add item bar — fixed when keyboard open, absolute otherwise */}
       <div
         ref={bottomBarRef}
-        className="z-10 bg-white"
+        className="z-10 bg-surface"
         style={keyboardHeight > 0 ? {
           position: "fixed",
           left: 0,
