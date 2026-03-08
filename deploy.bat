@@ -23,7 +23,7 @@ powershell -command "Expand-Archive -Path '%ZIP%' -DestinationPath '.' -Force"
 echo Committe und pushe...
 git add .
 git commit -m "update"
-git push origin master
+git push origin main
 
 echo.
 echo Fertig! Code ist auf GitHub.
