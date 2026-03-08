@@ -2194,24 +2194,30 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
     requestAnimationFrame(recomputeLiPositions);
   }, [syncContent, recomputeLiPositions]);
 
-  // Global listeners for li drag
+  // Touch listeners for li drag — always registered so they catch touchmove
+  // immediately after touchstart sets liDragRef synchronously (no React render delay).
+  // Each handler checks liDragRef.current and returns early if null.
   useEffect(() => {
-    if (!liDragging) return;
-    // Touch
     document.addEventListener("touchmove", handleLiTouchMove, { passive: false });
     document.addEventListener("touchend", handleLiTouchEnd);
     document.addEventListener("touchcancel", handleLiTouchEnd);
-    // Mouse
-    document.addEventListener("mousemove", handleLiMouseMove);
-    document.addEventListener("mouseup", handleLiMouseUp);
     return () => {
       document.removeEventListener("touchmove", handleLiTouchMove);
       document.removeEventListener("touchend", handleLiTouchEnd);
       document.removeEventListener("touchcancel", handleLiTouchEnd);
+    };
+  }, [handleLiTouchMove, handleLiTouchEnd]);
+
+  // Mouse listeners for li drag — gated by liDragging (no latency issue with mouse)
+  useEffect(() => {
+    if (!liDragging) return;
+    document.addEventListener("mousemove", handleLiMouseMove);
+    document.addEventListener("mouseup", handleLiMouseUp);
+    return () => {
       document.removeEventListener("mousemove", handleLiMouseMove);
       document.removeEventListener("mouseup", handleLiMouseUp);
     };
-  }, [liDragging, handleLiTouchMove, handleLiTouchEnd, handleLiMouseMove, handleLiMouseUp]);
+  }, [liDragging, handleLiMouseMove, handleLiMouseUp]);
 
   // ── Slash-command: filtered items ──
   const slashFiltered = useMemo(() => {
