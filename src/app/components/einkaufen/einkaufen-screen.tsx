@@ -3260,6 +3260,7 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
           left: 0,
           right: 0,
           zIndex: 100,
+          display: isItemNameEditing ? "none" : undefined,
         }}
       >
         <AddItemBar
