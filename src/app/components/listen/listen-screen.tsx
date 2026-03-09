@@ -1281,6 +1281,7 @@ function SidebarContent(props: SidebarContentProps) {
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-3" />
           <input
             type="text"
+            name="pages-search"
             placeholder="Seiten durchsuchen..."
             value={searchQuery}
             onChange={(e) => onSetSearchQuery(e.target.value)}
@@ -1594,6 +1595,8 @@ function PageTreeItem(props: PageTreeItemProps) {
         {isRenaming ? (
           <input
             ref={renameRef}
+            name="page-rename"
+            inputMode="text"
             defaultValue={page.title}
             className="flex-1 min-w-0 text-sm bg-surface border border-accent-mid rounded px-1 py-0 outline-none"
             onBlur={(e) => onFinishRename(page.id, e.target.value || "Unbenannt")}

@@ -1721,6 +1721,7 @@ function NotePickerDrawer({
             <input
               ref={searchRef}
               type="search"
+              name="cal-note-search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Notiz suchen..."
@@ -1842,6 +1843,7 @@ function RecipePickerDrawer({
             <input
               ref={searchRef}
               type="search"
+              name="cal-recipe-search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Rezept suchen..."
@@ -2312,6 +2314,7 @@ function EventEditorSheet({
             <input
               ref={titleInputRef}
               type="text"
+              name="cal-event-title"
               autoComplete="off"
               autoCorrect="off"
               autoCapitalize="off"

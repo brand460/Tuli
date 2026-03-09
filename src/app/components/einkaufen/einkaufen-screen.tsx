@@ -1093,6 +1093,7 @@ function QuantityDrawer({
             ref={inputRef}
             type="tel"
             inputMode="decimal"
+            name="qty-drawer-input"
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="off"
@@ -1542,36 +1543,135 @@ function SortableCategoryItem({
 
   const colors = getCategoryChipColor(category);
 
+  // ── Swipe-to-delete (Gmail-style) ──
+  const [swipeX, setSwipeX] = useState(0);
+  const [catSwiping, setCatSwiping] = useState(false);
+  const [catSwipeOut, setCatSwipeOut] = useState(false);
+  const catSwipeStartRef = useRef<{ x: number; y: number } | null>(null);
+  const catSwipeDecidedRef = useRef<"swipe" | "scroll" | null>(null);
+  const catSwipeRowRef = useRef<HTMLDivElement>(null);
+
+  const onCatSwipeDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (isDragging) return;
+      const target = e.target as HTMLElement;
+      if (target.closest("button")) return;
+      catSwipeStartRef.current = { x: e.clientX, y: e.clientY };
+      catSwipeDecidedRef.current = null;
+    },
+    [isDragging],
+  );
+
+  const onCatSwipeMove = useCallback((e: React.PointerEvent) => {
+    if (!catSwipeStartRef.current) return;
+    const dx = e.clientX - catSwipeStartRef.current.x;
+    const dy = e.clientY - catSwipeStartRef.current.y;
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+    if (!catSwipeDecidedRef.current && (absDx > 8 || absDy > 8)) {
+      const angle = Math.atan2(absDy, absDx) * (180 / Math.PI);
+      catSwipeDecidedRef.current = angle < 30 ? "swipe" : "scroll";
+      if (catSwipeDecidedRef.current === "swipe") setCatSwiping(true);
+    }
+    if (catSwipeDecidedRef.current === "swipe") {
+      e.preventDefault();
+      setSwipeX(dx);
+    }
+  }, []);
+
+  const onCatSwipeUp = useCallback(() => {
+    if (!catSwipeStartRef.current) return;
+    const wasSwipe = catSwipeDecidedRef.current === "swipe";
+    catSwipeStartRef.current = null;
+    catSwipeDecidedRef.current = null;
+    if (!wasSwipe) { setCatSwiping(false); setSwipeX(0); return; }
+    const rowW = catSwipeRowRef.current?.offsetWidth ?? 300;
+    if (Math.abs(swipeX) > rowW * 0.3) {
+      const dir = swipeX > 0 ? 1 : -1;
+      setCatSwipeOut(true);
+      setSwipeX(dir * rowW * 1.2);
+      setTimeout(() => onRemove(), 250);
+    } else {
+      setSwipeX(0);
+      setTimeout(() => setCatSwiping(false), 200);
+    }
+  }, [swipeX, onRemove]);
+
+  const onCatSwipeCancel = useCallback(() => {
+    catSwipeStartRef.current = null;
+    catSwipeDecidedRef.current = null;
+    setSwipeX(0);
+    setCatSwiping(false);
+  }, []);
+
   return (
     <div ref={setNodeRef} style={style}>
       <div
-        className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl transition-shadow ${
-          isDragging ? "bg-surface" : ""
-        }`}
+        ref={catSwipeRowRef}
+        style={{
+          position: "relative",
+          overflow: "hidden",
+          borderRadius: 12,
+          touchAction: catSwiping ? "none" : "pan-y",
+          WebkitUserSelect: catSwiping ? "none" : undefined,
+        }}
+        onPointerDown={onCatSwipeDown}
+        onPointerMove={onCatSwipeMove}
+        onPointerUp={onCatSwipeUp}
+        onPointerCancel={onCatSwipeCancel}
+        onContextMenu={(e) => { if (catSwiping) e.preventDefault(); }}
       >
-        <button
-          {...attributes}
-          {...listeners}
-          className="touch-none flex-shrink-0 p-0.5 text-text-3 cursor-grab active:cursor-grabbing"
+        {(catSwiping || catSwipeOut) && (
+          <div
+            className="absolute inset-0 flex items-center"
+            style={{
+              background: "#ef4444",
+              justifyContent: swipeX >= 0 ? "flex-start" : "flex-end",
+              padding: "0 16px",
+              borderRadius: 12,
+            }}
+          >
+            <Trash2 className="w-4 h-4 text-white" />
+          </div>
+        )}
+        <div
+          style={{
+            transform: `translateX(${swipeX}px)`,
+            transition: catSwiping && !catSwipeOut
+              ? (catSwipeStartRef.current ? "none" : "transform 200ms ease-out")
+              : catSwipeOut
+                ? "transform 250ms ease-in"
+                : undefined,
+            position: "relative",
+            zIndex: 1,
+            background: "var(--surface)",
+            willChange: catSwiping || catSwipeOut ? "transform" : undefined,
+            borderRadius: 12,
+          }}
         >
-          <GripVertical className="w-4 h-4" />
-        </button>
-        <div className="flex-1 flex items-center gap-2">
-          <span
-            className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-            style={{ backgroundColor: colors.dot }}
-          />
-          <span className="text-sm font-medium text-text-1">
-            {category}
-          </span>
+          <div
+            className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl transition-shadow ${
+              isDragging ? "bg-surface" : ""
+            }`}
+          >
+            <button
+              {...attributes}
+              {...listeners}
+              className="touch-none flex-shrink-0 p-0.5 text-text-3 cursor-grab active:cursor-grabbing"
+            >
+              <GripVertical className="w-4 h-4" />
+            </button>
+            <div className="flex-1 flex items-center gap-2">
+              <span
+                className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                style={{ backgroundColor: colors.dot }}
+              />
+              <span className="text-sm font-medium text-text-1">
+                {category}
+              </span>
+            </div>
+          </div>
         </div>
-        <button
-          onClick={onRemove}
-          onMouseDown={(e) => e.preventDefault()}
-          className="flex-shrink-0 p-1 text-text-3 hover:text-danger transition"
-        >
-          <X className="w-3.5 h-3.5" />
-        </button>
       </div>
     </div>
   );

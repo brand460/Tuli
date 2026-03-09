@@ -689,6 +689,8 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-3" />
             <input
               type="search"
+              name="recipe-search"
+              inputMode="text"
               autoComplete="off"
               autoCorrect="off"
               autoCapitalize="off"
@@ -950,6 +952,8 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-3" />
                 <input
                   type="search"
+                  name="meal-picker-search"
+                  inputMode="text"
                   autoComplete="off"
                   autoCorrect="off"
                   autoCapitalize="off"
@@ -1022,6 +1026,8 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
               <h3 className="text-base font-semibold mb-3">Freitext-Eintrag</h3>
             <input
               type="text"
+              name="freetext-entry"
+              inputMode="text"
               autoComplete="off"
               autoCorrect="off"
               autoCapitalize="off"
@@ -1137,6 +1143,7 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
               <h3 className="text-base font-semibold mb-3">URL importieren</h3>
             <input
               type="url"
+              name="recipe-url-import"
               autoComplete="off"
               autoCorrect="off"
               autoCapitalize="off"
@@ -1372,6 +1379,7 @@ function RecipeDetailView({
             value={comment}
             onChange={(e) => handleCommentChange(e.target.value)}
             placeholder="Eigene Notizen..."
+            name="recipe-comment"
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="off"
@@ -1518,6 +1526,8 @@ function RecipeEditView({
             value={recipe.title}
             onChange={(e) => update({ title: e.target.value })}
             placeholder="Rezeptname"
+            name="recipe-title"
+            inputMode="text"
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="off"
@@ -1536,6 +1546,7 @@ function RecipeEditView({
             value={recipe.description || ""}
             onChange={(e) => update({ description: e.target.value })}
             placeholder="Kurze Beschreibung..."
+            name="recipe-desc"
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="off"
@@ -1555,6 +1566,8 @@ function RecipeEditView({
             value={recipe.image_url || ""}
             onChange={(e) => update({ image_url: e.target.value || null })}
             placeholder="https://..."
+            name="recipe-image-url"
+            inputMode="text"
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="off"
@@ -1573,6 +1586,8 @@ function RecipeEditView({
             value={recipe.source_url || ""}
             onChange={(e) => update({ source_url: e.target.value })}
             placeholder="https://..."
+            name="recipe-source-url"
+            inputMode="text"
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="off"
@@ -1590,6 +1605,7 @@ function RecipeEditView({
             <label className="text-xs text-text-3 mb-1 block">Vorbereit. (Min)</label>
             <input
               type="tel"
+              name="recipe-prep-time"
               autoComplete="off"
               autoCorrect="off"
               autoCapitalize="off"
@@ -1606,6 +1622,7 @@ function RecipeEditView({
             <label className="text-xs text-text-3 mb-1 block">Kochzeit (Min)</label>
             <input
               type="tel"
+              name="recipe-cook-time"
               autoComplete="off"
               autoCorrect="off"
               autoCapitalize="off"
@@ -1621,7 +1638,15 @@ function RecipeEditView({
           <div>
             <label className="text-xs text-text-3 mb-1 block">Portionen</label>
             <input
-              type="number"
+              type="tel"
+              name="recipe-servings"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-form-type="other"
               value={recipe.servings ?? ""}
               onChange={(e) => update({ servings: e.target.value ? parseInt(e.target.value) : null })}
               className="w-full px-3 py-2 bg-surface-2 rounded-xl text-sm border-0 outline-none"
@@ -1677,18 +1702,45 @@ function RecipeEditView({
                   value={ing.quantity}
                   onChange={(e) => updateIngredient(i, "quantity", e.target.value)}
                   placeholder="Menge"
+                  name="ing-qty"
+                  inputMode="text"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-form-type="other"
                   className="w-16 px-2 py-1.5 bg-surface-2 rounded-lg text-sm border-0 outline-none"
                 />
                 <input
                   value={ing.unit}
                   onChange={(e) => updateIngredient(i, "unit", e.target.value)}
                   placeholder="Einh."
+                  name="ing-unit"
+                  inputMode="text"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-form-type="other"
                   className="w-14 px-2 py-1.5 bg-surface-2 rounded-lg text-sm border-0 outline-none"
                 />
                 <input
                   value={ing.name}
                   onChange={(e) => updateIngredient(i, "name", e.target.value)}
                   placeholder="Zutat"
+                  name="ing-name"
+                  inputMode="text"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-form-type="other"
                   className="flex-1 px-2 py-1.5 bg-surface-2 rounded-lg text-sm border-0 outline-none"
                 />
                 <button onClick={() => removeIngredient(i)} className="flex-shrink-0">
@@ -1717,6 +1769,14 @@ function RecipeEditView({
                   value={step.description}
                   onChange={(e) => updateStep(i, e.target.value)}
                   placeholder={`Schritt ${i + 1}...`}
+                  name="recipe-step"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-form-type="other"
                   className="flex-1 px-2 py-1.5 bg-surface-2 rounded-lg text-sm border-0 outline-none resize-none"
                   rows={2}
                 />
