@@ -5,11 +5,11 @@
  *
  *   1. <meta name="theme-color"> — Android/iOS Status Bar (oben)
  *      • Normal:       --zu-bg  (Seiten-Hintergrund, helles Grau / Schwarz)
- *      • Drawer offen: --zu-bg  (unverändert — Overlay dimmt Seite)
+ *      • Drawer offen: --zu-bg gedimmt mit bg-black/40 (simuliert Overlay)
  *
  *   2. document.body.backgroundColor — Android Gesture Bar (unten)
  *      • Normal:       --surface (Bottom-Nav-Farbe: Weiß / Dunkelgrau)
- *      • Drawer offen: --zu-bg  (passt zur Overlay-Stimmung)
+ *      • Drawer offen: --zu-bg gedimmt mit bg-black/40
  *
  * Reagiert automatisch auf:
  *   - Dark/Light-Mode-Wechsel (MutationObserver auf data-theme)
@@ -33,7 +33,7 @@ const ThemeColorContext = createContext<ThemeColorContextValue>({
   setDrawerOpen: () => {},
 });
 
-/* ── Hilfsfunktionen ─────────────────────────────────────────────── */
+/* ── Hilfsfunktionen ────────────────���────────────────────────────── */
 
 /** Löst eine CSS Custom Property zu einem konkreten String auf. */
 function resolveCssVar(varName: string): string {
@@ -84,6 +84,18 @@ function isDarkMode(): boolean {
 }
 
 /**
+ * Blendet eine Hex-Farbe mit schwarzem Overlay (rgba(0,0,0,alpha)).
+ * Ergebnis: rgb = bg_rgb * (1 - alpha)
+ */
+function blendWithBlack(hex: string, alpha: number): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const f = 1 - alpha;
+  return `#${Math.round(r * f).toString(16).padStart(2, "0")}${Math.round(g * f).toString(16).padStart(2, "0")}${Math.round(b * f).toString(16).padStart(2, "0")}`;
+}
+
+/**
  * Liefert true, wenn gerade mindestens ein Drawer-Overlay im DOM ist.
  * Alle Drawer/Bottom-Sheets tragen die Klasse "z-[1000]".
  */
@@ -106,17 +118,19 @@ export function ThemeColorProvider({
     const drawerOpen = manualDrawerOpen.current || isDrawerPresent();
 
     // ── Status Bar (meta theme-color) ──────────────────────────────
-    // Immer --zu-bg (Seiten-Hintergrund), egal ob Drawer offen oder nicht.
-    // Im Dark Mode ist --zu-bg fast schwarz (#141412).
-    const statusBarColor = resolveCssVar("--zu-bg");
-    if (statusBarColor) setMetaThemeColor(statusBarColor);
+    // Normal:       --zu-bg (Seiten-Hintergrund)
+    // Drawer offen: --zu-bg gedimmt mit bg-black/40 Overlay
+    const bgHex = resolveCssVar("--zu-bg");
+    if (bgHex) {
+      const statusBarColor = drawerOpen ? blendWithBlack(bgHex, 0.4) : bgHex;
+      setMetaThemeColor(statusBarColor);
+    }
 
     // ── Gesture Bar (body background) ─────────────────────────────
     // Normal:       --surface = Bottom-Nav-Farbe (Weiß / #1E1E1B)
-    // Drawer offen: --zu-bg   = Seiten-Hintergrund (passt zur Overlay-Stimmung)
+    // Drawer offen: --zu-bg gedimmt (passt zur Overlay-Stimmung)
     if (drawerOpen) {
-      const drawerBg = resolveCssVar("--zu-bg");
-      if (drawerBg) setBodyBg(drawerBg);
+      if (bgHex) setBodyBg(blendWithBlack(bgHex, 0.4));
     } else {
       const navBg = dark
         ? resolveCssVar("--surface")   // Dark: #1E1E1B (Nav-Hintergrund)
