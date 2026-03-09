@@ -1784,6 +1784,7 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
   const [hoveredBlockEl, setHoveredBlockEl] = useState<HTMLElement | null>(null);
   const [handlePos, setHandlePos] = useState<{ top: number } | null>(null);
   const initializedRef = useRef(false);
+  const lastKnownContentRef = useRef(content);
   const dragSrcRef = useRef<HTMLElement | null>(null);
   const [dropIdx, setDropIdx] = useState<number | null>(null);
   const isConvertingRef = useRef(false);
@@ -1896,10 +1897,30 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
   }, []);
 
   // Load content into editor on mount (key={page.id} ensures remount)
+  // AND apply remote updates when content prop changes from server
   useEffect(() => {
-    if (editorRef.current && !initializedRef.current) {
+    if (!editorRef.current) return;
+
+    // First mount — initialize editor
+    if (!initializedRef.current) {
       initializedRef.current = true;
       editorRef.current.innerHTML = content || "<p><br></p>";
+      lastKnownContentRef.current = content;
+      return;
+    }
+
+    // Remote update: content prop changed but NOT from our own editing
+    if (content !== lastKnownContentRef.current) {
+      const currentHtml = editorRef.current.innerHTML;
+      if (content !== currentHtml) {
+        // Only update DOM if editor is not focused (avoids cursor jump while typing)
+        const editorHasFocus = editorRef.current === document.activeElement
+          || editorRef.current.contains(document.activeElement);
+        if (!editorHasFocus) {
+          editorRef.current.innerHTML = content || "<p><br></p>";
+        }
+      }
+      lastKnownContentRef.current = content;
     }
   }, [content]);
 
@@ -1916,7 +1937,9 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
   // ── Sync innerHTML to state ──
   const syncContent = useCallback(() => {
     if (editorRef.current) {
-      onContentChange(editorRef.current.innerHTML);
+      const html = editorRef.current.innerHTML;
+      lastKnownContentRef.current = html;
+      onContentChange(html);
     }
   }, [onContentChange]);
 
