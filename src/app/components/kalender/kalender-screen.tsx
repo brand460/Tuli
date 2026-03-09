@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { CookingPot, Notepad } from "phosphor-react";
 import { apiFetch } from "../supabase-client";
-import { useKvRealtime, markLocalWrite } from "../use-kv-realtime";
+import { useKvRealtime, broadcastChange } from "../use-kv-realtime";
 import { useBackHandler } from "../ui/use-back-handler";
 import {
   CalendarEvent,
@@ -526,7 +526,7 @@ export function KalenderScreen({ onNavigate }: { onNavigate?: (tab: string, item
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(async () => {
       try {
-        markLocalWrite();
+        broadcastChange([`calendar_events:${DEV_HOUSEHOLD_ID}`]);
         await apiFetch("/calendar-events", {
           method: "PUT",
           body: JSON.stringify({ household_id: DEV_HOUSEHOLD_ID, events: newEvents }),

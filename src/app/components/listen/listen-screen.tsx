@@ -17,7 +17,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { apiFetch } from "../supabase-client";
-import { useKvRealtime, markLocalWrite } from "../use-kv-realtime";
+import { useKvRealtime, broadcastChange } from "../use-kv-realtime";
 import { useBackHandler } from "../ui/use-back-handler";
 import {
   DndContext,
@@ -188,7 +188,7 @@ export function ListenScreen({ openPageId }: { openPageId?: string | null } = {}
   // ── Save helpers ───────────────────────────────────────────────
   const saveData = useCallback(async (p: Page[], c: PageContents) => {
     try {
-      markLocalWrite();
+      broadcastChange([`custom_pages:${HOUSEHOLD_ID}`, `custom_blocks:${HOUSEHOLD_ID}`]);
       await Promise.all([
         apiFetch("/custom-pages", {
           method: "PUT",

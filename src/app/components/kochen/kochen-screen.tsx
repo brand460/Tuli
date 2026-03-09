@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "../supabase-client";
-import { useKvRealtime, markLocalWrite } from "../use-kv-realtime";
+import { useKvRealtime, broadcastChange } from "../use-kv-realtime";
 import { ImageWithFallback } from "../figma/ImageWithFallback";
 import type {
   Recipe, MealPlanEntry, Ingredient, RecipeStep, CategoryFilter,
@@ -173,6 +173,26 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
     loadData,
   );
 
+  // ── Visibility / focus handlers for reconnection ──
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        console.log("[Kochen] App visible again, reloading data...");
+        loadData();
+      }
+    };
+    const handleFocus = () => {
+      console.log("[Kochen] Window focused, reloading data...");
+      loadData();
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleFocus);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, [loadData]);
+
   // Center today in the week scroller on mount and when switching to wochenplaner tab
   useEffect(() => {
     if (kochenTab === "wochenplaner" && weekScrollRef.current) {
@@ -190,7 +210,7 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
   const saveRecipes = useCallback(async (updated: Recipe[]) => {
     setRecipes(updated);
     try {
-      markLocalWrite();
+      broadcastChange([`recipes:${HOUSEHOLD_ID}`]);
       await apiFetch("/recipes", {
         method: "PUT",
         body: JSON.stringify({ household_id: HOUSEHOLD_ID, recipes: updated }),
@@ -204,7 +224,7 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
   const saveMealPlan = useCallback(async (updated: MealPlanEntry[]) => {
     setMealPlan(updated);
     try {
-      markLocalWrite();
+      broadcastChange([`meal_plan:${HOUSEHOLD_ID}`]);
       await apiFetch("/meal-plan", {
         method: "PUT",
         body: JSON.stringify({ household_id: HOUSEHOLD_ID, entries: updated }),

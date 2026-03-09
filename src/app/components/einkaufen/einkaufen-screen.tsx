@@ -65,7 +65,7 @@ import { API_BASE } from "../supabase-client";
 import { publicAnonKey } from "/utils/supabase/info";
 import {
   useKvRealtime,
-  markLocalWrite,
+  broadcastChange,
 } from "../use-kv-realtime";
 import { useBackHandler } from "../ui/use-back-handler";
 import { useKeyboardHeight } from "./use-keyboard-height";
@@ -3054,7 +3054,7 @@ export function EinkaufenScreen({
       if (saveTimeout.current)
         clearTimeout(saveTimeout.current);
       saveTimeout.current = setTimeout(() => {
-        markLocalWrite();
+        broadcastChange([`shopping:${DEV_HOUSEHOLD_ID}`]);
         saveItems(newItems);
       }, 300);
     },
@@ -3079,7 +3079,7 @@ export function EinkaufenScreen({
       if (settingsSaveTimeout.current)
         clearTimeout(settingsSaveTimeout.current);
       settingsSaveTimeout.current = setTimeout(() => {
-        markLocalWrite();
+        broadcastChange([`store_settings:${DEV_HOUSEHOLD_ID}`]);
         saveStoreSettings(newSettings);
       }, 300);
     },
@@ -3687,7 +3687,7 @@ export function EinkaufenScreen({
         if (customCatSaveTimeout.current)
           clearTimeout(customCatSaveTimeout.current);
         customCatSaveTimeout.current = setTimeout(() => {
-          markLocalWrite();
+          broadcastChange([`custom_categories:${DEV_HOUSEHOLD_ID}`]);
           saveCustomCategories(next);
         }, 300);
         return next;
