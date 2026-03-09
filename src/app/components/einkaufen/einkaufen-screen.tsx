@@ -2132,6 +2132,8 @@ function AddItemBar({
             <input
               ref={inputRef}
               type="search"
+              inputMode="text"
+              name="add-item-search"
               autoComplete="off"
               autoCorrect="off"
               autoCapitalize="off"
@@ -2144,7 +2146,12 @@ function AddItemBar({
                 setQuery(e.target.value);
                 setShowSuggestions(true);
               }}
-              onFocus={() => setShowSuggestions(true)}
+              onFocus={() => {
+                setShowSuggestions(true);
+                // Prevent browser from auto-scrolling the fixed layout
+                // to reveal this input — we position the bar above the keyboard ourselves.
+                requestAnimationFrame(() => window.scrollTo(0, 0));
+              }}
               onBlur={() =>
                 setTimeout(() => setShowSuggestions(false), 200)
               }
@@ -2650,6 +2657,7 @@ export function EinkaufenScreen({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const lastLocalChangeRef = useRef<number>(0);
   const bottomBarRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // ── Fixed layout measurements ─────────────────────────────────
   // storeSelectorH: pixel height of the Store-Selector header (top anchor for list)
@@ -2660,6 +2668,10 @@ export function EinkaufenScreen({
   //   keyboard closed → addItemBarH
   //   keyboard open   → keyboardHeight + addItemBarH
   const [listBottomFixed, setListBottomFixed] = useState(60);
+  // kbOffset: keyboard height relative to the container (not the screen).
+  // Used to position the AddItemBar above the keyboard so the browser
+  // doesn't auto-scroll the fixed layout to reveal the focused input.
+  const [kbOffset, setKbOffset] = useState(0);
 
   // ── Load items + store settings ────────────────────────────────
   const reloadAllData = useCallback(async () => {
@@ -3741,15 +3753,26 @@ export function EinkaufenScreen({
   //   keyboard closed → bottom = addItemBarH
   //   keyboard open   → bottom = keyboardHeight + addItemBarH
   // Uses refs so the callback never goes stale.
+  //
+  // IMPORTANT: kbH must be relative to the CONTAINER (not the screen),
+  // because the scroll container's CSS `bottom` is relative to the
+  // container — which is shorter than the screen by the bottom-nav height.
+  // Using window.innerHeight would overshoot by exactly that amount,
+  // leaving a visible gap (the "white block") between list and keyboard.
   const updateListBottom = useCallback(() => {
     const vv = window.visualViewport;
+    // Use container's bottom edge (= screen position) instead of window.innerHeight
+    // so the keyboard offset is measured relative to the same coordinate space
+    // as the CSS `bottom` property.
+    const containerBottom =
+      containerRef.current?.getBoundingClientRect().bottom ??
+      window.innerHeight;
     const kbH = vv
-      ? Math.max(
-          0,
-          window.innerHeight - vv.height - (vv.offsetTop || 0),
-        )
+      ? Math.max(0, containerBottom - vv.height - (vv.offsetTop || 0))
       : 0;
     const isKbOpen = kbH > 80;
+    // Track keyboard offset for positioning the AddItemBar above the keyboard
+    setKbOffset(isKbOpen ? kbH : 0);
     // When item name is being edited the bar is hidden (display:none) → treat its height as 0
     // so no phantom gap appears below the list while the keyboard is open.
     const barH = isItemNameEditingRef.current
@@ -3804,6 +3827,10 @@ export function EinkaufenScreen({
     }
 
     const handleViewportChange = () => {
+      // Reset any browser auto-scroll that may have shifted the fixed layout
+      // (e.g. Android Chrome scrolls the page to reveal a focused input).
+      if (window.scrollY !== 0) window.scrollTo(0, 0);
+
       const kbH = Math.max(0, window.innerHeight - vv.height - (vv.offsetTop || 0));
       const isKbOpen = kbH > 80;
 
@@ -3832,6 +3859,7 @@ export function EinkaufenScreen({
 
   return (
     <div
+      ref={containerRef}
       className="flex-1 min-h-0 relative overflow-hidden"
       style={{
         background: "var(--zu-bg)",
@@ -4006,18 +4034,16 @@ export function EinkaufenScreen({
         </div>
       </div>
 
-      {/* ── AddItemBar (Thumb-Nav) ──────────────────────────────────────
-           position: absolute, bottom: 0  — bleibt immer am unteren Rand
-           des Content-Bereichs (= über der Bottom-Nav).
-           Bei geöffneter Tastatur deckt die Tastatur diese Bar ab —
-           das ist korrekt. Die Liste (listBottomFixed) wird gleichzeitig
-           nach oben verkleinert, sodass alle Einträge über der Tastatur
-           sichtbar bleiben.                                            */}
+      {/* ── AddItemBar ──────────────────────────────────────────────────
+           position: absolute, bottom: kbOffset — sits directly above the
+           keyboard when it's open, so the browser never needs to auto-scroll
+           the fixed layout to show the focused search input.
+           When the keyboard is closed, kbOffset is 0 → bar at the bottom.  */}
       <div
         ref={bottomBarRef}
         style={{
           position: "absolute",
-          bottom: 0,
+          bottom: kbOffset,
           left: 0,
           right: 0,
           zIndex: 100,
