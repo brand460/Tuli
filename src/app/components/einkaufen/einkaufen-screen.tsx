@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+} from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "motion/react";
 import {
@@ -57,7 +63,10 @@ import {
 } from "./shopping-data";
 import { API_BASE } from "../supabase-client";
 import { publicAnonKey } from "/utils/supabase/info";
-import { useKvRealtime, markLocalWrite } from "../use-kv-realtime";
+import {
+  useKvRealtime,
+  markLocalWrite,
+} from "../use-kv-realtime";
 
 // ── Types ──────────────────────────────────────────────────────────
 interface StoreSettingEntry {
@@ -72,7 +81,7 @@ async function fetchItems(): Promise<ShoppingItem[]> {
   try {
     const res = await fetch(
       `${API_BASE}/shopping?household_id=${DEV_HOUSEHOLD_ID}`,
-      { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+      { headers: { Authorization: `Bearer ${publicAnonKey}` } },
     );
     const json = await res.json();
     return json.items || [];
@@ -90,18 +99,23 @@ async function saveItems(items: ShoppingItem[]): Promise<void> {
         "Content-Type": "application/json",
         Authorization: `Bearer ${publicAnonKey}`,
       },
-      body: JSON.stringify({ household_id: DEV_HOUSEHOLD_ID, items }),
+      body: JSON.stringify({
+        household_id: DEV_HOUSEHOLD_ID,
+        items,
+      }),
     });
   } catch (err) {
     console.log("saveItems error:", err);
   }
 }
 
-async function fetchStoreSettings(): Promise<StoreSettingEntry[]> {
+async function fetchStoreSettings(): Promise<
+  StoreSettingEntry[]
+> {
   try {
     const res = await fetch(
       `${API_BASE}/store-settings?household_id=${DEV_HOUSEHOLD_ID}`,
-      { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+      { headers: { Authorization: `Bearer ${publicAnonKey}` } },
     );
     const json = await res.json();
     return json.settings || [];
@@ -111,7 +125,9 @@ async function fetchStoreSettings(): Promise<StoreSettingEntry[]> {
   }
 }
 
-async function saveStoreSettings(settings: StoreSettingEntry[]): Promise<void> {
+async function saveStoreSettings(
+  settings: StoreSettingEntry[],
+): Promise<void> {
   try {
     await fetch(`${API_BASE}/store-settings`, {
       method: "PUT",
@@ -119,7 +135,10 @@ async function saveStoreSettings(settings: StoreSettingEntry[]): Promise<void> {
         "Content-Type": "application/json",
         Authorization: `Bearer ${publicAnonKey}`,
       },
-      body: JSON.stringify({ household_id: DEV_HOUSEHOLD_ID, settings }),
+      body: JSON.stringify({
+        household_id: DEV_HOUSEHOLD_ID,
+        settings,
+      }),
     });
   } catch (err) {
     console.log("saveStoreSettings error:", err);
@@ -130,7 +149,7 @@ async function fetchCustomCategories(): Promise<string[]> {
   try {
     const res = await fetch(
       `${API_BASE}/custom-categories?household_id=${DEV_HOUSEHOLD_ID}`,
-      { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+      { headers: { Authorization: `Bearer ${publicAnonKey}` } },
     );
     const json = await res.json();
     return json.categories || [];
@@ -140,7 +159,9 @@ async function fetchCustomCategories(): Promise<string[]> {
   }
 }
 
-async function saveCustomCategories(categories: string[]): Promise<void> {
+async function saveCustomCategories(
+  categories: string[],
+): Promise<void> {
   try {
     await fetch(`${API_BASE}/custom-categories`, {
       method: "PUT",
@@ -148,7 +169,10 @@ async function saveCustomCategories(categories: string[]): Promise<void> {
         "Content-Type": "application/json",
         Authorization: `Bearer ${publicAnonKey}`,
       },
-      body: JSON.stringify({ household_id: DEV_HOUSEHOLD_ID, categories }),
+      body: JSON.stringify({
+        household_id: DEV_HOUSEHOLD_ID,
+        categories,
+      }),
     });
   } catch (err) {
     console.log("saveCustomCategories error:", err);
@@ -167,7 +191,7 @@ async function fetchGlobalItems(): Promise<GlobalItem[]> {
   try {
     const res = await fetch(
       `${API_BASE}/global-items?household_id=${DEV_HOUSEHOLD_ID}`,
-      { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+      { headers: { Authorization: `Bearer ${publicAnonKey}` } },
     );
     const json = await res.json();
     return json.items || [];
@@ -177,7 +201,10 @@ async function fetchGlobalItems(): Promise<GlobalItem[]> {
   }
 }
 
-async function upsertGlobalItem(name: string, category: string): Promise<void> {
+async function upsertGlobalItem(
+  name: string,
+  category: string,
+): Promise<void> {
   try {
     await fetch(`${API_BASE}/global-items`, {
       method: "PUT",
@@ -185,7 +212,11 @@ async function upsertGlobalItem(name: string, category: string): Promise<void> {
         "Content-Type": "application/json",
         Authorization: `Bearer ${publicAnonKey}`,
       },
-      body: JSON.stringify({ household_id: DEV_HOUSEHOLD_ID, name, category }),
+      body: JSON.stringify({
+        household_id: DEV_HOUSEHOLD_ID,
+        name,
+        category,
+      }),
     });
   } catch (err) {
     console.log("upsertGlobalItem error:", err);
@@ -213,27 +244,50 @@ function StoreLogo({
       style={{
         width: size,
         height: size,
-        backgroundColor: isAlleStore ? "var(--color-surface-2)" : (showLogo ? "var(--color-surface-2)" : (imgError ? "var(--color-surface-2)" : store.bgColor)),
-        border: isSelected ? "2.5px solid var(--color-accent)" : "2.5px solid transparent",
+        backgroundColor: isAlleStore
+          ? "var(--color-surface-2)"
+          : showLogo
+            ? "var(--color-surface-2)"
+            : imgError
+              ? "var(--color-surface-2)"
+              : store.bgColor,
+        border: isSelected
+          ? "2.5px solid var(--color-accent)"
+          : "2.5px solid transparent",
         opacity: 1,
       }}
     >
       {isAlleStore ? (
-        <ShoppingBag style={{ width: size * 0.45, height: size * 0.45 }} className="text-text-3" />
+        <ShoppingBag
+          style={{ width: size * 0.45, height: size * 0.45 }}
+          className="text-text-3"
+        />
       ) : store.emoji ? (
-        <span className="select-none" style={{ fontSize: size * 0.45 }}>{store.emoji}</span>
+        <span
+          className="select-none"
+          style={{ fontSize: size * 0.45 }}
+        >
+          {store.emoji}
+        </span>
       ) : showLogo ? (
         <img
           src={logoUrl}
           alt={store.name}
           className="object-contain p-1.5"
-          style={{ width: size * 0.75, height: size * 0.75, imageRendering: "crisp-edges" }}
+          style={{
+            width: size * 0.75,
+            height: size * 0.75,
+            imageRendering: "crisp-edges",
+          }}
           onError={() => setImgError(true)}
         />
       ) : (
         <span
           className="font-bold select-none"
-          style={{ fontSize: size * 0.35, color: imgError ? "#6B7280" : store.color }}
+          style={{
+            fontSize: size * 0.35,
+            color: imgError ? "#6B7280" : store.color,
+          }}
         >
           {store.name.charAt(0).toUpperCase()}
         </span>
@@ -275,7 +329,11 @@ function SortableStoreButton({
   };
 
   return (
-    <div ref={setNodeRef} style={style} className="flex-shrink-0">
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="flex-shrink-0"
+    >
       <button
         {...attributes}
         {...listeners}
@@ -284,7 +342,11 @@ function SortableStoreButton({
         }`}
       >
         <div className="relative">
-          <StoreLogo store={store} size={48} isSelected={isSelected} />
+          <StoreLogo
+            store={store}
+            size={48}
+            isSelected={isSelected}
+          />
           {count > 0 && (
             <span className="absolute -top-1 -right-1 bg-accent text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
               {count}
@@ -320,29 +382,48 @@ function StoreSelector({
   transferHoveredStoreId?: string | null;
   isTransferActive?: boolean;
 }) {
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTimer = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
   const longPressTriggered = useRef(false);
 
-  const storeSensorOpts = useMemo(() => ({
-    pointer: { activationConstraint: { distance: 5 } },
-    touch: { activationConstraint: { delay: 100, tolerance: 5 } },
-  }), []);
-  const pointerSensor = useSensor(PointerSensor, storeSensorOpts.pointer);
-  const touchSensor = useSensor(TouchSensor, storeSensorOpts.touch);
+  const storeSensorOpts = useMemo(
+    () => ({
+      pointer: { activationConstraint: { distance: 5 } },
+      touch: {
+        activationConstraint: { delay: 100, tolerance: 5 },
+      },
+    }),
+    [],
+  );
+  const pointerSensor = useSensor(
+    PointerSensor,
+    storeSensorOpts.pointer,
+  );
+  const touchSensor = useSensor(
+    TouchSensor,
+    storeSensorOpts.touch,
+  );
   const sensors = useSensors(pointerSensor, touchSensor);
 
-  const storeIds = useMemo(() => stores.map((s) => s.id), [stores]);
+  const storeIds = useMemo(
+    () => stores.map((s) => s.id),
+    [stores],
+  );
 
   const storeModifiers = useMemo(
     () => [restrictToHorizontalAxis, restrictToParentElement],
-    []
+    [],
   );
   const storeAutoScroll = useMemo(
     () => ({ threshold: { x: 0.2, y: 0 }, acceleration: 10 }),
-    []
+    [],
   );
 
-  const handlePointerDown = (storeId: string, e: React.PointerEvent) => {
+  const handlePointerDown = (
+    storeId: string,
+    e: React.PointerEvent,
+  ) => {
     if (isReorderMode) return;
     longPressTriggered.current = false;
     const target = e.currentTarget as HTMLElement;
@@ -379,7 +460,7 @@ function StoreSelector({
   return (
     <div>
       <div
-        className={`flex items-center gap-2 px-4 py-3 scrollbar-hide ${isReorderMode ? 'overflow-x-auto scroll-smooth' : 'overflow-x-auto'}`}
+        className={`flex items-center gap-2 px-4 py-3 scrollbar-hide ${isReorderMode ? "overflow-x-auto scroll-smooth" : "overflow-x-auto"}`}
         style={{ WebkitOverflowScrolling: "touch" }}
       >
         {isReorderMode ? (
@@ -411,12 +492,16 @@ function StoreSelector({
           stores.map((store) => {
             const isSelected = selectedStore === store.id;
             const count = itemCounts[store.id] || 0;
-            const isTransferHovered = isTransferActive && transferHoveredStoreId === store.id;
+            const isTransferHovered =
+              isTransferActive &&
+              transferHoveredStoreId === store.id;
             return (
               <button
                 key={store.id}
                 data-store-id={store.id}
-                onPointerDown={(e) => handlePointerDown(store.id, e)}
+                onPointerDown={(e) =>
+                  handlePointerDown(store.id, e)
+                }
                 onPointerUp={handlePointerUp}
                 onPointerLeave={handlePointerLeave}
                 onClick={() => handleClick(store.id)}
@@ -424,13 +509,21 @@ function StoreSelector({
                 className={`flex items-center justify-center flex-shrink-0 transition-all duration-150 ${
                   isTransferHovered ? "scale-125" : ""
                 }`}
-                style={{ WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none" }}
+                style={{
+                  WebkitTouchCallout: "none",
+                  WebkitUserSelect: "none",
+                  userSelect: "none",
+                }}
               >
-                <div className={`relative ${isTransferHovered ? "ring-3 ring-accent rounded-full shadow-lg" : ""}`}>
+                <div
+                  className={`relative ${isTransferHovered ? "ring-3 ring-accent rounded-full shadow-lg" : ""}`}
+                >
                   <StoreLogo
                     store={store}
                     size={48}
-                    isSelected={isSelected || !!isTransferHovered}
+                    isSelected={
+                      isSelected || !!isTransferHovered
+                    }
                   />
                   {count > 0 && (
                     <span className="absolute -top-1 -right-1 bg-accent text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
@@ -447,7 +540,14 @@ function StoreSelector({
             onClick={onAddStore}
             className="flex items-center justify-center flex-shrink-0"
           >
-            <div className="rounded-full border-2 border-dashed flex items-center justify-center text-text-3 hover:border-accent hover:text-accent transition" style={{ width: 48, height: 48, borderColor: "var(--zu-border)" }}>
+            <div
+              className="rounded-full border-2 border-dashed flex items-center justify-center text-text-3 hover:border-accent hover:text-accent transition"
+              style={{
+                width: 48,
+                height: 48,
+                borderColor: "var(--zu-border)",
+              }}
+            >
               <Plus className="w-5 h-5" />
             </div>
           </button>
@@ -482,17 +582,30 @@ function StorePopover({
     const rect = anchorEl.getBoundingClientRect();
     setPos({
       top: rect.bottom + 6,
-      left: Math.max(8, Math.min(rect.left + rect.width / 2 - 100, window.innerWidth - 208)),
+      left: Math.max(
+        8,
+        Math.min(
+          rect.left + rect.width / 2 - 100,
+          window.innerWidth - 208,
+        ),
+      ),
     });
   }, [anchorEl]);
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
-      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+      if (
+        popoverRef.current &&
+        !popoverRef.current.contains(e.target as Node)
+      ) {
         onClose();
       }
     };
-    const t = setTimeout(() => document.addEventListener("pointerdown", handleClick), 50);
+    const t = setTimeout(
+      () =>
+        document.addEventListener("pointerdown", handleClick),
+      50,
+    );
     return () => {
       clearTimeout(t);
       document.removeEventListener("pointerdown", handleClick);
@@ -500,13 +613,28 @@ function StorePopover({
   }, [onClose]);
 
   const options = [
-    { icon: <ArrowUpDown className="w-4 h-4" />, label: "Laden verschieben", action: onReorder },
-    { icon: <Trash2 className="w-4 h-4" />, label: "Laden entfernen", action: onRemove },
-    { icon: <Settings className="w-4 h-4" />, label: "Kategorien anpassen", action: onCategorySort },
+    {
+      icon: <ArrowUpDown className="w-4 h-4" />,
+      label: "Laden verschieben",
+      action: onReorder,
+    },
+    {
+      icon: <Trash2 className="w-4 h-4" />,
+      label: "Laden entfernen",
+      action: onRemove,
+    },
+    {
+      icon: <Settings className="w-4 h-4" />,
+      label: "Kategorien anpassen",
+      action: onCategorySort,
+    },
   ];
 
   return (
-    <div className="fixed inset-0 z-[1000]" style={{ pointerEvents: "none" }}>
+    <div
+      className="fixed inset-0 z-[1000]"
+      style={{ pointerEvents: "none" }}
+    >
       <motion.div
         ref={popoverRef}
         initial={{ opacity: 0, scale: 0.9, y: -4 }}
@@ -542,50 +670,177 @@ function StorePopover({
 }
 
 // ── Category chip colors ───────────────────────────────────────────
-const CATEGORY_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
-  "Obst & Gemüse": { bg: "#DCFCE7", text: "#166534", dot: "#22C55E" },
+const CATEGORY_COLORS: Record<
+  string,
+  { bg: string; text: string; dot: string }
+> = {
+  "Obst & Gemüse": {
+    bg: "#DCFCE7",
+    text: "#166534",
+    dot: "#22C55E",
+  },
   Backwaren: { bg: "#FEF3C7", text: "#92400E", dot: "#F59E0B" },
-  "Fleisch & Wurst": { bg: "#FCE7F3", text: "#9D174D", dot: "#EC4899" },
-  "Milch & Käse": { bg: "#DBEAFE", text: "#1E40AF", dot: "#3B82F6" },
+  "Fleisch & Wurst": {
+    bg: "#FCE7F3",
+    text: "#9D174D",
+    dot: "#EC4899",
+  },
+  "Milch & Käse": {
+    bg: "#DBEAFE",
+    text: "#1E40AF",
+    dot: "#3B82F6",
+  },
   Eier: { bg: "#FEF9C3", text: "#854D0E", dot: "#EAB308" },
-  "Nudeln & Reis": { bg: "#FFF7ED", text: "#9A3412", dot: "#F97316" },
+  "Nudeln & Reis": {
+    bg: "#FFF7ED",
+    text: "#9A3412",
+    dot: "#F97316",
+  },
   Konserven: { bg: "#FEE2E2", text: "#991B1B", dot: "#EF4444" },
-  "Saucen & Gewürze": { bg: "#FED7AA", text: "#9A3412", dot: "#FB923C" },
-  "Kaffee & Tee": { bg: "#F3E8FF", text: "#6B21A8", dot: "#A855F7" },
-  "Müsli & Frühstück": { bg: "#FFEDD5", text: "#C2410C", dot: "#F97316" },
+  "Saucen & Gewürze": {
+    bg: "#FED7AA",
+    text: "#9A3412",
+    dot: "#FB923C",
+  },
+  "Kaffee & Tee": {
+    bg: "#F3E8FF",
+    text: "#6B21A8",
+    dot: "#A855F7",
+  },
+  "Müsli & Frühstück": {
+    bg: "#FFEDD5",
+    text: "#C2410C",
+    dot: "#F97316",
+  },
   Tiefkühl: { bg: "#E0F2FE", text: "#075985", dot: "#0EA5E9" },
-  "Süßwaren & Snacks": { bg: "#FDF2F8", text: "#BE185D", dot: "#EC4899" },
+  "Süßwaren & Snacks": {
+    bg: "#FDF2F8",
+    text: "#BE185D",
+    dot: "#EC4899",
+  },
   Getränke: { bg: "#ECFDF5", text: "#065F46", dot: "#10B981" },
-  "Haushalt & Reinigung": { bg: "#F3F4F6", text: "#374151", dot: "#6B7280" },
-  Tiernahrung: { bg: "#FEF3C7", text: "#78350F", dot: "#D97706" },
-  Körperpflege: { bg: "#FCE7F3", text: "#9D174D", dot: "#EC4899" },
-  Haarpflege: { bg: "#F3E8FF", text: "#6B21A8", dot: "#A855F7" },
-  Gesichtspflege: { bg: "#FDF2F8", text: "#BE185D", dot: "#F472B6" },
-  "Makeup & Kosmetik": { bg: "#FECDD3", text: "#9F1239", dot: "#FB7185" },
-  Mundhygiene: { bg: "#DBEAFE", text: "#1E40AF", dot: "#3B82F6" },
-  Damenhygiene: { bg: "#FCE7F3", text: "#9D174D", dot: "#EC4899" },
-  Babypflege: { bg: "#FEF9C3", text: "#854D0E", dot: "#EAB308" },
-  Reinigungsmittel: { bg: "#E0F2FE", text: "#075985", dot: "#0EA5E9" },
-  Waschmittel: { bg: "#ECFDF5", text: "#065F46", dot: "#10B981" },
-  Papierprodukte: { bg: "#F3F4F6", text: "#374151", dot: "#6B7280" },
-  "Gesundheit & Medizin": { bg: "#DCFCE7", text: "#166534", dot: "#22C55E" },
-  "Vitamine & Nahrungsergänzung": { bg: "#FFF7ED", text: "#C2410C", dot: "#F97316" },
-  "Foto & Technik": { bg: "#E0E7FF", text: "#3730A3", dot: "#6366F1" },
-  "Lebensmittel & Snacks": { bg: "#FEF3C7", text: "#92400E", dot: "#F59E0B" },
-  Elektronik: { bg: "#E0E7FF", text: "#3730A3", dot: "#6366F1" },
+  "Haushalt & Reinigung": {
+    bg: "#F3F4F6",
+    text: "#374151",
+    dot: "#6B7280",
+  },
+  Tiernahrung: {
+    bg: "#FEF3C7",
+    text: "#78350F",
+    dot: "#D97706",
+  },
+  Körperpflege: {
+    bg: "#FCE7F3",
+    text: "#9D174D",
+    dot: "#EC4899",
+  },
+  Haarpflege: {
+    bg: "#F3E8FF",
+    text: "#6B21A8",
+    dot: "#A855F7",
+  },
+  Gesichtspflege: {
+    bg: "#FDF2F8",
+    text: "#BE185D",
+    dot: "#F472B6",
+  },
+  "Makeup & Kosmetik": {
+    bg: "#FECDD3",
+    text: "#9F1239",
+    dot: "#FB7185",
+  },
+  Mundhygiene: {
+    bg: "#DBEAFE",
+    text: "#1E40AF",
+    dot: "#3B82F6",
+  },
+  Damenhygiene: {
+    bg: "#FCE7F3",
+    text: "#9D174D",
+    dot: "#EC4899",
+  },
+  Babypflege: {
+    bg: "#FEF9C3",
+    text: "#854D0E",
+    dot: "#EAB308",
+  },
+  Reinigungsmittel: {
+    bg: "#E0F2FE",
+    text: "#075985",
+    dot: "#0EA5E9",
+  },
+  Waschmittel: {
+    bg: "#ECFDF5",
+    text: "#065F46",
+    dot: "#10B981",
+  },
+  Papierprodukte: {
+    bg: "#F3F4F6",
+    text: "#374151",
+    dot: "#6B7280",
+  },
+  "Gesundheit & Medizin": {
+    bg: "#DCFCE7",
+    text: "#166534",
+    dot: "#22C55E",
+  },
+  "Vitamine & Nahrungsergänzung": {
+    bg: "#FFF7ED",
+    text: "#C2410C",
+    dot: "#F97316",
+  },
+  "Foto & Technik": {
+    bg: "#E0E7FF",
+    text: "#3730A3",
+    dot: "#6366F1",
+  },
+  "Lebensmittel & Snacks": {
+    bg: "#FEF3C7",
+    text: "#92400E",
+    dot: "#F59E0B",
+  },
+  Elektronik: {
+    bg: "#E0E7FF",
+    text: "#3730A3",
+    dot: "#6366F1",
+  },
   Haushalt: { bg: "#F3F4F6", text: "#374151", dot: "#6B7280" },
-  Lebensmittel: { bg: "#DCFCE7", text: "#166534", dot: "#22C55E" },
-  "Bücher & Medien": { bg: "#F3E8FF", text: "#6B21A8", dot: "#A855F7" },
-  "Sport & Freizeit": { bg: "#ECFDF5", text: "#065F46", dot: "#10B981" },
+  Lebensmittel: {
+    bg: "#DCFCE7",
+    text: "#166534",
+    dot: "#22C55E",
+  },
+  "Bücher & Medien": {
+    bg: "#F3E8FF",
+    text: "#6B21A8",
+    dot: "#A855F7",
+  },
+  "Sport & Freizeit": {
+    bg: "#ECFDF5",
+    text: "#065F46",
+    dot: "#10B981",
+  },
   Kleidung: { bg: "#FCE7F3", text: "#9D174D", dot: "#EC4899" },
-  Bürobedarf: { bg: "#FEF9C3", text: "#854D0E", dot: "#EAB308" },
+  Bürobedarf: {
+    bg: "#FEF9C3",
+    text: "#854D0E",
+    dot: "#EAB308",
+  },
   Spielzeug: { bg: "#FEF3C7", text: "#92400E", dot: "#F59E0B" },
   Garten: { bg: "#DCFCE7", text: "#166534", dot: "#22C55E" },
   Sonstiges: { bg: "#F1F5F9", text: "#475569", dot: "#94A3B8" },
 };
 
-function getCategoryChipColor(category: string): { bg: string; text: string; dot: string } {
-  return CATEGORY_COLORS[category] || { ...CATEGORY_COLORS.Sonstiges };
+function getCategoryChipColor(category: string): {
+  bg: string;
+  text: string;
+  dot: string;
+} {
+  return (
+    CATEGORY_COLORS[category] || {
+      ...CATEGORY_COLORS.Sonstiges,
+    }
+  );
 }
 
 // ── Category Chip Component ────────────────────────────────────────
@@ -612,7 +867,10 @@ function CategoryChip({
       style={
         selected
           ? { borderColor: colors.dot, color: colors.text }
-          : { borderColor: "var(--zu-border)", color: colors.text }
+          : {
+              borderColor: "var(--zu-border)",
+              color: colors.text,
+            }
       }
     >
       <span
@@ -646,12 +904,15 @@ function createRestrictToListBounds(
     }
 
     // Top bound: bottom edge of store selector
-    const selectorRect = storeSelectorRef.current?.getBoundingClientRect();
+    const selectorRect =
+      storeSelectorRef.current?.getBoundingClientRect();
     const topBound = selectorRect ? selectorRect.bottom : 0;
 
     // Bottom bound: top edge of checked section, or bottom of scroll container
-    const checkedRect = checkedSectionRef.current?.getBoundingClientRect();
-    const scrollRect = scrollContainerRef.current?.getBoundingClientRect();
+    const checkedRect =
+      checkedSectionRef.current?.getBoundingClientRect();
+    const scrollRect =
+      scrollContainerRef.current?.getBoundingClientRect();
     // If checked section has content (height > 0), use its top; otherwise use scroll container bottom
     const bottomBound =
       checkedRect && checkedRect.height > 0
@@ -661,7 +922,9 @@ function createRestrictToListBounds(
           : window.innerHeight;
 
     const minY = topBound - draggingNodeRect.top;
-    const maxY = bottomBound - (draggingNodeRect.top + draggingNodeRect.height);
+    const maxY =
+      bottomBound -
+      (draggingNodeRect.top + draggingNodeRect.height);
 
     return {
       ...transform,
@@ -683,21 +946,34 @@ const UNITS: { value: UnitType; label: string }[] = [
 
 function getUnitStep(unit: string | null | undefined): number {
   switch (unit) {
-    case "g": case "ml": return 50;
-    case "kg": case "L": return 0.5;
-    default: return 1;
+    case "g":
+    case "ml":
+      return 50;
+    case "kg":
+    case "L":
+      return 0.5;
+    default:
+      return 1;
   }
 }
 
 function getUnitMin(unit: string | null | undefined): number {
   switch (unit) {
-    case "g": case "ml": return 50;
-    case "kg": case "L": return 0.5;
-    default: return 1;
+    case "g":
+    case "ml":
+      return 50;
+    case "kg":
+    case "L":
+      return 0.5;
+    default:
+      return 1;
   }
 }
 
-function formatQuantity(qty: number, unit: string | null | undefined): string {
+function formatQuantity(
+  qty: number,
+  unit: string | null | undefined,
+): string {
   if (unit === "kg" || unit === "L") {
     return qty % 1 === 0 ? qty.toString() : qty.toFixed(1);
   }
@@ -706,9 +982,14 @@ function formatQuantity(qty: number, unit: string | null | undefined): string {
 
 function getDefaultQuantityForUnit(unit: UnitType): number {
   switch (unit) {
-    case "g": case "ml": return 100;
-    case "kg": case "L": return 1;
-    default: return 1;
+    case "g":
+    case "ml":
+      return 100;
+    case "kg":
+    case "L":
+      return 1;
+    default:
+      return 1;
   }
 }
 
@@ -724,7 +1005,9 @@ function QuantityDrawer({
 }) {
   const currentUnit = (item.unit as UnitType) || null;
   const [unit, setUnit] = useState<UnitType>(currentUnit);
-  const [inputValue, setInputValue] = useState(item.quantity.toString());
+  const [inputValue, setInputValue] = useState(
+    item.quantity.toString(),
+  );
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -738,13 +1021,16 @@ function QuantityDrawer({
     // If switching unit category, set a sensible default
     const parsed = parseFloat(inputValue);
     if (isNaN(parsed) || parsed <= 0) {
-      setInputValue(getDefaultQuantityForUnit(newUnit).toString());
+      setInputValue(
+        getDefaultQuantityForUnit(newUnit).toString(),
+      );
     }
   };
 
   const doSave = useCallback(() => {
     let qty = parseFloat(inputValue);
-    if (isNaN(qty) || qty <= 0) qty = getDefaultQuantityForUnit(unit);
+    if (isNaN(qty) || qty <= 0)
+      qty = getDefaultQuantityForUnit(unit);
     const min = getUnitMin(unit);
     if (qty < min) qty = min;
     onSave(qty, unit);
@@ -767,23 +1053,39 @@ function QuantityDrawer({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      transition={{ type: "spring", damping: 25, stiffness: 300 }}
+      transition={{
+        type: "spring",
+        damping: 25,
+        stiffness: 300,
+      }}
     >
-      <div className="absolute inset-0 bg-black/40" onClick={handleBackdropClick} />
+      <div
+        className="absolute inset-0 bg-black/40"
+        onClick={handleBackdropClick}
+      />
       <motion.div
         className="relative bg-surface rounded-t-[20px] px-5 pt-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))]"
         style={{ height: 160, minHeight: 160 }}
         initial={{ y: "100%" }}
         animate={{ y: 0 }}
         exit={{ y: "100%" }}
-        transition={{ type: "spring", damping: 25, stiffness: 300 }}
+        transition={{
+          type: "spring",
+          damping: 25,
+          stiffness: 300,
+        }}
       >
         {/* Drag handle */}
         <div className="flex justify-center mb-4">
-          <div className="w-9 h-1 rounded-full" style={{ background: "var(--zu-border)" }} />
+          <div
+            className="w-9 h-1 rounded-full"
+            style={{ background: "var(--zu-border)" }}
+          />
         </div>
 
-        <p className="text-sm font-semibold text-text-1 mb-3">{item.name}</p>
+        <p className="text-sm font-semibold text-text-1 mb-3">
+          {item.name}
+        </p>
 
         <div className="flex items-center gap-3">
           {/* Quantity input */}
@@ -863,10 +1165,15 @@ function SortableShoppingItem({
   } = useSortable({ id: item.id });
 
   const isAnimating = animatingCheckId === item.id;
-  const [phase, setPhase] = useState<"idle" | "flash" | "flyout">("idle");
+  const [phase, setPhase] = useState<
+    "idle" | "flash" | "flyout"
+  >("idle");
 
   useEffect(() => {
-    if (!isAnimating) { setPhase("idle"); return; }
+    if (!isAnimating) {
+      setPhase("idle");
+      return;
+    }
     setPhase("flash");
     const t1 = setTimeout(() => setPhase("flyout"), 300);
     return () => clearTimeout(t1);
@@ -900,17 +1207,20 @@ function SortableShoppingItem({
     onEditingChange?.(false);
   }, [editNameValue, item.name, onNameChange, onEditingChange]);
 
-  const handleNameKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      handleNameSave();
-    }
-    if (e.key === "Escape") {
-      setEditNameValue(item.name);
-      setIsEditingName(false);
-      onEditingChange?.(false);
-    }
-  }, [handleNameSave, item.name, onEditingChange]);
+  const handleNameKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        handleNameSave();
+      }
+      if (e.key === "Escape") {
+        setEditNameValue(item.name);
+        setIsEditingName(false);
+        onEditingChange?.(false);
+      }
+    },
+    [handleNameSave, item.name, onEditingChange],
+  );
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -920,7 +1230,9 @@ function SortableShoppingItem({
   };
 
   // Long press on counter area
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTimer = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
   const longPressFired = useRef(false);
 
   const handlePointerDown = useCallback(() => {
@@ -940,7 +1252,8 @@ function SortableShoppingItem({
 
   const step = getUnitStep(item.unit);
   const min = getUnitMin(item.unit);
-  const unitLabel = item.unit && item.unit !== "Stk." ? item.unit : null;
+  const unitLabel =
+    item.unit && item.unit !== "Stk." ? item.unit : null;
 
   return (
     <div ref={setNodeRef} style={style}>
@@ -957,10 +1270,14 @@ function SortableShoppingItem({
             ? {
                 transform: "translateY(100px)",
                 opacity: 0,
-                transition: "transform 400ms ease-in, opacity 400ms ease-in",
+                transition:
+                  "transform 400ms ease-in, opacity 400ms ease-in",
               }
             : phase === "flash"
-              ? { backgroundColor: "var(--accent-light)", transition: "background-color 150ms ease-in" }
+              ? {
+                  backgroundColor: "var(--accent-light)",
+                  transition: "background-color 150ms ease-in",
+                }
               : undefined
         }
       >
@@ -981,7 +1298,11 @@ function SortableShoppingItem({
                 : "hover:border-accent"
           }`}
         >
-          {(item.is_checked || phase === "flash" || phase === "flyout") && <Check className="w-3.5 h-3.5 text-white" />}
+          {(item.is_checked ||
+            phase === "flash" ||
+            phase === "flyout") && (
+            <Check className="w-3.5 h-3.5 text-white" />
+          )}
         </button>
         <div className="flex-1 min-w-0">
           {isEditingName && !item.is_checked ? (
@@ -1032,7 +1353,8 @@ function SortableShoppingItem({
           <button
             onClick={(e) => {
               e.stopPropagation();
-              if (!longPressFired.current) onQuantityChange(-step);
+              if (!longPressFired.current)
+                onQuantityChange(-step);
             }}
             disabled={item.quantity <= min}
             className="w-7 h-7 rounded-lg bg-surface-2 flex items-center justify-center text-text-2 hover:text-text-1 disabled:opacity-30 transition"
@@ -1044,13 +1366,16 @@ function SortableShoppingItem({
               {formatQuantity(item.quantity, item.unit)}
             </span>
             {unitLabel && (
-              <span className="text-xs text-text-3">{unitLabel}</span>
+              <span className="text-xs text-text-3">
+                {unitLabel}
+              </span>
             )}
           </div>
           <button
             onClick={(e) => {
               e.stopPropagation();
-              if (!longPressFired.current) onQuantityChange(step);
+              if (!longPressFired.current)
+                onQuantityChange(step);
             }}
             className="w-7 h-7 rounded-lg bg-surface-2 flex items-center justify-center text-text-2 hover:text-text-1 transition"
           >
@@ -1145,7 +1470,9 @@ function CategorySortModal({
   onAddGlobalCategory: (name: string) => void;
   onClose: () => void;
 }) {
-  const [categories, setCategories] = useState<string[]>(initialCategories);
+  const [categories, setCategories] = useState<string[]>(
+    initialCategories,
+  );
   const [newCat, setNewCat] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -1165,15 +1492,29 @@ function CategorySortModal({
     onAutoSave(categories);
   }, [categories]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const catSensorOpts = useMemo(() => ({
-    pointer: { activationConstraint: { distance: 5 } },
-    touch: { activationConstraint: { delay: 150, tolerance: 5 } },
-  }), []);
-  const pointerSensor = useSensor(PointerSensor, catSensorOpts.pointer);
-  const touchSensor = useSensor(TouchSensor, catSensorOpts.touch);
+  const catSensorOpts = useMemo(
+    () => ({
+      pointer: { activationConstraint: { distance: 5 } },
+      touch: {
+        activationConstraint: { delay: 150, tolerance: 5 },
+      },
+    }),
+    [],
+  );
+  const pointerSensor = useSensor(
+    PointerSensor,
+    catSensorOpts.pointer,
+  );
+  const touchSensor = useSensor(
+    TouchSensor,
+    catSensorOpts.touch,
+  );
   const sensors = useSensors(pointerSensor, touchSensor);
 
-  const catModifiers = useMemo(() => [restrictToVerticalAxis], []);
+  const catModifiers = useMemo(
+    () => [restrictToVerticalAxis],
+    [],
+  );
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
@@ -1185,7 +1526,7 @@ function CategorySortModal({
         setCategories(arrayMove(categories, oldIdx, newIdx));
       }
     },
-    [categories]
+    [categories],
   );
 
   // Merge built-in known categories with global custom pool (deduplicated)
@@ -1203,7 +1544,9 @@ function CategorySortModal({
   const searchResults = useMemo(() => {
     if (!newCat.trim()) return [];
     const q = newCat.toLowerCase().trim();
-    return availableChips.filter((c) => c.toLowerCase().includes(q));
+    return availableChips.filter((c) =>
+      c.toLowerCase().includes(q),
+    );
   }, [newCat, availableChips]);
 
   const handleAddCategory = (name?: string) => {
@@ -1212,10 +1555,10 @@ function CategorySortModal({
     setCategories((prev) => [...prev, catName]);
     // If this is a truly new category (not in any built-in list), add to global pool
     const isBuiltIn = allKnownCategories.some(
-      (c) => c.toLowerCase() === catName.toLowerCase()
+      (c) => c.toLowerCase() === catName.toLowerCase(),
     );
     const isAlreadyCustom = globalCustomCategories.some(
-      (c) => c.toLowerCase() === catName.toLowerCase()
+      (c) => c.toLowerCase() === catName.toLowerCase(),
     );
     if (!isBuiltIn && !isAlreadyCustom) {
       onAddGlobalCategory(catName);
@@ -1228,7 +1571,7 @@ function CategorySortModal({
   const showCustomOption =
     newCat.trim() &&
     !mergedKnownCategories.some(
-      (c) => c.toLowerCase() === newCat.trim().toLowerCase()
+      (c) => c.toLowerCase() === newCat.trim().toLowerCase(),
     ) &&
     !categories.includes(newCat.trim());
 
@@ -1245,14 +1588,21 @@ function CategorySortModal({
         initial={{ y: "100%" }}
         animate={{ y: 0 }}
         exit={{ y: "100%" }}
-        transition={{ type: "spring", damping: 25, stiffness: 300 }}
+        transition={{
+          type: "spring",
+          damping: 25,
+          stiffness: 300,
+        }}
         onClick={(e) => e.stopPropagation()}
         className="w-full bg-surface rounded-t-[20px] flex flex-col max-h-[80vh]"
         style={{ boxShadow: "var(--shadow-elevated)" }}
       >
         {/* Handle bar */}
         <div className="flex justify-center pt-3 pb-1">
-          <div className="w-9 h-1 rounded-full" style={{ background: "var(--zu-border)" }} />
+          <div
+            className="w-9 h-1 rounded-full"
+            style={{ background: "var(--zu-border)" }}
+          />
         </div>
         <div className="px-5 pb-3">
           <h3 className="text-base font-bold text-text-1">
@@ -1262,7 +1612,13 @@ function CategorySortModal({
             Ziehe Kategorien um die Sortierung zu ändern
           </p>
         </div>
-        <div className="flex-1 overflow-y-auto px-5 pb-2 min-h-0" style={{ overscrollBehavior: "contain", touchAction: "pan-y" }}>
+        <div
+          className="flex-1 overflow-y-auto px-5 pb-2 min-h-0"
+          style={{
+            overscrollBehavior: "contain",
+            touchAction: "pan-y",
+          }}
+        >
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
@@ -1280,7 +1636,7 @@ function CategorySortModal({
                     category={cat}
                     onRemove={() =>
                       setCategories((prev) =>
-                        prev.filter((c) => c !== cat)
+                        prev.filter((c) => c !== cat),
                       )
                     }
                   />
@@ -1291,87 +1647,112 @@ function CategorySortModal({
         </div>
 
         {/* Add category section */}
-        <div className="flex-shrink-0" style={{ borderTop: "1px solid var(--zu-border)" }}>
+        <div
+          className="flex-shrink-0"
+          style={{ borderTop: "1px solid var(--zu-border)" }}
+        >
           {/* Quick-add chips */}
-          {availableChips.length > 0 && (!showSuggestions || !newCat.trim()) && (
-            <div
-              className="flex gap-1.5 px-5 pt-2.5 pb-1 overflow-x-auto scrollbar-hide"
-              style={{ WebkitOverflowScrolling: "touch" }}
-            >
-              {availableChips.slice(0, 12).map((chip) => {
-                const colors = getCategoryChipColor(chip);
-                return (
-                  <button
-                    key={chip}
-                    onClick={() => handleAddCategory(chip)}
-                    onMouseDown={(e) => e.preventDefault()}
-                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap"
-                    style={{
-                      background: "var(--surface-2)",
-                      border: "1px solid var(--zu-border)",
-                    }}
-                  >
-                    <span style={{ color: "var(--text-2)" }}>+</span>
-                    <span
-                      className="w-2 h-2 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: colors.dot }}
-                    />
-                    <span style={{ color: colors.text }}>{chip}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          {availableChips.length > 0 &&
+            (!showSuggestions || !newCat.trim()) && (
+              <div
+                className="flex gap-1.5 px-5 pt-2.5 pb-1 overflow-x-auto scrollbar-hide"
+                style={{ WebkitOverflowScrolling: "touch" }}
+              >
+                {availableChips.slice(0, 12).map((chip) => {
+                  const colors = getCategoryChipColor(chip);
+                  return (
+                    <button
+                      key={chip}
+                      onClick={() => handleAddCategory(chip)}
+                      onMouseDown={(e) => e.preventDefault()}
+                      className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap"
+                      style={{
+                        background: "var(--surface-2)",
+                        border: "1px solid var(--zu-border)",
+                      }}
+                    >
+                      <span style={{ color: "var(--text-2)" }}>
+                        +
+                      </span>
+                      <span
+                        className="w-2 h-2 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: colors.dot }}
+                      />
+                      <span style={{ color: colors.text }}>
+                        {chip}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
           {/* Autocomplete dropdown */}
           <AnimatePresence>
-            {showSuggestions && newCat.trim() && (searchResults.length > 0 || showCustomOption) && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.15 }}
-                className="overflow-hidden"
-              >
-                <div className="max-h-36 overflow-y-auto px-5">
-                  {searchResults.map((result) => {
-                    const colors = getCategoryChipColor(result);
-                    return (
+            {showSuggestions &&
+              newCat.trim() &&
+              (searchResults.length > 0 ||
+                showCustomOption) && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.15 }}
+                  className="overflow-hidden"
+                >
+                  <div className="max-h-36 overflow-y-auto px-5">
+                    {searchResults.map((result) => {
+                      const colors =
+                        getCategoryChipColor(result);
+                      return (
+                        <button
+                          key={result}
+                          onClick={() =>
+                            handleAddCategory(result)
+                          }
+                          onMouseDown={(e) =>
+                            e.preventDefault()
+                          }
+                          className="w-full text-left px-3 py-2 hover:bg-surface-2 rounded-[10px] flex items-center gap-2 transition"
+                        >
+                          <span
+                            className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                            style={{
+                              backgroundColor: colors.dot,
+                            }}
+                          />
+                          <span
+                            className="text-sm font-medium"
+                            style={{ color: colors.text }}
+                          >
+                            {result}
+                          </span>
+                        </button>
+                      );
+                    })}
+                    {showCustomOption && (
                       <button
-                        key={result}
-                        onClick={() => handleAddCategory(result)}
+                        onClick={() => handleAddCategory()}
                         onMouseDown={(e) => e.preventDefault()}
-                        className="w-full text-left px-3 py-2 hover:bg-surface-2 rounded-[10px] flex items-center gap-2 transition"
+                        className="w-full text-left px-3 py-2 hover:bg-surface-2 rounded-[10px] transition"
                       >
-                        <span
-                          className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: colors.dot }}
-                        />
-                        <span className="text-sm font-medium" style={{ color: colors.text }}>
-                          {result}
+                        <span className="text-sm text-accent font-medium">
+                          + &bdquo;{newCat.trim()}&ldquo;
+                          erstellen
                         </span>
                       </button>
-                    );
-                  })}
-                  {showCustomOption && (
-                    <button
-                      onClick={() => handleAddCategory()}
-                      onMouseDown={(e) => e.preventDefault()}
-                      className="w-full text-left px-3 py-2 hover:bg-surface-2 rounded-[10px] transition"
-                    >
-                      <span className="text-sm text-accent font-medium">
-                        + &bdquo;{newCat.trim()}&ldquo; erstellen
-                      </span>
-                    </button>
-                  )}
-                </div>
-              </motion.div>
-            )}
+                    )}
+                  </div>
+                </motion.div>
+              )}
           </AnimatePresence>
 
           {/* Input bar */}
           <div className="flex items-center gap-2 px-5 py-2.5">
-            <div className="flex-1 flex items-center gap-2 bg-surface-2 rounded-xl px-3 py-2.5" style={{ border: "1px solid var(--zu-border)" }}>
+            <div
+              className="flex-1 flex items-center gap-2 bg-surface-2 rounded-xl px-3 py-2.5"
+              style={{ border: "1px solid var(--zu-border)" }}
+            >
               <Search className="w-4 h-4 text-text-3 flex-shrink-0" />
               <input
                 ref={inputRef}
@@ -1391,7 +1772,10 @@ function CategorySortModal({
                 }}
                 onFocus={() => setShowSuggestions(true)}
                 onBlur={() =>
-                  setTimeout(() => setShowSuggestions(false), 200)
+                  setTimeout(
+                    () => setShowSuggestions(false),
+                    200,
+                  )
                 }
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
@@ -1418,10 +1802,8 @@ function CategorySortModal({
                 </button>
               )}
             </div>
-            
           </div>
         </div>
-
       </motion.div>
     </motion.div>
   );
@@ -1442,7 +1824,10 @@ function CheckedSection({
   if (items.length === 0) return null;
 
   return (
-    <div className="bg-surface-2" style={{ borderTop: "1px solid var(--zu-border)" }}>
+    <div
+      className="bg-surface-2"
+      style={{ borderTop: "1px solid var(--zu-border)" }}
+    >
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center justify-between px-4 py-2.5"
@@ -1482,7 +1867,9 @@ function CheckedSection({
                   </span>
                   <span className="text-[10px] text-text-3">
                     {formatQuantity(item.quantity, item.unit)}
-                    {item.unit && item.unit !== "Stk." ? item.unit : "x"}
+                    {item.unit && item.unit !== "Stk."
+                      ? item.unit
+                      : "x"}
                   </span>
                 </div>
               ))}
@@ -1524,28 +1911,37 @@ function AddItemBar({
   const [query, setQuery] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [quickChips, setQuickChips] = useState<string[]>([]);
-  const [pendingCustomName, setPendingCustomName] = useState<string | null>(
-    null
-  );
+  const [pendingCustomName, setPendingCustomName] = useState<
+    string | null
+  >(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const suggestions = getQuickSuggestions(storeId).filter(
-      (s) => !existingNames.has(s)
+      (s) => !existingNames.has(s),
     );
     setQuickChips(suggestions);
   }, [storeId, existingNames]);
 
   const searchResults = useMemo(() => {
     if (!query.trim()) return [];
-    return searchGroceries(query, storeId, stores, customTemplates).filter(
-      (g) => !existingNames.has(g.name)
-    );
+    return searchGroceries(
+      query,
+      storeId,
+      stores,
+      customTemplates,
+    ).filter((g) => !existingNames.has(g.name));
   }, [query, storeId, stores, existingNames, customTemplates]);
 
-  const handleSelect = (name: string, category?: string, fromSearch?: boolean) => {
+  const handleSelect = (
+    name: string,
+    category?: string,
+    fromSearch?: boolean,
+  ) => {
     const cat =
-      category || findGroceryTemplate(name, customTemplates)?.category || null;
+      category ||
+      findGroceryTemplate(name, customTemplates)?.category ||
+      null;
     if (!cat) {
       setPendingCustomName(name);
       setQuery("");
@@ -1570,7 +1966,10 @@ function AddItemBar({
     e.preventDefault();
     if (!query.trim()) return;
     if (searchResults.length > 0) {
-      handleSelect(searchResults[0].name, searchResults[0].category);
+      handleSelect(
+        searchResults[0].name,
+        searchResults[0].category,
+      );
     } else {
       setPendingCustomName(query.trim());
       setQuery("");
@@ -1581,7 +1980,9 @@ function AddItemBar({
   const handleCategoryPicked = (category: string) => {
     if (pendingCustomName) {
       onAdd(pendingCustomName, category);
-      setQuickChips((prev) => prev.filter((c) => c !== pendingCustomName));
+      setQuickChips((prev) =>
+        prev.filter((c) => c !== pendingCustomName),
+      );
       setPendingCustomName(null);
     }
   };
@@ -1593,7 +1994,10 @@ function AddItemBar({
 
   return (
     <>
-      <div className="bg-surface" style={{ borderTop: "1px solid var(--zu-border)" }}>
+      <div
+        className="bg-surface"
+        style={{ borderTop: "1px solid var(--zu-border)" }}
+      >
         {quickChips.length > 0 && (
           <div
             className="flex gap-2 px-4 pt-2.5 pb-1 overflow-x-auto scrollbar-hide"
@@ -1604,12 +2008,16 @@ function AddItemBar({
               paddingTop: query.length > 0 ? 0 : undefined,
               paddingBottom: query.length > 0 ? 0 : undefined,
               pointerEvents: query.length > 0 ? "none" : "auto",
-              transition: "opacity 200ms, max-height 200ms, padding 200ms",
+              transition:
+                "opacity 200ms, max-height 200ms, padding 200ms",
               overflow: query.length > 0 ? "hidden" : undefined,
             }}
           >
             {quickChips.map((chip) => {
-              const template = findGroceryTemplate(chip, customTemplates);
+              const template = findGroceryTemplate(
+                chip,
+                customTemplates,
+              );
               const colors = template
                 ? getCategoryChipColor(template.category)
                 : getCategoryChipColor("Sonstiges");
@@ -1644,26 +2052,42 @@ function AddItemBar({
               animate={{ height: "auto", opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
               transition={{ duration: 0.15 }}
-              className="overflow-hidden" style={{ borderTop: "1px solid var(--zu-border)" }}
+              className="overflow-hidden"
+              style={{
+                borderTop: "1px solid var(--zu-border)",
+              }}
             >
               <div className="max-h-48 overflow-y-auto">
                 {searchResults.map((result) => {
-                  const colors = getCategoryChipColor(result.category);
+                  const colors = getCategoryChipColor(
+                    result.category,
+                  );
                   return (
                     <button
                       key={result.name}
                       onPointerDown={(e) => e.preventDefault()}
                       onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => handleSelect(result.name, result.category, true)}
+                      onClick={() =>
+                        handleSelect(
+                          result.name,
+                          result.category,
+                          true,
+                        )
+                      }
                       className="w-full text-left px-4 py-2.5 hover:bg-surface-2 flex items-center justify-between transition"
                     >
                       <span className="text-sm text-text-1">
                         {result.name}
                       </span>
-                      <span className="flex items-center gap-1.5 text-[10px] ml-2 flex-shrink-0 font-medium" style={{ color: colors.text }}>
+                      <span
+                        className="flex items-center gap-1.5 text-[10px] ml-2 flex-shrink-0 font-medium"
+                        style={{ color: colors.text }}
+                      >
                         <span
                           className="w-2 h-2 rounded-full"
-                          style={{ backgroundColor: colors.dot }}
+                          style={{
+                            backgroundColor: colors.dot,
+                          }}
                         />
                         {result.category}
                       </span>
@@ -1672,23 +2096,26 @@ function AddItemBar({
                 })}
                 {query.trim() &&
                   !searchResults.some(
-                    (r) => r.name.toLowerCase() === query.trim().toLowerCase()
+                    (r) =>
+                      r.name.toLowerCase() ===
+                      query.trim().toLowerCase(),
                   ) && (
-                  <button
-                    onPointerDown={(e) => e.preventDefault()}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      setPendingCustomName(query.trim());
-                      setQuery("");
-                      setShowSuggestions(false);
-                    }}
-                    className="w-full text-left px-4 py-2.5 hover:bg-surface-2 transition"
-                  >
-                    <span className="text-sm text-accent font-medium">
-                      + &bdquo;{query.trim()}&ldquo; hinzufügen&hellip;
-                    </span>
-                  </button>
-                )}
+                    <button
+                      onPointerDown={(e) => e.preventDefault()}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setPendingCustomName(query.trim());
+                        setQuery("");
+                        setShowSuggestions(false);
+                      }}
+                      className="w-full text-left px-4 py-2.5 hover:bg-surface-2 transition"
+                    >
+                      <span className="text-sm text-accent font-medium">
+                        + &bdquo;{query.trim()}&ldquo;
+                        hinzufügen&hellip;
+                      </span>
+                    </button>
+                  )}
               </div>
             </motion.div>
           )}
@@ -1697,7 +2124,10 @@ function AddItemBar({
           onSubmit={handleSubmit}
           className="flex items-center gap-2 px-4 py-2.5"
         >
-          <div className="flex-1 flex items-center gap-2 bg-surface-2 rounded-xl px-3 py-2.5" style={{ border: "1px solid var(--zu-border)" }}>
+          <div
+            className="flex-1 flex items-center gap-2 bg-surface-2 rounded-xl px-3 py-2.5"
+            style={{ border: "1px solid var(--zu-border)" }}
+          >
             <Search className="w-4 h-4 text-text-3 flex-shrink-0" />
             <input
               ref={inputRef}
@@ -1715,7 +2145,9 @@ function AddItemBar({
                 setShowSuggestions(true);
               }}
               onFocus={() => setShowSuggestions(true)}
-              onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+              onBlur={() =>
+                setTimeout(() => setShowSuggestions(false), 200)
+              }
               placeholder="Artikel hinzufügen..."
               className="flex-1 bg-transparent outline-none text-sm text-text-1 placeholder:text-text-3"
             />
@@ -1732,7 +2164,6 @@ function AddItemBar({
               </button>
             )}
           </div>
-          
         </form>
       </div>
 
@@ -1776,7 +2207,8 @@ function CategoryPickerModal({
     const vv = window.visualViewport;
     if (!vv) return;
     const update = () => {
-      const kbHeight = window.innerHeight - vv.height - vv.offsetTop;
+      const kbHeight =
+        window.innerHeight - vv.height - vv.offsetTop;
       setBottomOffset(Math.max(0, kbHeight));
     };
     update();
@@ -1791,7 +2223,9 @@ function CategoryPickerModal({
   const filtered = useMemo(() => {
     if (!filterQuery.trim()) return categories;
     const q = filterQuery.toLowerCase().trim();
-    return categories.filter((c) => c.toLowerCase().includes(q));
+    return categories.filter((c) =>
+      c.toLowerCase().includes(q),
+    );
   }, [categories, filterQuery]);
 
   return createPortal(
@@ -1807,7 +2241,11 @@ function CategoryPickerModal({
         initial={{ y: "100%" }}
         animate={{ y: 0 }}
         exit={{ y: "100%" }}
-        transition={{ type: "spring", damping: 25, stiffness: 300 }}
+        transition={{
+          type: "spring",
+          damping: 25,
+          stiffness: 300,
+        }}
         onClick={(e) => e.stopPropagation()}
         className="fixed left-0 right-0 w-full bg-surface rounded-t-[20px] flex flex-col"
         style={{
@@ -1820,7 +2258,10 @@ function CategoryPickerModal({
       >
         {/* Handle bar */}
         <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
-          <div className="w-9 h-1 rounded-full" style={{ background: "var(--zu-border)" }} />
+          <div
+            className="w-9 h-1 rounded-full"
+            style={{ background: "var(--zu-border)" }}
+          />
         </div>
         <div className="px-5 pb-2 flex-shrink-0">
           <h3 className="text-base font-bold text-text-1">
@@ -1832,7 +2273,10 @@ function CategoryPickerModal({
         </div>
         {/* Search field */}
         <div className="px-5 pb-2 flex-shrink-0">
-          <div className="flex items-center gap-2 bg-surface-2 rounded-xl px-3 py-2" style={{ border: "1px solid var(--zu-border)" }}>
+          <div
+            className="flex items-center gap-2 bg-surface-2 rounded-xl px-3 py-2"
+            style={{ border: "1px solid var(--zu-border)" }}
+          >
             <Search className="w-4 h-4 text-text-3 flex-shrink-0" />
             <input
               ref={filterInputRef}
@@ -1862,7 +2306,13 @@ function CategoryPickerModal({
             )}
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto px-5 pb-5 min-h-0" style={{ overscrollBehavior: "contain", touchAction: "pan-y" }}>
+        <div
+          className="flex-1 overflow-y-auto px-5 pb-5 min-h-0"
+          style={{
+            overscrollBehavior: "contain",
+            touchAction: "pan-y",
+          }}
+        >
           <div className="flex flex-wrap gap-2">
             {filtered.map((cat) => (
               <CategoryChip
@@ -1880,7 +2330,7 @@ function CategoryPickerModal({
         </div>
       </motion.div>
     </motion.div>,
-    document.body
+    document.body,
   );
 }
 
@@ -1902,7 +2352,8 @@ function AddStoreModal({
     const vv = window.visualViewport;
     if (!vv) return;
     const update = () => {
-      const keyboardHeight = window.innerHeight - vv.height - vv.offsetTop;
+      const keyboardHeight =
+        window.innerHeight - vv.height - vv.offsetTop;
       setBottomOffset(Math.max(0, keyboardHeight));
     };
     update();
@@ -1916,11 +2367,14 @@ function AddStoreModal({
 
   const allSuggestions = useMemo(() => {
     const suggestionIds = new Set(
-      STORE_SUGGESTIONS.map((s) => s.name.toLowerCase().replace(/\s+/g, "-"))
+      STORE_SUGGESTIONS.map((s) =>
+        s.name.toLowerCase().replace(/\s+/g, "-"),
+      ),
     );
-    const fromDefaults: StoreSuggestion[] = DEFAULT_STORES
-      .filter((s) => s.id !== "alle" && !suggestionIds.has(s.id))
-      .map((s) => ({
+    const fromDefaults: StoreSuggestion[] =
+      DEFAULT_STORES.filter(
+        (s) => s.id !== "alle" && !suggestionIds.has(s.id),
+      ).map((s) => ({
         name: s.name,
         domain: s.domain,
         type: s.type as StoreSuggestion["type"],
@@ -1933,15 +2387,18 @@ function AddStoreModal({
     const q = query.toLowerCase().trim();
     return allSuggestions.filter(
       (s) =>
-        !existingStoreIds.has(s.name.toLowerCase().replace(/\s+/g, "-")) &&
-        (!q || s.name.toLowerCase().includes(q))
+        !existingStoreIds.has(
+          s.name.toLowerCase().replace(/\s+/g, "-"),
+        ) &&
+        (!q || s.name.toLowerCase().includes(q)),
     );
   }, [query, existingStoreIds, allSuggestions]);
 
   const showCustomOption =
     query.trim() &&
     !STORE_SUGGESTIONS.some(
-      (s) => s.name.toLowerCase() === query.trim().toLowerCase()
+      (s) =>
+        s.name.toLowerCase() === query.trim().toLowerCase(),
     );
 
   const handleCustomAdd = () => {
@@ -1964,7 +2421,11 @@ function AddStoreModal({
         initial={{ y: "100%" }}
         animate={{ y: 0 }}
         exit={{ y: "100%" }}
-        transition={{ type: "spring", damping: 25, stiffness: 300 }}
+        transition={{
+          type: "spring",
+          damping: 25,
+          stiffness: 300,
+        }}
         onClick={(e) => e.stopPropagation()}
         className="fixed left-0 right-0 w-full bg-surface rounded-t-[20px] flex flex-col"
         style={{
@@ -1977,7 +2438,10 @@ function AddStoreModal({
       >
         {/* Handle bar */}
         <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
-          <div className="w-9 h-1 rounded-full" style={{ background: "var(--zu-border)" }} />
+          <div
+            className="w-9 h-1 rounded-full"
+            style={{ background: "var(--zu-border)" }}
+          />
         </div>
         <div className="px-5 pb-3 flex-shrink-0">
           <h3 className="text-lg font-bold text-text-1">
@@ -1985,7 +2449,10 @@ function AddStoreModal({
           </h3>
         </div>
         <div className="px-5 pb-3 flex-shrink-0">
-          <div className="flex items-center gap-2 bg-surface-2 rounded-xl px-3 py-2.5" style={{ border: "1px solid var(--zu-border)" }}>
+          <div
+            className="flex items-center gap-2 bg-surface-2 rounded-xl px-3 py-2.5"
+            style={{ border: "1px solid var(--zu-border)" }}
+          >
             <Search className="w-4 h-4 text-text-3 flex-shrink-0" />
             <input
               autoFocus
@@ -2015,7 +2482,9 @@ function AddStoreModal({
         <div className="flex-1 overflow-y-auto px-5 pb-5 min-h-0">
           <div className="space-y-1">
             {filtered.map((s) => {
-              const logoUrl = s.domain ? getLogoUrl(s.domain) : null;
+              const logoUrl = s.domain
+                ? getLogoUrl(s.domain)
+                : null;
               return (
                 <StoreSuggestionRow
                   key={s.name}
@@ -2035,7 +2504,8 @@ function AddStoreModal({
                 </div>
                 <div className="text-left">
                   <p className="text-sm font-medium text-accent">
-                    Eigenen Laden hinzufügen: &bdquo;{query.trim()}&ldquo;
+                    Eigenen Laden hinzufügen: &bdquo;
+                    {query.trim()}&ldquo;
                   </p>
                 </div>
               </button>
@@ -2078,7 +2548,13 @@ function StoreSuggestionRow({
     >
       <div
         className="w-10 h-10 rounded-full flex items-center justify-center overflow-hidden flex-shrink-0"
-        style={{ backgroundColor: suggestion.emoji ? suggestion.bgColor : showLogo ? "#F3F4F6" : "#E5E7EB" }}
+        style={{
+          backgroundColor: suggestion.emoji
+            ? suggestion.bgColor
+            : showLogo
+              ? "#F3F4F6"
+              : "#E5E7EB",
+        }}
       >
         {suggestion.emoji ? (
           <span className="text-lg">{suggestion.emoji}</span>
@@ -2109,43 +2585,66 @@ function StoreSuggestionRow({
 }
 
 // ── Main Einkaufen Screen ──────────────────────────────────────────
-export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (count: number) => void }) {
+export function EinkaufenScreen({
+  onItemCountChange,
+}: {
+  onItemCountChange?: (count: number) => void;
+}) {
   const [items, setItems] = useState<ShoppingItem[]>([]);
-  const [stores, setStores] = useState<StoreInfo[]>(DEFAULT_STORES);
-  const [storeSettings, setStoreSettings] = useState<StoreSettingEntry[]>([]);
+  const [stores, setStores] =
+    useState<StoreInfo[]>(DEFAULT_STORES);
+  const [storeSettings, setStoreSettings] = useState<
+    StoreSettingEntry[]
+  >([]);
   // Track when any item name is being edited inline → hide AddItemBar
-  const [isItemNameEditing, setIsItemNameEditing] = useState(false);
+  const [isItemNameEditing, setIsItemNameEditing] =
+    useState(false);
   // Ref mirror so updateListBottom (stable callback) can read the value without re-creating
   const isItemNameEditingRef = useRef(false);
   const [selectedStore, setSelectedStore] = useState("aldi");
   const [showAddStore, setShowAddStore] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const [activeDragId, setActiveDragId] = useState<
+    string | null
+  >(null);
 
   // Popover & modal state
   const [popover, setPopover] = useState<{
     storeId: string;
     anchorEl: HTMLElement;
   } | null>(null);
-  const [storeReorderMode, setStoreReorderMode] = useState(false);
-  const [categorySortStore, setCategorySortStore] = useState<string | null>(
-    null
+  const [storeReorderMode, setStoreReorderMode] =
+    useState(false);
+  const [categorySortStore, setCategorySortStore] = useState<
+    string | null
+  >(null);
+  const [globalCustomCategories, setGlobalCustomCategories] =
+    useState<string[]>([]);
+  const [globalItems, setGlobalItems] = useState<GlobalItem[]>(
+    [],
   );
-  const [globalCustomCategories, setGlobalCustomCategories] = useState<string[]>([]);
-  const [globalItems, setGlobalItems] = useState<GlobalItem[]>([]);
-  const [animatingCheckId, setAnimatingCheckId] = useState<string | null>(null);
+  const [animatingCheckId, setAnimatingCheckId] = useState<
+    string | null
+  >(null);
 
   // Store transfer drag state
   const storeTransferModeRef = useRef(false);
-  const storeTransferTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const storeTransferTimerRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
   const pointerPosRef = useRef({ x: 0, y: 0 });
-  const [storeTransferActive, setStoreTransferActive] = useState(false);
-  const [hoveredStoreId, setHoveredStoreId] = useState<string | null>(null);
+  const [storeTransferActive, setStoreTransferActive] =
+    useState(false);
+  const [hoveredStoreId, setHoveredStoreId] = useState<
+    string | null
+  >(null);
   const hoveredStoreRef = useRef<string | null>(null);
 
   const saveTimeout = useRef<ReturnType<typeof setTimeout>>();
-  const customCatSaveTimeout = useRef<ReturnType<typeof setTimeout>>();
-  const settingsSaveTimeout = useRef<ReturnType<typeof setTimeout>>();
+  const customCatSaveTimeout =
+    useRef<ReturnType<typeof setTimeout>>();
+  const settingsSaveTimeout =
+    useRef<ReturnType<typeof setTimeout>>();
   const storeSelectorRef = useRef<HTMLDivElement>(null);
   const checkedSectionRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -2165,14 +2664,16 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
   // ── Load items + store settings ────────────────────────────────
   const reloadAllData = useCallback(async () => {
     try {
-      const [serverItems, settings, customCats, gItems] = await Promise.all([
-        fetchItems(),
-        fetchStoreSettings(),
-        fetchCustomCategories(),
-        fetchGlobalItems(),
-      ]);
+      const [serverItems, settings, customCats, gItems] =
+        await Promise.all([
+          fetchItems(),
+          fetchStoreSettings(),
+          fetchCustomCategories(),
+          fetchGlobalItems(),
+        ]);
       // Only update if no local changes happened during fetch
-      if (Date.now() - lastLocalChangeRef.current < 2000) return;
+      if (Date.now() - lastLocalChangeRef.current < 2000)
+        return;
       setItems(serverItems);
       if (settings.length > 0) {
         setStoreSettings(settings);
@@ -2194,33 +2695,50 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
   useEffect(() => {
     const handleVisibility = () => {
       if (document.visibilityState === "visible") {
-        console.log("[Einkaufen] App visible again, reloading data...");
+        console.log(
+          "[Einkaufen] App visible again, reloading data...",
+        );
         reloadAllData();
       }
     };
     const handleFocus = () => {
-      console.log("[Einkaufen] Window focused, reloading data...");
+      console.log(
+        "[Einkaufen] Window focused, reloading data...",
+      );
       reloadAllData();
     };
-    document.addEventListener("visibilitychange", handleVisibility);
+    document.addEventListener(
+      "visibilitychange",
+      handleVisibility,
+    );
     window.addEventListener("focus", handleFocus);
     return () => {
-      document.removeEventListener("visibilitychange", handleVisibility);
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibility,
+      );
       window.removeEventListener("focus", handleFocus);
     };
   }, [reloadAllData]);
 
   // ── Supabase Realtime subscription for live sync ──
   useKvRealtime(
-    [`shopping:${DEV_HOUSEHOLD_ID}`, `store_settings:${DEV_HOUSEHOLD_ID}`, `global_items:${DEV_HOUSEHOLD_ID}`, `custom_categories:${DEV_HOUSEHOLD_ID}`],
+    [
+      `shopping:${DEV_HOUSEHOLD_ID}`,
+      `store_settings:${DEV_HOUSEHOLD_ID}`,
+      `global_items:${DEV_HOUSEHOLD_ID}`,
+      `custom_categories:${DEV_HOUSEHOLD_ID}`,
+    ],
     reloadAllData,
   );
 
   const applyStoreSettings = (
     baseStores: StoreInfo[],
-    settings: StoreSettingEntry[]
+    settings: StoreSettingEntry[],
   ) => {
-    const settingsMap = new Map(settings.map((s) => [s.store_id, s]));
+    const settingsMap = new Map(
+      settings.map((s) => [s.store_id, s]),
+    );
     const visible = baseStores.filter((s) => {
       const setting = settingsMap.get(s.id);
       return setting ? setting.is_visible : true;
@@ -2231,7 +2749,10 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
       return pa - pb;
     });
     setStores(visible);
-    if (!visible.find((s) => s.id === selectedStore) && visible.length > 0) {
+    if (
+      !visible.find((s) => s.id === selectedStore) &&
+      visible.length > 0
+    ) {
       setSelectedStore(visible[0].id);
     }
   };
@@ -2241,10 +2762,12 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
     const interval = setInterval(async () => {
       // Skip poll if a local change happened recently (debounce save is 300ms,
       // give extra buffer so the server has time to persist)
-      if (Date.now() - lastLocalChangeRef.current < 2000) return;
+      if (Date.now() - lastLocalChangeRef.current < 2000)
+        return;
       const serverItems = await fetchItems();
       // Re-check after async fetch in case a local change happened while waiting
-      if (Date.now() - lastLocalChangeRef.current < 2000) return;
+      if (Date.now() - lastLocalChangeRef.current < 2000)
+        return;
       if (!activeDragId) {
         setItems(serverItems);
       }
@@ -2263,7 +2786,10 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
         setStoreReorderMode(false);
       }
     };
-    const t = setTimeout(() => document.addEventListener("pointerdown", handler), 50);
+    const t = setTimeout(
+      () => document.addEventListener("pointerdown", handler),
+      50,
+    );
     return () => {
       clearTimeout(t);
       document.removeEventListener("pointerdown", handler);
@@ -2271,10 +2797,17 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
   }, [storeReorderMode]);
 
   // ── Debounced save for items ───────────────────────────────────
-  const debouncedSave = useCallback((newItems: ShoppingItem[]) => {
-    if (saveTimeout.current) clearTimeout(saveTimeout.current);
-    saveTimeout.current = setTimeout(() => { markLocalWrite(); saveItems(newItems); }, 300);
-  }, []);
+  const debouncedSave = useCallback(
+    (newItems: ShoppingItem[]) => {
+      if (saveTimeout.current)
+        clearTimeout(saveTimeout.current);
+      saveTimeout.current = setTimeout(() => {
+        markLocalWrite();
+        saveItems(newItems);
+      }, 300);
+    },
+    [],
+  );
 
   const updateItems = useCallback(
     (updater: (prev: ShoppingItem[]) => ShoppingItem[]) => {
@@ -2285,7 +2818,7 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
         return next;
       });
     },
-    [debouncedSave]
+    [debouncedSave],
   );
 
   // ── Debounced save for store settings ──────────────────────────
@@ -2293,29 +2826,35 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
     (newSettings: StoreSettingEntry[]) => {
       if (settingsSaveTimeout.current)
         clearTimeout(settingsSaveTimeout.current);
-      settingsSaveTimeout.current = setTimeout(
-        () => { markLocalWrite(); saveStoreSettings(newSettings); },
-        300
-      );
+      settingsSaveTimeout.current = setTimeout(() => {
+        markLocalWrite();
+        saveStoreSettings(newSettings);
+      }, 300);
     },
-    []
+    [],
   );
 
   const updateStoreSettings = useCallback(
-    (updater: (prev: StoreSettingEntry[]) => StoreSettingEntry[]) => {
+    (
+      updater: (
+        prev: StoreSettingEntry[],
+      ) => StoreSettingEntry[],
+    ) => {
       setStoreSettings((prev) => {
         const next = updater(prev);
         debouncedSaveSettings(next);
         return next;
       });
     },
-    [debouncedSaveSettings]
+    [debouncedSaveSettings],
   );
 
   // ── Helper: get or create setting entry for a store ────────────
   const getOrCreateSetting = useCallback(
     (storeId: string): StoreSettingEntry => {
-      const existing = storeSettings.find((s) => s.store_id === storeId);
+      const existing = storeSettings.find(
+        (s) => s.store_id === storeId,
+      );
       if (existing) return existing;
       const store = stores.find((s) => s.id === storeId);
       return {
@@ -2325,19 +2864,25 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
         category_order: getCategoriesForStore(storeId, stores),
       };
     },
-    [storeSettings, stores]
+    [storeSettings, stores],
   );
 
   // ── Get category order for a store ─────────────────────────────
   const getCategoryOrderForStore = useCallback(
     (storeId: string): string[] => {
-      const setting = storeSettings.find((s) => s.store_id === storeId);
-      if (setting && setting.category_order && setting.category_order.length > 0) {
+      const setting = storeSettings.find(
+        (s) => s.store_id === storeId,
+      );
+      if (
+        setting &&
+        setting.category_order &&
+        setting.category_order.length > 0
+      ) {
         return setting.category_order;
       }
       return getCategoriesForStore(storeId, stores);
     },
-    [storeSettings, stores]
+    [storeSettings, stores],
   );
 
   // ── Custom getCategoryIndex using persisted order ──────────────
@@ -2347,7 +2892,7 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
       const idx = order.indexOf(category);
       return idx >= 0 ? idx : order.length;
     },
-    [getCategoryOrderForStore]
+    [getCategoryOrderForStore],
   );
 
   // ── Derived data ───────────────────────────────────────────────
@@ -2366,13 +2911,16 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
   updateItemsRef.current = updateItems;
 
   const checkedItems = useMemo(() => {
-    return items.filter((i) => i.store === selectedStore && i.is_checked);
+    return items.filter(
+      (i) => i.store === selectedStore && i.is_checked,
+    );
   }, [items, selectedStore]);
 
   const itemCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     items.forEach((i) => {
-      if (!i.is_checked) counts[i.store] = (counts[i.store] || 0) + 1;
+      if (!i.is_checked)
+        counts[i.store] = (counts[i.store] || 0) + 1;
     });
     return counts;
   }, [items]);
@@ -2388,7 +2936,9 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
 
   const existingNames = useMemo(() => {
     return new Set(
-      items.filter((i) => i.store === selectedStore).map((i) => i.name)
+      items
+        .filter((i) => i.store === selectedStore)
+        .map((i) => i.name),
     );
   }, [items, selectedStore]);
 
@@ -2397,17 +2947,24 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
   }, [stores]);
 
   const customTemplates = useMemo(() => {
-    const dbNames = new Set(GROCERY_DATABASE.map((g) => g.name.toLowerCase()));
+    const dbNames = new Set(
+      GROCERY_DATABASE.map((g) => g.name.toLowerCase()),
+    );
     const seen = new Set<string>();
     const templates: GroceryTemplate[] = [];
 
     // Add global items first (sorted by times_used desc for priority)
-    const sortedGlobal = [...globalItems].sort((a, b) => b.times_used - a.times_used);
+    const sortedGlobal = [...globalItems].sort(
+      (a, b) => b.times_used - a.times_used,
+    );
     for (const gi of sortedGlobal) {
       const key = gi.name.toLowerCase();
       if (!dbNames.has(key) && !seen.has(key)) {
         seen.add(key);
-        templates.push({ name: gi.name, category: gi.category });
+        templates.push({
+          name: gi.name,
+          category: gi.category,
+        });
       }
     }
 
@@ -2416,7 +2973,10 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
       const key = item.name.toLowerCase();
       if (!dbNames.has(key) && !seen.has(key)) {
         seen.add(key);
-        templates.push({ name: item.name, category: item.category });
+        templates.push({
+          name: item.name,
+          category: item.category,
+        });
       }
     }
     return templates;
@@ -2430,8 +2990,8 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
       if (item?.is_checked) {
         updateItems((prev) =>
           prev.map((i) =>
-            i.id === id ? { ...i, is_checked: false } : i
-          )
+            i.id === id ? { ...i, is_checked: false } : i,
+          ),
         );
         return;
       }
@@ -2441,13 +3001,13 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
       setTimeout(() => {
         updateItems((prev) =>
           prev.map((i) =>
-            i.id === id ? { ...i, is_checked: true } : i
-          )
+            i.id === id ? { ...i, is_checked: true } : i,
+          ),
         );
         setAnimatingCheckId(null);
       }, 700);
     },
-    [items, updateItems]
+    [items, updateItems],
   );
 
   const handleQuantityChange = useCallback(
@@ -2456,23 +3016,24 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
         prev.map((i) => {
           if (i.id !== id) return i;
           const min = getUnitMin(i.unit);
-          const raw = Math.round((i.quantity + delta) * 100) / 100; // avoid float issues
+          const raw =
+            Math.round((i.quantity + delta) * 100) / 100; // avoid float issues
           return { ...i, quantity: Math.max(min, raw) };
-        })
+        }),
       );
     },
-    [updateItems]
+    [updateItems],
   );
 
   const handleUpdateQuantityUnit = useCallback(
     (id: string, quantity: number, unit: UnitType) => {
       updateItems((prev) =>
         prev.map((i) =>
-          i.id === id ? { ...i, quantity, unit } : i
-        )
+          i.id === id ? { ...i, quantity, unit } : i,
+        ),
       );
     },
-    [updateItems]
+    [updateItems],
   );
 
   const handleNameChange = useCallback(
@@ -2480,38 +3041,52 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
       const item = items.find((i) => i.id === id);
       if (!item) return;
       updateItems((prev) =>
-        prev.map((i) => (i.id === id ? { ...i, name: newName } : i))
+        prev.map((i) =>
+          i.id === id ? { ...i, name: newName } : i,
+        ),
       );
       // If the new name doesn't exist in global_items or GROCERY_DATABASE, upsert it
       const isBuiltIn = GROCERY_DATABASE.some(
-        (g) => g.name.toLowerCase() === newName.toLowerCase()
+        (g) => g.name.toLowerCase() === newName.toLowerCase(),
       );
       const isInGlobal = globalItems.some(
-        (g) => g.name.toLowerCase() === newName.toLowerCase()
+        (g) => g.name.toLowerCase() === newName.toLowerCase(),
       );
       if (!isBuiltIn && !isInGlobal) {
         setGlobalItems((prev) => [
           ...prev,
-          { name: newName, category: item.category, created_by_household_id: DEV_HOUSEHOLD_ID, times_used: 1 },
+          {
+            name: newName,
+            category: item.category,
+            created_by_household_id: DEV_HOUSEHOLD_ID,
+            times_used: 1,
+          },
         ]);
         upsertGlobalItem(newName, item.category);
       }
     },
-    [items, globalItems, updateItems]
+    [items, globalItems, updateItems],
   );
 
   // State for the quantity/unit drawer
-  const [quantityDrawerItemId, setQuantityDrawerItemId] = useState<string | null>(null);
+  const [quantityDrawerItemId, setQuantityDrawerItemId] =
+    useState<string | null>(null);
   const quantityDrawerItem = useMemo(
-    () => items.find((i) => i.id === quantityDrawerItemId) ?? null,
-    [items, quantityDrawerItemId]
+    () =>
+      items.find((i) => i.id === quantityDrawerItemId) ?? null,
+    [items, quantityDrawerItemId],
   );
 
   const handleAddItem = useCallback(
     (name: string, category: string) => {
-      const catIdx = getCustomCategoryIndex(category, selectedStore);
+      const catIdx = getCustomCategoryIndex(
+        category,
+        selectedStore,
+      );
       const storeUnchecked = items
-        .filter((i) => i.store === selectedStore && !i.is_checked)
+        .filter(
+          (i) => i.store === selectedStore && !i.is_checked,
+        )
         .sort((a, b) => a.position - b.position);
 
       let insertPosition = 0;
@@ -2524,7 +3099,7 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
         }
         const existingCatIdx = getCustomCategoryIndex(
           existing.category,
-          selectedStore
+          selectedStore,
         );
         if (existingCatIdx <= catIdx) {
           insertPosition = existing.position + 1;
@@ -2548,52 +3123,72 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
           !i.is_checked &&
           i.position >= insertPosition
             ? { ...i, position: i.position + 1 }
-            : i
+            : i,
         );
         return [...shifted, newItem];
       });
 
       // If this is a custom article (not in built-in DB), save/upsert to global items
       const isBuiltIn = GROCERY_DATABASE.some(
-        (g) => g.name.toLowerCase() === name.toLowerCase()
+        (g) => g.name.toLowerCase() === name.toLowerCase(),
       );
       if (!isBuiltIn) {
         // Update local state immediately for instant search visibility
         setGlobalItems((prev) => {
           const idx = prev.findIndex(
-            (g) => g.name.toLowerCase() === name.toLowerCase()
+            (g) => g.name.toLowerCase() === name.toLowerCase(),
           );
           if (idx >= 0) {
             const copy = [...prev];
-            copy[idx] = { ...copy[idx], times_used: copy[idx].times_used + 1, category };
+            copy[idx] = {
+              ...copy[idx],
+              times_used: copy[idx].times_used + 1,
+              category,
+            };
             return copy;
           }
-          return [...prev, { name, category, created_by_household_id: DEV_HOUSEHOLD_ID, times_used: 1 }];
+          return [
+            ...prev,
+            {
+              name,
+              category,
+              created_by_household_id: DEV_HOUSEHOLD_ID,
+              times_used: 1,
+            },
+          ];
         });
         // Persist to server (fire and forget)
         upsertGlobalItem(name, category);
       }
     },
-    [items, selectedStore, getCustomCategoryIndex, updateItems]
+    [items, selectedStore, getCustomCategoryIndex, updateItems],
   );
 
   const handleClearChecked = useCallback(() => {
     updateItems((prev) =>
-      prev.filter((i) => !(i.store === selectedStore && i.is_checked))
+      prev.filter(
+        (i) => !(i.store === selectedStore && i.is_checked),
+      ),
     );
   }, [selectedStore, updateItems]);
 
   const handleAddStore = useCallback(
     (suggestion: StoreSuggestion) => {
-      const id = suggestion.name.toLowerCase().replace(/\s+/g, "-");
+      const id = suggestion.name
+        .toLowerCase()
+        .replace(/\s+/g, "-");
 
-      const defaultStore = DEFAULT_STORES.find((s) => s.id === id);
+      const defaultStore = DEFAULT_STORES.find(
+        (s) => s.id === id,
+      );
       if (defaultStore) {
         setStores((prev) => {
           if (prev.find((s) => s.id === id)) {
             return prev;
           }
-          const alleIdx = prev.findIndex((s) => s.id === "alle");
+          const alleIdx = prev.findIndex(
+            (s) => s.id === "alle",
+          );
           const copy = [...prev];
           if (alleIdx >= 0) {
             copy.splice(alleIdx, 0, defaultStore);
@@ -2646,13 +3241,16 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
           store_id: id,
           position: stores.length,
           is_visible: true,
-          category_order: getCategoriesForStore(id, [...stores, newStore]),
+          category_order: getCategoriesForStore(id, [
+            ...stores,
+            newStore,
+          ]),
         },
       ]);
       setSelectedStore(id);
       setShowAddStore(false);
     },
-    [stores, updateStoreSettings]
+    [stores, updateStoreSettings],
   );
 
   // ── Store long-press handlers ──────────────────────────────────
@@ -2660,7 +3258,7 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
     (storeId: string, anchorEl: HTMLElement) => {
       setPopover({ storeId, anchorEl });
     },
-    []
+    [],
   );
 
   const handleRemoveStore = useCallback(
@@ -2673,7 +3271,9 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
         return remaining;
       });
       updateStoreSettings((prev) => {
-        const idx = prev.findIndex((s) => s.store_id === storeId);
+        const idx = prev.findIndex(
+          (s) => s.store_id === storeId,
+        );
         if (idx >= 0) {
           const copy = [...prev];
           copy[idx] = { ...copy[idx], is_visible: false };
@@ -2690,7 +3290,7 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
         ];
       });
     },
-    [selectedStore, updateStoreSettings]
+    [selectedStore, updateStoreSettings],
   );
 
   const handleStoreReorderEnd = useCallback(
@@ -2699,38 +3299,51 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
       if (!over || active.id === over.id) return;
 
       setStores((prev) => {
-        const oldIdx = prev.findIndex((s) => s.id === active.id);
+        const oldIdx = prev.findIndex(
+          (s) => s.id === active.id,
+        );
         const newIdx = prev.findIndex((s) => s.id === over.id);
         if (oldIdx < 0 || newIdx < 0) return prev;
         const moved = arrayMove(prev, oldIdx, newIdx);
         updateStoreSettings((settings) => {
           const newSettings = moved.map((store, idx) => {
-            const existing = settings.find((s) => s.store_id === store.id);
+            const existing = settings.find(
+              (s) => s.store_id === store.id,
+            );
             return {
               store_id: store.id,
               position: idx,
               is_visible: true,
-              category_order: existing?.category_order || getCategoriesForStore(store.id, moved),
+              category_order:
+                existing?.category_order ||
+                getCategoriesForStore(store.id, moved),
             };
           });
           const hiddenSettings = settings.filter(
-            (s) => !s.is_visible && !moved.find((st) => st.id === s.store_id)
+            (s) =>
+              !s.is_visible &&
+              !moved.find((st) => st.id === s.store_id),
           );
           return [...newSettings, ...hiddenSettings];
         });
         return moved;
       });
     },
-    [updateStoreSettings]
+    [updateStoreSettings],
   );
 
   const handleCategoryAutoSave = useCallback(
     (storeId: string, categories: string[]) => {
       updateStoreSettings((prev) => {
-        const idx = prev.findIndex((s) => s.store_id === storeId);
+        const idx = prev.findIndex(
+          (s) => s.store_id === storeId,
+        );
         if (idx >= 0) {
           const copy = [...prev];
-          copy[idx] = { ...copy[idx], category_order: categories };
+          copy[idx] = {
+            ...copy[idx],
+            category_order: categories,
+          };
           return copy;
         }
         return [
@@ -2749,8 +3362,12 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
           .filter((i) => i.store === storeId && !i.is_checked)
           .sort((a, b) => a.position - b.position);
 
-        const manual = storeUnchecked.filter((i) => i.manually_positioned);
-        const auto = storeUnchecked.filter((i) => !i.manually_positioned);
+        const manual = storeUnchecked.filter(
+          (i) => i.manually_positioned,
+        );
+        const auto = storeUnchecked.filter(
+          (i) => !i.manually_positioned,
+        );
 
         auto.sort((a, b) => {
           const ai = categories.indexOf(a.category);
@@ -2790,71 +3407,114 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
 
       // Do NOT close the modal — auto-save keeps it open
     },
-    [stores, updateStoreSettings, updateItems]
+    [stores, updateStoreSettings, updateItems],
   );
 
   const handleAddGlobalCategory = useCallback(
     (name: string) => {
       setGlobalCustomCategories((prev) => {
         const alreadyExists = prev.some(
-          (c) => c.toLowerCase() === name.toLowerCase()
+          (c) => c.toLowerCase() === name.toLowerCase(),
         );
         if (alreadyExists) return prev;
         const next = [...prev, name];
         // Debounce save to server
-        if (customCatSaveTimeout.current) clearTimeout(customCatSaveTimeout.current);
-        customCatSaveTimeout.current = setTimeout(() => { markLocalWrite(); saveCustomCategories(next); }, 300);
+        if (customCatSaveTimeout.current)
+          clearTimeout(customCatSaveTimeout.current);
+        customCatSaveTimeout.current = setTimeout(() => {
+          markLocalWrite();
+          saveCustomCategories(next);
+        }, 300);
         return next;
       });
     },
-    []
+    [],
   );
 
   // ── dnd-kit sensors for item list ──────────────────────────────
-  const itemSensorOptions = useMemo(() => ({
-    pointer: { activationConstraint: { distance: 5 } },
-    touch: { activationConstraint: { delay: 150, tolerance: 5 } },
-  }), []);
-  const pointerSensor = useSensor(PointerSensor, itemSensorOptions.pointer);
-  const touchSensor = useSensor(TouchSensor, itemSensorOptions.touch);
+  const itemSensorOptions = useMemo(
+    () => ({
+      pointer: { activationConstraint: { distance: 5 } },
+      touch: {
+        activationConstraint: { delay: 150, tolerance: 5 },
+      },
+    }),
+    [],
+  );
+  const pointerSensor = useSensor(
+    PointerSensor,
+    itemSensorOptions.pointer,
+  );
+  const touchSensor = useSensor(
+    TouchSensor,
+    itemSensorOptions.touch,
+  );
   const sensors = useSensors(pointerSensor, touchSensor);
 
-  const handleDndDragStart = useCallback((event: DragStartEvent) => {
-    setActiveDragId(event.active.id as string);
-    storeTransferModeRef.current = false;
-    setStoreTransferActive(false);
-    hoveredStoreRef.current = null;
-    setHoveredStoreId(null);
+  const handleDndDragStart = useCallback(
+    (event: DragStartEvent) => {
+      setActiveDragId(event.active.id as string);
+      storeTransferModeRef.current = false;
+      setStoreTransferActive(false);
+      hoveredStoreRef.current = null;
+      setHoveredStoreId(null);
 
-    // Track pointer position for store transfer detection
-    const trackPointer = (e: PointerEvent | TouchEvent) => {
-      if ("touches" in e) {
-        pointerPosRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-      } else {
-        pointerPosRef.current = { x: e.clientX, y: e.clientY };
-      }
-    };
-    document.addEventListener("pointermove", trackPointer as any);
-    document.addEventListener("touchmove", trackPointer as any, { passive: true });
+      // Track pointer position for store transfer detection
+      const trackPointer = (e: PointerEvent | TouchEvent) => {
+        if ("touches" in e) {
+          pointerPosRef.current = {
+            x: e.touches[0].clientX,
+            y: e.touches[0].clientY,
+          };
+        } else {
+          pointerPosRef.current = {
+            x: e.clientX,
+            y: e.clientY,
+          };
+        }
+      };
+      document.addEventListener(
+        "pointermove",
+        trackPointer as any,
+      );
+      document.addEventListener(
+        "touchmove",
+        trackPointer as any,
+        { passive: true },
+      );
 
-    // Clean up on drag end (will be removed in handleDndDragEnd too)
-    const cleanup = () => {
-      document.removeEventListener("pointermove", trackPointer as any);
-      document.removeEventListener("touchmove", trackPointer as any);
-      document.removeEventListener("pointerup", cleanup);
-      document.removeEventListener("touchend", cleanup);
-    };
-    document.addEventListener("pointerup", cleanup, { once: true });
-    document.addEventListener("touchend", cleanup, { once: true });
-  }, []);
+      // Clean up on drag end (will be removed in handleDndDragEnd too)
+      const cleanup = () => {
+        document.removeEventListener(
+          "pointermove",
+          trackPointer as any,
+        );
+        document.removeEventListener(
+          "touchmove",
+          trackPointer as any,
+        );
+        document.removeEventListener("pointerup", cleanup);
+        document.removeEventListener("touchend", cleanup);
+      };
+      document.addEventListener("pointerup", cleanup, {
+        once: true,
+      });
+      document.addEventListener("touchend", cleanup, {
+        once: true,
+      });
+    },
+    [],
+  );
 
   const handleDndDragMove = useCallback(() => {
     // Check if the dragged item is near the top of the list area
-    const selectorRect = storeSelectorRef.current?.getBoundingClientRect();
+    const selectorRect =
+      storeSelectorRef.current?.getBoundingClientRect();
     if (!selectorRect) return;
 
     const topThreshold = selectorRect.bottom + 60; // within 60px of the top
-    const itemRect = scrollContainerRef.current?.getBoundingClientRect();
+    const itemRect =
+      scrollContainerRef.current?.getBoundingClientRect();
     if (!itemRect) return;
 
     // Use pointer position for detection
@@ -2862,7 +3522,10 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
 
     if (py < topThreshold && py > selectorRect.top) {
       // Near the top — start timer if not already started
-      if (!storeTransferTimerRef.current && !storeTransferModeRef.current) {
+      if (
+        !storeTransferTimerRef.current &&
+        !storeTransferModeRef.current
+      ) {
         storeTransferTimerRef.current = setTimeout(() => {
           storeTransferModeRef.current = true;
           setStoreTransferActive(true);
@@ -2880,7 +3543,10 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
 
     // In transfer mode, detect which store icon the pointer is hovering over
     if (storeTransferModeRef.current) {
-      const storeButtons = document.querySelectorAll<HTMLElement>("[data-store-id]");
+      const storeButtons =
+        document.querySelectorAll<HTMLElement>(
+          "[data-store-id]",
+        );
       let foundStore: string | null = null;
       const px = pointerPosRef.current.x;
       storeButtons.forEach((btn) => {
@@ -2918,21 +3584,33 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
       setActiveDragId(null);
 
       // Handle store transfer
-      if (wasTransferMode && targetStore && targetStore !== selectedStoreRefStable.current) {
+      if (
+        wasTransferMode &&
+        targetStore &&
+        targetStore !== selectedStoreRefStable.current
+      ) {
         // Transfer the item to the new store
         updateItemsRef.current((prev) => {
           // Get the max position in the target store
           const targetItems = prev.filter(
-            (i) => i.store === targetStore && !i.is_checked
+            (i) => i.store === targetStore && !i.is_checked,
           );
-          const maxPos = targetItems.length > 0
-            ? Math.max(...targetItems.map((i) => i.position)) + 1
-            : 0;
+          const maxPos =
+            targetItems.length > 0
+              ? Math.max(
+                  ...targetItems.map((i) => i.position),
+                ) + 1
+              : 0;
 
           return prev.map((i) =>
             i.id === activeId
-              ? { ...i, store: targetStore, position: maxPos, manually_positioned: false }
-              : i
+              ? {
+                  ...i,
+                  store: targetStore,
+                  position: maxPos,
+                  manually_positioned: false,
+                }
+              : i,
           );
         });
         return;
@@ -2947,11 +3625,19 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
       const overId = over.id as string;
 
       const currentSorted = sortedStoreItemsRef.current;
-      const oldIndex = currentSorted.findIndex((i) => i.id === activeId);
-      const newIndex = currentSorted.findIndex((i) => i.id === overId);
+      const oldIndex = currentSorted.findIndex(
+        (i) => i.id === activeId,
+      );
+      const newIndex = currentSorted.findIndex(
+        (i) => i.id === overId,
+      );
       if (oldIndex < 0 || newIndex < 0) return;
 
-      const reordered = arrayMove(currentSorted, oldIndex, newIndex);
+      const reordered = arrayMove(
+        currentSorted,
+        oldIndex,
+        newIndex,
+      );
 
       updateItemsRef.current((prev) => {
         const positionMap = new Map<
@@ -2962,7 +3648,9 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
           positionMap.set(item.id, {
             position: idx,
             manually_positioned:
-              item.id === activeId ? true : item.manually_positioned,
+              item.id === activeId
+                ? true
+                : item.manually_positioned,
           });
         });
 
@@ -2979,7 +3667,7 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
         });
       });
     },
-    []
+    [],
   );
 
   const handleDndDragCancel = useCallback(() => {
@@ -2995,24 +3683,35 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
   }, []);
 
   const restrictToListBounds = useMemo(
-    () => createRestrictToListBounds(storeSelectorRef, checkedSectionRef, scrollContainerRef, storeTransferModeRef),
-    []
+    () =>
+      createRestrictToListBounds(
+        storeSelectorRef,
+        checkedSectionRef,
+        scrollContainerRef,
+        storeTransferModeRef,
+      ),
+    [],
   );
-  const itemModifiers = useMemo(() => [restrictToListBounds], [restrictToListBounds]);
+  const itemModifiers = useMemo(
+    () => [restrictToListBounds],
+    [restrictToListBounds],
+  );
 
   const sortableItemIds = useMemo(
     () => sortedStoreItems.map((i) => i.id),
-    [sortedStoreItems]
+    [sortedStoreItems],
   );
 
   const currentCategoryOrder = useMemo(
     () => getCategoryOrderForStore(selectedStore),
-    [selectedStore, getCategoryOrderForStore]
+    [selectedStore, getCategoryOrderForStore],
   );
 
   const categorySortStoreName = useMemo(() => {
     if (!categorySortStore) return "";
-    return stores.find((s) => s.id === categorySortStore)?.name || "";
+    return (
+      stores.find((s) => s.id === categorySortStore)?.name || ""
+    );
   }, [categorySortStore, stores]);
 
   const categorySortInitial = useMemo(() => {
@@ -3045,12 +3744,17 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
   const updateListBottom = useCallback(() => {
     const vv = window.visualViewport;
     const kbH = vv
-      ? Math.max(0, window.innerHeight - vv.height - (vv.offsetTop || 0))
+      ? Math.max(
+          0,
+          window.innerHeight - vv.height - (vv.offsetTop || 0),
+        )
       : 0;
     const isKbOpen = kbH > 80;
     // When item name is being edited the bar is hidden (display:none) → treat its height as 0
     // so no phantom gap appears below the list while the keyboard is open.
-    const barH = isItemNameEditingRef.current ? 0 : addItemBarHRef.current;
+    const barH = isItemNameEditingRef.current
+      ? 0
+      : addItemBarHRef.current;
     setListBottomFixed(isKbOpen ? kbH + barH : barH);
   }, []);
 
@@ -3069,7 +3773,9 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
     if (!bottomBarRef.current) return;
     const ro = new ResizeObserver(() => {
       // Use getBoundingClientRect for full rendered height (incl. borders)
-      const h = bottomBarRef.current?.getBoundingClientRect().height ?? 0;
+      const h =
+        bottomBarRef.current?.getBoundingClientRect().height ??
+        0;
       addItemBarHRef.current = h;
       updateListBottom();
     });
@@ -3104,7 +3810,10 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
   return (
     <div
       className="flex-1 min-h-0 relative overflow-hidden"
-      style={{ background: "var(--zu-bg)", overscrollBehavior: "none" }}
+      style={{
+        background: "var(--zu-bg)",
+        overscrollBehavior: "none",
+      }}
     >
       {/* Wiggle animation for store reorder */}
       <style>{`
@@ -3131,7 +3840,9 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
       >
         {/* Screen Header */}
         <div className="px-4 pt-4 pb-2">
-          <h2 className="text-lg font-bold text-text-1">Einkaufen</h2>
+          <h2 className="text-lg font-bold text-text-1">
+            Einkaufen
+          </h2>
         </div>
 
         {/* Store Selector */}
@@ -3173,8 +3884,12 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
           <div className="flex items-center justify-center py-20">
             <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
           </div>
-        ) : sortedStoreItems.length === 0 && checkedItems.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 px-6" style={{ minHeight: "100%" }}>
+        ) : sortedStoreItems.length === 0 &&
+          checkedItems.length === 0 ? (
+          <div
+            className="flex flex-col items-center justify-center py-20 px-6"
+            style={{ minHeight: "100%" }}
+          >
             <div className="w-14 h-14 rounded-xl bg-accent-light flex items-center justify-center mb-3">
               <Search className="w-7 h-7 text-accent" />
             </div>
@@ -3182,11 +3897,16 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
               Liste ist leer
             </p>
             <p className="text-sm text-text-2 mt-1 text-center">
-              Füge unten Artikel hinzu, um deine Einkaufsliste zu starten.
+              Füge unten Artikel hinzu, um deine Einkaufsliste
+              zu starten.
             </p>
           </div>
-        ) : sortedStoreItems.length === 0 && checkedItems.length > 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 px-6" style={{ minHeight: "100%" }}>
+        ) : sortedStoreItems.length === 0 &&
+          checkedItems.length > 0 ? (
+          <div
+            className="flex flex-col items-center justify-center py-20 px-6"
+            style={{ minHeight: "100%" }}
+          >
             <div className="w-14 h-14 rounded-xl bg-accent-light flex items-center justify-center mb-3">
               <Check className="w-7 h-7 text-accent" />
             </div>
@@ -3242,7 +3962,10 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
                     }
                     onEditingChange={setIsItemNameEditing}
                     animatingCheckId={animatingCheckId}
-                    isTransferDragging={storeTransferActive && activeDragId === item.id}
+                    isTransferDragging={
+                      storeTransferActive &&
+                      activeDragId === item.id
+                    }
                   />
                 ))}
               </div>
@@ -3299,7 +4022,11 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
           <QuantityDrawer
             item={quantityDrawerItem}
             onSave={(qty, unit) =>
-              handleUpdateQuantityUnit(quantityDrawerItem.id, qty, unit)
+              handleUpdateQuantityUnit(
+                quantityDrawerItem.id,
+                qty,
+                unit,
+              )
             }
             onClose={() => setQuantityDrawerItemId(null)}
           />
@@ -3323,13 +4050,16 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
           <StorePopover
             storeId={popover.storeId}
             storeName={
-              stores.find((s) => s.id === popover.storeId)?.name || ""
+              stores.find((s) => s.id === popover.storeId)
+                ?.name || ""
             }
             anchorEl={popover.anchorEl}
             onClose={() => setPopover(null)}
             onReorder={() => setStoreReorderMode(true)}
             onRemove={() => handleRemoveStore(popover.storeId)}
-            onCategorySort={() => setCategorySortStore(popover.storeId)}
+            onCategorySort={() =>
+              setCategorySortStore(popover.storeId)
+            }
           />
         )}
       </AnimatePresence>
@@ -3344,7 +4074,9 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
             initialCategories={categorySortInitial}
             allKnownCategories={allKnownCategories}
             globalCustomCategories={globalCustomCategories}
-            onAutoSave={(cats) => handleCategoryAutoSave(categorySortStore, cats)}
+            onAutoSave={(cats) =>
+              handleCategoryAutoSave(categorySortStore, cats)
+            }
             onAddGlobalCategory={handleAddGlobalCategory}
             onClose={() => setCategorySortStore(null)}
           />
