@@ -996,6 +996,7 @@ function SortableShoppingItem({
               data-lpignore="true"
               data-1p-ignore="true"
               data-form-type="other"
+              name="item-edit-field"
               value={editNameValue}
               onChange={(e) => setEditNameValue(e.target.value)}
               onBlur={handleNameSave}
@@ -1592,7 +1593,7 @@ function AddItemBar({
 
   return (
     <>
-      <div className="bg-surface" style={{ borderTop: "1px solid var(--zu-border)", display: itemEditing ? "none" : undefined }}>
+      <div className="bg-surface" style={{ borderTop: itemEditing ? "none" : "1px solid var(--zu-border)", display: itemEditing ? "none" : undefined, height: itemEditing ? 0 : undefined, overflow: itemEditing ? "hidden" : undefined, padding: itemEditing ? 0 : undefined, margin: itemEditing ? 0 : undefined }}>
         {quickChips.length > 0 && (
           <div
             className="flex gap-2 px-4 pt-2.5 pb-1 overflow-x-auto scrollbar-hide"
@@ -2114,6 +2115,8 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
   const [storeSettings, setStoreSettings] = useState<StoreSettingEntry[]>([]);
   // Track when any item name is being edited inline → hide AddItemBar
   const [isItemNameEditing, setIsItemNameEditing] = useState(false);
+  // Ref mirror so updateListBottom (stable callback) can read the value without re-creating
+  const isItemNameEditingRef = useRef(false);
   const [selectedStore, setSelectedStore] = useState("aldi");
   const [showAddStore, setShowAddStore] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -3045,7 +3048,10 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
       ? Math.max(0, window.innerHeight - vv.height - (vv.offsetTop || 0))
       : 0;
     const isKbOpen = kbH > 80;
-    setListBottomFixed(isKbOpen ? kbH + addItemBarHRef.current : addItemBarHRef.current);
+    // When item name is being edited the bar is hidden (display:none) → treat its height as 0
+    // so no phantom gap appears below the list while the keyboard is open.
+    const barH = isItemNameEditingRef.current ? 0 : addItemBarHRef.current;
+    setListBottomFixed(isKbOpen ? kbH + barH : barH);
   }, []);
 
   // ── Measure store-selector height ─────────────────────────────
@@ -3070,6 +3076,14 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
     ro.observe(bottomBarRef.current);
     return () => ro.disconnect();
   }, [updateListBottom]);
+
+  // ── Sync isItemNameEditingRef + immediately recalc list bottom ───
+  // Keeps the stable ref current and flushes listBottomFixed so the
+  // list fills up to the keyboard without a phantom bar-height gap.
+  useEffect(() => {
+    isItemNameEditingRef.current = isItemNameEditing;
+    updateListBottom();
+  }, [isItemNameEditing, updateListBottom]);
 
   // ── Listen to visualViewport resize/scroll (keyboard open/close) ─
   useEffect(() => {
@@ -3261,6 +3275,10 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
           right: 0,
           zIndex: 100,
           display: isItemNameEditing ? "none" : undefined,
+          height: isItemNameEditing ? 0 : undefined,
+          overflow: isItemNameEditing ? "hidden" : undefined,
+          padding: isItemNameEditing ? 0 : undefined,
+          margin: isItemNameEditing ? 0 : undefined,
         }}
       >
         <AddItemBar
