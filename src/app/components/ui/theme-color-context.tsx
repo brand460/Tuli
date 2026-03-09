@@ -32,7 +32,7 @@ const ThemeColorContext = createContext<ThemeColorContextValue>({
   setDrawerOpen: () => {},
 });
 
-/* ── Hilfsfunktionen ──────────────────────────────────────���─────── */
+/* ── Hilfsfunktionen ─────────────────────────────────────────���─── */
 
 /** Löst eine CSS Custom Property zu einem konkreten String auf. */
 function resolveCssVar(varName: string): string {
@@ -57,17 +57,24 @@ function setMetaThemeColor(color: string) {
 /** Setzt document.body.backgroundColor (Gesture Bar). */
 function setBodyBg(color: string) {
   /**
-   * Gesture-Bar-Fix: Chrome Android liest die Gesture-Bar-Farbe aus dem
-   * untersten sichtbaren Pixel bzw. dem body-Hintergrund.
+   * Gesture-Bar-Fix: Chrome Android liest die Gesture-Bar-Farbe aus
+   * background-color (NICHT dem background-Shorthand!).
    *
-   * Wir setzen `background` (Shorthand!) mit `!important` auf allen
-   * drei Layern, damit wir den CSS-Shorthand `background: var(--zu-bg)`
-   * aus index.css definitiv überschreiben.
+   * Wir setzen sowohl background-color als auch background mit !important,
+   * damit wir den CSS-Shorthand `background: var(--zu-bg)` aus index.css
+   * definitiv überschreiben. Reihenfolge: erst Shorthand (cleared alles),
+   * dann Longhand (setzt die konkrete Farbe nochmal explizit).
    */
-  document.documentElement.style.setProperty("background", color, "important");
-  document.body.style.setProperty("background", color, "important");
-  const root = document.getElementById("root");
-  if (root) root.style.setProperty("background", color, "important");
+  const targets = [
+    document.documentElement,
+    document.body,
+    document.getElementById("root"),
+  ].filter(Boolean) as HTMLElement[];
+
+  for (const el of targets) {
+    el.style.setProperty("background", color, "important");
+    el.style.setProperty("background-color", color, "important");
+  }
 }
 
 /** Erkennt ob Dark Mode aktiv ist (data-theme="dark" auf <html>). */

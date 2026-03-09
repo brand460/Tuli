@@ -24,10 +24,11 @@ import { AppContent } from "./components/app-content";
     //   den body normalerweise vollständig überlagern.
     //   Light → #ffffff (Bottom Nav)  |  Dark → #1E1E1B (Bottom Nav dark)
     const gestureColor = isDark ? "#1E1E1B" : "#ffffff";
-    document.documentElement.style.backgroundColor = gestureColor;
-    document.body.style.backgroundColor = gestureColor;
-    const root = document.getElementById("root");
-    if (root) root.style.backgroundColor = gestureColor;
+    const targets = [document.documentElement, document.body, document.getElementById("root")].filter(Boolean) as HTMLElement[];
+    for (const el of targets) {
+      el.style.setProperty("background", gestureColor, "important");
+      el.style.setProperty("background-color", gestureColor, "important");
+    }
   } catch (_) {
     // localStorage not available — stay with defaults
   }
