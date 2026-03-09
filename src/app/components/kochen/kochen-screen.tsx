@@ -281,6 +281,7 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
 
   const saveEdit = async () => {
     if (!editRecipe) return;
+    const cameFromDetail = !!selectedRecipeId; // true if editing existing recipe from detail view
     const updated = recipes.map((r) => (r.id === editRecipe.id ? editRecipe : r));
     // If new recipe (not in list), add
     if (!recipes.find((r) => r.id === editRecipe.id)) {
@@ -291,6 +292,11 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
     setActiveView("detail");
     setEditRecipe(null);
     popBack(); // remove edit history entry
+    // If this was a new recipe (came from main → edit, not detail → edit),
+    // we need to push a detail handler so swipe-back works on the detail view.
+    if (!cameFromDetail) {
+      pushBack(() => { setActiveView("main"); setSelectedRecipeId(null); });
+    }
     toast.success("Rezept gespeichert");
   };
 
