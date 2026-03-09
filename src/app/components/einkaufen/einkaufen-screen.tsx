@@ -1013,9 +1013,15 @@ function QuantityDrawer({
   const inputRef = useRef<HTMLInputElement>(null);
   const kbHeight = useKeyboardHeight();
 
-  // Focus immediately so keyboard opens simultaneously with the drawer slide-up
+  // Focus after ~100ms — the drawer is already partially visible by then,
+  // so the keyboard rises together with the slide-up animation.
+  // preventScroll stops the browser from scrolling the background list.
   useEffect(() => {
-    requestAnimationFrame(() => inputRef.current?.focus());
+    const t = setTimeout(
+      () => inputRef.current?.focus({ preventScroll: true }),
+      100,
+    );
+    return () => clearTimeout(t);
   }, []);
 
   const handleUnitChange = (newUnit: UnitType) => {
@@ -1075,9 +1081,8 @@ function QuantityDrawer({
         animate={{ y: 0, marginBottom: kbHeight }}
         exit={{ y: "100%", marginBottom: 0 }}
         transition={{
-          type: "spring",
-          damping: 25,
-          stiffness: 300,
+          y: { type: "spring", damping: 25, stiffness: 300 },
+          marginBottom: { type: "tween", duration: 0.28, ease: "easeOut" },
         }}
         onTouchMove={(e) => e.stopPropagation()}
       >
