@@ -3792,18 +3792,41 @@ export function EinkaufenScreen({
   }, [isItemNameEditing, updateListBottom]);
 
   // ── Listen to visualViewport resize/scroll (keyboard open/close) ─
+  // Also detects keyboard dismiss (swipe-back, tap outside) while editing
+  // an item name: if the keyboard closes but the input still has focus,
+  // we programmatically blur it so handleNameSave fires and edit-mode ends.
+  const wasKbOpenRef = useRef(false);
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) {
       setListBottomFixed(addItemBarHRef.current);
       return;
     }
-    updateListBottom(); // initial calculation
-    vv.addEventListener("resize", updateListBottom);
-    vv.addEventListener("scroll", updateListBottom);
+
+    const handleViewportChange = () => {
+      const kbH = Math.max(0, window.innerHeight - vv.height - (vv.offsetTop || 0));
+      const isKbOpen = kbH > 80;
+
+      // Keyboard just closed while an item-name was being edited?
+      // The input retains focus (no blur event) on swipe-dismiss / tap-outside,
+      // so we force-blur it to end the edit and bring back the AddItemBar.
+      if (wasKbOpenRef.current && !isKbOpen && isItemNameEditingRef.current) {
+        const el = document.activeElement as HTMLElement | null;
+        if (el && typeof el.blur === "function") {
+          el.blur();
+        }
+      }
+      wasKbOpenRef.current = isKbOpen;
+
+      updateListBottom();
+    };
+
+    handleViewportChange(); // initial calculation
+    vv.addEventListener("resize", handleViewportChange);
+    vv.addEventListener("scroll", handleViewportChange);
     return () => {
-      vv.removeEventListener("resize", updateListBottom);
-      vv.removeEventListener("scroll", updateListBottom);
+      vv.removeEventListener("resize", handleViewportChange);
+      vv.removeEventListener("scroll", handleViewportChange);
     };
   }, [updateListBottom]);
 
