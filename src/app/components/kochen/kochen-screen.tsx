@@ -1025,7 +1025,7 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
               </div>
               <h3 className="text-base font-semibold mb-3">Freitext-Eintrag</h3>
             <input
-              type="text"
+              type="search"
               name="freetext-entry"
               inputMode="text"
               autoComplete="off"
@@ -1142,7 +1142,7 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
               </div>
               <h3 className="text-base font-semibold mb-3">URL importieren</h3>
             <input
-              type="url"
+              type="search"
               name="recipe-url-import"
               autoComplete="off"
               autoCorrect="off"
@@ -1523,6 +1523,7 @@ function RecipeEditView({
         <div className="mt-4">
           <label className="text-xs text-text-3 mb-1 block">Titel{isNull(recipe.title) && <span style={{ color: "var(--danger)" }}> *</span>}</label>
           <input
+            type="search"
             value={recipe.title}
             onChange={(e) => update({ title: e.target.value })}
             placeholder="Rezeptname"
@@ -1563,6 +1564,7 @@ function RecipeEditView({
         <div className="mt-3">
           <label className="text-xs text-text-3 mb-1 block">Bild-URL</label>
           <input
+            type="search"
             value={recipe.image_url || ""}
             onChange={(e) => update({ image_url: e.target.value || null })}
             placeholder="https://..."
@@ -1583,6 +1585,7 @@ function RecipeEditView({
         <div className="mt-3">
           <label className="text-xs text-text-3 mb-1 block">Original-URL</label>
           <input
+            type="search"
             value={recipe.source_url || ""}
             onChange={(e) => update({ source_url: e.target.value })}
             placeholder="https://..."
@@ -1599,8 +1602,8 @@ function RecipeEditView({
           />
         </div>
 
-        {/* Time + Servings row */}
-        <div className="grid grid-cols-3 gap-3 mt-3">
+        {/* Time + Servings row — wrapped in form to suppress Chrome autofill toolbar on tel inputs */}
+        <form autoComplete="off" onSubmit={(e) => e.preventDefault()} className="grid grid-cols-3 gap-3 mt-3">
           <div>
             <label className="text-xs text-text-3 mb-1 block">Vorbereit. (Min)</label>
             <input
@@ -1652,7 +1655,7 @@ function RecipeEditView({
               className="w-full px-3 py-2 bg-surface-2 rounded-xl text-sm border-0 outline-none"
             />
           </div>
-        </div>
+        </form>
 
         {/* Categories */}
         <div className="mt-4">
@@ -1699,6 +1702,7 @@ function RecipeEditView({
             {recipe.ingredients.map((ing, i) => (
               <div key={i} className="flex gap-2 items-center">
                 <input
+                  type="search"
                   value={ing.quantity}
                   onChange={(e) => updateIngredient(i, "quantity", e.target.value)}
                   placeholder="Menge"
@@ -1714,6 +1718,7 @@ function RecipeEditView({
                   className="w-16 px-2 py-1.5 bg-surface-2 rounded-lg text-sm border-0 outline-none"
                 />
                 <input
+                  type="search"
                   value={ing.unit}
                   onChange={(e) => updateIngredient(i, "unit", e.target.value)}
                   placeholder="Einh."
@@ -1729,6 +1734,7 @@ function RecipeEditView({
                   className="w-14 px-2 py-1.5 bg-surface-2 rounded-lg text-sm border-0 outline-none"
                 />
                 <input
+                  type="search"
                   value={ing.name}
                   onChange={(e) => updateIngredient(i, "name", e.target.value)}
                   placeholder="Zutat"

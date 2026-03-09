@@ -2313,7 +2313,7 @@ function EventEditorSheet({
           <div className="px-4 py-3">
             <input
               ref={titleInputRef}
-              type="text"
+              type="search"
               name="cal-event-title"
               autoComplete="off"
               autoCorrect="off"

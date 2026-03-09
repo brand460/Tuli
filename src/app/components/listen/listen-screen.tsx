@@ -1280,7 +1280,7 @@ function SidebarContent(props: SidebarContentProps) {
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-3" />
           <input
-            type="text"
+            type="search"
             name="pages-search"
             placeholder="Seiten durchsuchen..."
             value={searchQuery}
@@ -1595,6 +1595,7 @@ function PageTreeItem(props: PageTreeItemProps) {
         {isRenaming ? (
           <input
             ref={renameRef}
+            type="search"
             name="page-rename"
             inputMode="text"
             defaultValue={page.title}

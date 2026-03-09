@@ -124,7 +124,7 @@ export function HouseholdSetup() {
                   Haushaltsname
                 </label>
                 <input
-                  type="text"
+                  type="search"
                   autoComplete="off"
                   data-lpignore="true"
                   data-1p-ignore="true"
@@ -174,7 +174,7 @@ export function HouseholdSetup() {
                   Einladungscode
                 </label>
                 <input
-                  type="text"
+                  type="search"
                   autoComplete="off"
                   data-lpignore="true"
                   data-1p-ignore="true"

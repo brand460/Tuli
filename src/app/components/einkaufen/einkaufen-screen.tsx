@@ -676,159 +676,159 @@ const CATEGORY_COLORS: Record<
 > = {
   "Obst & Gemüse": {
     bg: "#DCFCE7",
-    text: "#166534",
+    text: "#22C55E",
     dot: "#22C55E",
   },
-  Backwaren: { bg: "#FEF3C7", text: "#92400E", dot: "#F59E0B" },
+  Backwaren: { bg: "#FEF3C7", text: "#F59E0B", dot: "#F59E0B" },
   "Fleisch & Wurst": {
     bg: "#FCE7F3",
-    text: "#9D174D",
+    text: "#EC4899",
     dot: "#EC4899",
   },
   "Milch & Käse": {
     bg: "#DBEAFE",
-    text: "#1E40AF",
+    text: "#3B82F6",
     dot: "#3B82F6",
   },
-  Eier: { bg: "#FEF9C3", text: "#854D0E", dot: "#EAB308" },
+  Eier: { bg: "#FEF9C3", text: "#EAB308", dot: "#EAB308" },
   "Nudeln & Reis": {
     bg: "#FFF7ED",
-    text: "#9A3412",
+    text: "#F97316",
     dot: "#F97316",
   },
-  Konserven: { bg: "#FEE2E2", text: "#991B1B", dot: "#EF4444" },
+  Konserven: { bg: "#FEE2E2", text: "#EF4444", dot: "#EF4444" },
   "Saucen & Gewürze": {
     bg: "#FED7AA",
-    text: "#9A3412",
+    text: "#FB923C",
     dot: "#FB923C",
   },
   "Kaffee & Tee": {
     bg: "#F3E8FF",
-    text: "#6B21A8",
+    text: "#A855F7",
     dot: "#A855F7",
   },
   "Müsli & Frühstück": {
     bg: "#FFEDD5",
-    text: "#C2410C",
+    text: "#F97316",
     dot: "#F97316",
   },
-  Tiefkühl: { bg: "#E0F2FE", text: "#075985", dot: "#0EA5E9" },
+  Tiefkühl: { bg: "#E0F2FE", text: "#0EA5E9", dot: "#0EA5E9" },
   "Süßwaren & Snacks": {
     bg: "#FDF2F8",
-    text: "#BE185D",
+    text: "#EC4899",
     dot: "#EC4899",
   },
-  Getränke: { bg: "#ECFDF5", text: "#065F46", dot: "#10B981" },
+  Getränke: { bg: "#ECFDF5", text: "#10B981", dot: "#10B981" },
   "Haushalt & Reinigung": {
     bg: "#F3F4F6",
-    text: "#374151",
+    text: "#9CA3AF",
     dot: "#6B7280",
   },
   Tiernahrung: {
     bg: "#FEF3C7",
-    text: "#78350F",
+    text: "#D97706",
     dot: "#D97706",
   },
   Körperpflege: {
     bg: "#FCE7F3",
-    text: "#9D174D",
+    text: "#EC4899",
     dot: "#EC4899",
   },
   Haarpflege: {
     bg: "#F3E8FF",
-    text: "#6B21A8",
+    text: "#A855F7",
     dot: "#A855F7",
   },
   Gesichtspflege: {
     bg: "#FDF2F8",
-    text: "#BE185D",
+    text: "#F472B6",
     dot: "#F472B6",
   },
   "Makeup & Kosmetik": {
     bg: "#FECDD3",
-    text: "#9F1239",
+    text: "#FB7185",
     dot: "#FB7185",
   },
   Mundhygiene: {
     bg: "#DBEAFE",
-    text: "#1E40AF",
+    text: "#3B82F6",
     dot: "#3B82F6",
   },
   Damenhygiene: {
     bg: "#FCE7F3",
-    text: "#9D174D",
+    text: "#EC4899",
     dot: "#EC4899",
   },
   Babypflege: {
     bg: "#FEF9C3",
-    text: "#854D0E",
+    text: "#EAB308",
     dot: "#EAB308",
   },
   Reinigungsmittel: {
     bg: "#E0F2FE",
-    text: "#075985",
+    text: "#0EA5E9",
     dot: "#0EA5E9",
   },
   Waschmittel: {
     bg: "#ECFDF5",
-    text: "#065F46",
+    text: "#10B981",
     dot: "#10B981",
   },
   Papierprodukte: {
     bg: "#F3F4F6",
-    text: "#374151",
+    text: "#9CA3AF",
     dot: "#6B7280",
   },
   "Gesundheit & Medizin": {
     bg: "#DCFCE7",
-    text: "#166534",
+    text: "#22C55E",
     dot: "#22C55E",
   },
   "Vitamine & Nahrungsergänzung": {
     bg: "#FFF7ED",
-    text: "#C2410C",
+    text: "#F97316",
     dot: "#F97316",
   },
   "Foto & Technik": {
     bg: "#E0E7FF",
-    text: "#3730A3",
+    text: "#6366F1",
     dot: "#6366F1",
   },
   "Lebensmittel & Snacks": {
     bg: "#FEF3C7",
-    text: "#92400E",
+    text: "#F59E0B",
     dot: "#F59E0B",
   },
   Elektronik: {
     bg: "#E0E7FF",
-    text: "#3730A3",
+    text: "#6366F1",
     dot: "#6366F1",
   },
-  Haushalt: { bg: "#F3F4F6", text: "#374151", dot: "#6B7280" },
+  Haushalt: { bg: "#F3F4F6", text: "#9CA3AF", dot: "#6B7280" },
   Lebensmittel: {
     bg: "#DCFCE7",
-    text: "#166534",
+    text: "#22C55E",
     dot: "#22C55E",
   },
   "Bücher & Medien": {
     bg: "#F3E8FF",
-    text: "#6B21A8",
+    text: "#A855F7",
     dot: "#A855F7",
   },
   "Sport & Freizeit": {
     bg: "#ECFDF5",
-    text: "#065F46",
+    text: "#10B981",
     dot: "#10B981",
   },
-  Kleidung: { bg: "#FCE7F3", text: "#9D174D", dot: "#EC4899" },
+  Kleidung: { bg: "#FCE7F3", text: "#EC4899", dot: "#EC4899" },
   Bürobedarf: {
     bg: "#FEF9C3",
-    text: "#854D0E",
+    text: "#EAB308",
     dot: "#EAB308",
   },
-  Spielzeug: { bg: "#FEF3C7", text: "#92400E", dot: "#F59E0B" },
-  Garten: { bg: "#DCFCE7", text: "#166534", dot: "#22C55E" },
-  Sonstiges: { bg: "#F1F5F9", text: "#475569", dot: "#94A3B8" },
+  Spielzeug: { bg: "#FEF3C7", text: "#F59E0B", dot: "#F59E0B" },
+  Garten: { bg: "#DCFCE7", text: "#22C55E", dot: "#22C55E" },
+  Sonstiges: { bg: "#F1F5F9", text: "#94A3B8", dot: "#94A3B8" },
 };
 
 function getCategoryChipColor(category: string): {
@@ -1088,25 +1088,27 @@ function QuantityDrawer({
         </p>
 
         <div className="flex items-center gap-3">
-          {/* Quantity input */}
-          <input
-            ref={inputRef}
-            type="tel"
-            inputMode="decimal"
-            name="qty-drawer-input"
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="off"
-            spellCheck={false}
-            data-lpignore="true"
-            data-1p-ignore="true"
-            data-form-type="other"
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={handleKeyDown}
-            className="w-20 h-11 rounded-[16px] text-center text-sm font-semibold text-text-1 bg-surface-2 focus:outline-none"
-            style={{ border: "1px solid var(--zu-border)" }}
-          />
+          {/* Quantity input — wrapped in form to suppress Chrome autofill toolbar on tel inputs */}
+          <form autoComplete="off" onSubmit={(e) => e.preventDefault()}>
+            <input
+              ref={inputRef}
+              type="tel"
+              inputMode="decimal"
+              name="qty-drawer-input"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-form-type="other"
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              className="w-20 h-11 rounded-[16px] text-center text-sm font-semibold text-text-1 bg-surface-2 focus:outline-none"
+              style={{ border: "1px solid var(--zu-border)" }}
+            />
+          </form>
 
           {/* Unit segmented control — prevent focus steal to keep keyboard open */}
           <div
@@ -2516,7 +2518,7 @@ function CategoryPickerModal({
             <Search className="w-4 h-4 text-text-3 flex-shrink-0" />
             <input
               ref={filterInputRef}
-              type="text"
+              type="search"
               inputMode="text"
               autoComplete="off"
               autoCorrect="off"

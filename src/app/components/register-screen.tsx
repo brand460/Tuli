@@ -51,7 +51,7 @@ export function RegisterScreen({ onSwitchToLogin }: RegisterScreenProps) {
               Name
             </label>
             <input
-              type="text"
+              type="search"
               autoComplete="off"
               autoCorrect="off"
               autoCapitalize="off"
