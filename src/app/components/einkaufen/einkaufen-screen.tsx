@@ -987,7 +987,7 @@ function SortableShoppingItem({
           {isEditingName && !item.is_checked ? (
             <input
               ref={nameInputRef}
-              type="text"
+              type="search"
               inputMode="text"
               autoComplete="off"
               autoCorrect="off"
@@ -3104,7 +3104,7 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
   return (
     <div
       className="flex-1 min-h-0 relative overflow-hidden"
-      style={{ background: "var(--zu-bg)" }}
+      style={{ background: "var(--zu-bg)", overscrollBehavior: "none" }}
     >
       {/* Wiggle animation for store reorder */}
       <style>{`
@@ -3166,6 +3166,7 @@ export function EinkaufenScreen({ onItemCountChange }: { onItemCountChange?: (co
           bottom: listBottomFixed,
           overflowY: "auto",
           WebkitOverflowScrolling: "touch",
+          overscrollBehavior: "contain",
         }}
       >
         {!loaded ? (
