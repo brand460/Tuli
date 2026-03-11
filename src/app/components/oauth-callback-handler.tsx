@@ -135,7 +135,12 @@ export function OAuthCallbackHandler({
             console.error("[OAuth] Profil-Check fehlgeschlagen (nicht kritisch):", profileErr);
           }
 
-          // Hard redirect — clean URL, force full auth-state re-init.
+          // Wait briefly so Supabase can persist the session to localStorage
+          // before the hard redirect re-initialises the app.
+          console.log("[OAuth] Warte 500ms damit Session persistiert wird...");
+          await new Promise((resolve) => setTimeout(resolve, 500));
+
+          // Hard redirect — use replace() so the callback URL is removed from history.
           console.log("[OAuth] Leite weiter zu / ...");
           window.location.replace("/");
           return;
@@ -150,6 +155,7 @@ export function OAuthCallbackHandler({
           const { data: { session: retrySession } } = await supabase.auth.getSession();
           if (retrySession) {
             console.log("[OAuth] ✓ Session nach Wartezeit gefunden! Leite weiter...");
+            await new Promise((resolve) => setTimeout(resolve, 500));
             window.location.replace("/");
             return;
           }
