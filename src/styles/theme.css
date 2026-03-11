@@ -23,6 +23,9 @@
   --text-2: #4A4A45;
   --text-3: #9A9A93;
 
+  /* Bottom Nav icon color */
+  --nav-icon: #1a1a1a;
+
   /* Border */
   --zu-border: #E8E8E3;
 
@@ -32,6 +35,12 @@
   /* Danger */
   --danger: #DC2626;
   --danger-light: #FEF2F2;
+
+  /* Paper bag illustration — exact SVG fill colors */
+  --bag-body:   #D3B08A;
+  --bag-fold:   #C59066;
+  --bag-flap:   #B5855D;
+  --bag-shadow: #94704E;
 
   /* Shadows */
   --shadow-card: 0 1px 4px rgba(0,0,0,0.06);
@@ -100,6 +109,13 @@
   --shadow-elevated: 0 4px 24px rgba(0,0,0,0.35);
   --switch-background: #4A4A45;
   --today-circle: #4A4A4A;
+  --nav-icon: #e5e5e5;
+
+  /* Paper bag illustration – dark (proportionally darkened) */
+  --bag-body:   #8B6540;
+  --bag-fold:   #7D5C3F;
+  --bag-flap:   #70523A;
+  --bag-shadow: #5C4530;
 }
 
 @theme inline {

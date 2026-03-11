@@ -49,6 +49,19 @@ const supabaseAdmin = () =>
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
+// ── Auth helper ───────────────────────────────────────────────────
+async function getAuthUser(c: any) {
+  const token = c.req.header("Authorization")?.split(" ")[1];
+  if (!token) return null;
+  try {
+    const { data: { user }, error } = await supabaseAdmin().auth.getUser(token);
+    if (error || !user) return null;
+    return user;
+  } catch {
+    return null;
+  }
+}
+
 // Health check
 app.get("/make-server-2a26506b/health", (c) => {
   return c.json({ status: "ok", ts: Date.now(), v: 2 });
@@ -444,7 +457,261 @@ app.put("/make-server-2a26506b/meal-plan", async (c) => {
   }
 });
 
-// ── Recipe URL import via Claude API ───────────────────────────────
+// ── Invite endpoints ───────────────────────────────────────────────
+
+// Generate invite token (valid 7 days)
+app.post("/make-server-2a26506b/invite/generate", async (c) => {
+  try {
+    const user = await getAuthUser(c);
+    if (!user) return c.json({ error: "Nicht autorisiert." }, 401);
+
+    const { household_id } = await c.req.json();
+    if (!household_id) return c.json({ error: "household_id erforderlich." }, 400);
+
+    // Verify user is a member
+    const { data: member } = await supabaseAdmin()
+      .from("household_members")
+      .select("role")
+      .eq("household_id", household_id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (!member) return c.json({ error: "Kein Mitglied dieses Haushalts." }, 403);
+
+    // Get household name
+    const { data: hh } = await supabaseAdmin()
+      .from("households")
+      .select("name")
+      .eq("id", household_id)
+      .maybeSingle();
+
+    const token = crypto.randomUUID().replace(/-/g, "");
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    await kv.set(`invite:${token}`, {
+      household_id,
+      household_name: hh?.name || "Unbekannt",
+      created_by: user.id,
+      created_at: new Date().toISOString(),
+      expires_at: expiresAt,
+      used_by: null,
+    });
+
+    return c.json({ token, expires_at: expiresAt });
+  } catch (err) {
+    console.log("POST /invite/generate error:", err);
+    return c.json({ error: `Fehler beim Erstellen des Einladungslinks: ${err}` }, 500);
+  }
+});
+
+// Validate invite token
+app.get("/make-server-2a26506b/invite/:token", async (c) => {
+  try {
+    const token = c.req.param("token");
+    const data = await kv.get(`invite:${token}`);
+
+    if (!data) return c.json({ valid: false, error: "Ungültiger Einladungslink." }, 404);
+    if (data.used_by) return c.json({ valid: false, error: "Dieser Link wurde bereits verwendet." }, 410);
+    if (new Date(data.expires_at) < new Date()) return c.json({ valid: false, error: "Dieser Einladungslink ist abgelaufen." }, 410);
+
+    return c.json({
+      valid: true,
+      household_id: data.household_id,
+      household_name: data.household_name,
+      expires_at: data.expires_at,
+    });
+  } catch (err) {
+    console.log("GET /invite/:token error:", err);
+    return c.json({ error: `Fehler beim Prüfen des Links: ${err}` }, 500);
+  }
+});
+
+// Accept invite — adds user to household
+app.post("/make-server-2a26506b/invite/accept", async (c) => {
+  try {
+    const user = await getAuthUser(c);
+    if (!user) return c.json({ error: "Nicht autorisiert." }, 401);
+
+    const { token } = await c.req.json();
+    if (!token) return c.json({ error: "Token erforderlich." }, 400);
+
+    const data = await kv.get(`invite:${token}`);
+    if (!data) return c.json({ error: "Ungültiger Einladungslink." }, 404);
+    if (data.used_by) return c.json({ error: "Dieser Link wurde bereits verwendet." }, 410);
+    if (new Date(data.expires_at) < new Date()) return c.json({ error: "Einladungslink abgelaufen." }, 410);
+
+    // Already a member?
+    const { data: existing } = await supabaseAdmin()
+      .from("household_members")
+      .select("id")
+      .eq("household_id", data.household_id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (existing) return c.json({ ok: true, household_id: data.household_id, message: "Bereits Mitglied." });
+
+    // Add to household
+    const { error: insertErr } = await supabaseAdmin()
+      .from("household_members")
+      .insert({ household_id: data.household_id, user_id: user.id, role: "member" });
+
+    if (insertErr) return c.json({ error: `Beitreten fehlgeschlagen: ${insertErr.message}` }, 500);
+
+    // Mark token as used
+    await kv.set(`invite:${token}`, { ...data, used_by: user.id });
+
+    return c.json({ ok: true, household_id: data.household_id });
+  } catch (err) {
+    console.log("POST /invite/accept error:", err);
+    return c.json({ error: `Fehler beim Beitreten: ${err}` }, 500);
+  }
+});
+
+// ── Household management endpoints ────────────────────────────────
+
+// Get members of a household
+app.get("/make-server-2a26506b/household/:id/members", async (c) => {
+  try {
+    const user = await getAuthUser(c);
+    if (!user) return c.json({ error: "Nicht autorisiert." }, 401);
+
+    const householdId = c.req.param("id");
+
+    // Verify user is a member
+    const { data: membership } = await supabaseAdmin()
+      .from("household_members")
+      .select("role")
+      .eq("household_id", householdId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (!membership) return c.json({ error: "Kein Zugriff." }, 403);
+
+    // Get all members
+    const { data: memberRows, error: memberErr } = await supabaseAdmin()
+      .from("household_members")
+      .select("user_id, role")
+      .eq("household_id", householdId);
+
+    if (memberErr) return c.json({ error: `Fehler: ${memberErr.message}` }, 500);
+
+    // Get profiles for each member
+    const userIds = (memberRows || []).map((m: any) => m.user_id);
+    const { data: profileRows } = await supabaseAdmin()
+      .from("profiles")
+      .select("id, display_name")
+      .in("id", userIds);
+
+    const members = (memberRows || []).map((m: any) => ({
+      user_id: m.user_id,
+      role: m.role,
+      display_name: (profileRows || []).find((p: any) => p.id === m.user_id)?.display_name || "Unbekannt",
+      is_me: m.user_id === user.id,
+    }));
+
+    return c.json({ members, my_role: membership.role });
+  } catch (err) {
+    console.log("GET /household/:id/members error:", err);
+    return c.json({ error: `Fehler beim Laden der Mitglieder: ${err}` }, 500);
+  }
+});
+
+// Rename household (admin/owner only)
+app.put("/make-server-2a26506b/household/:id/name", async (c) => {
+  try {
+    const user = await getAuthUser(c);
+    if (!user) return c.json({ error: "Nicht autorisiert." }, 401);
+
+    const householdId = c.req.param("id");
+    const { name } = await c.req.json();
+    if (!name?.trim()) return c.json({ error: "Name darf nicht leer sein." }, 400);
+
+    const { data: member } = await supabaseAdmin()
+      .from("household_members")
+      .select("role")
+      .eq("household_id", householdId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (!member || member.role !== "admin") return c.json({ error: "Nur der Inhaber kann den Namen ändern." }, 403);
+
+    const { error } = await supabaseAdmin()
+      .from("households")
+      .update({ name: name.trim() })
+      .eq("id", householdId);
+
+    if (error) return c.json({ error: `Fehler: ${error.message}` }, 500);
+    return c.json({ ok: true });
+  } catch (err) {
+    console.log("PUT /household/:id/name error:", err);
+    return c.json({ error: `Fehler beim Umbenennen: ${err}` }, 500);
+  }
+});
+
+// Leave household (non-admin members only)
+app.post("/make-server-2a26506b/household/:id/leave", async (c) => {
+  try {
+    const user = await getAuthUser(c);
+    if (!user) return c.json({ error: "Nicht autorisiert." }, 401);
+
+    const householdId = c.req.param("id");
+
+    const { data: member } = await supabaseAdmin()
+      .from("household_members")
+      .select("role")
+      .eq("household_id", householdId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (!member) return c.json({ error: "Kein Mitglied dieses Haushalts." }, 404);
+    if (member.role === "admin") return c.json({ error: "Inhaber kann den Haushalt nicht verlassen. Bitte erst löschen." }, 400);
+
+    const { error } = await supabaseAdmin()
+      .from("household_members")
+      .delete()
+      .eq("household_id", householdId)
+      .eq("user_id", user.id);
+
+    if (error) return c.json({ error: `Fehler: ${error.message}` }, 500);
+    return c.json({ ok: true });
+  } catch (err) {
+    console.log("POST /household/:id/leave error:", err);
+    return c.json({ error: `Fehler beim Verlassen: ${err}` }, 500);
+  }
+});
+
+// Delete household (admin/owner only — cascades members)
+app.delete("/make-server-2a26506b/household/:id", async (c) => {
+  try {
+    const user = await getAuthUser(c);
+    if (!user) return c.json({ error: "Nicht autorisiert." }, 401);
+
+    const householdId = c.req.param("id");
+
+    const { data: member } = await supabaseAdmin()
+      .from("household_members")
+      .select("role")
+      .eq("household_id", householdId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (!member || member.role !== "admin") return c.json({ error: "Nur der Inhaber kann den Haushalt löschen." }, 403);
+
+    // Remove all members first
+    await supabaseAdmin().from("household_members").delete().eq("household_id", householdId);
+
+    // Delete household
+    const { error } = await supabaseAdmin().from("households").delete().eq("id", householdId);
+    if (error) return c.json({ error: `Fehler: ${error.message}` }, 500);
+
+    return c.json({ ok: true });
+  } catch (err) {
+    console.log("DELETE /household/:id error:", err);
+    return c.json({ error: `Fehler beim Löschen: ${err}` }, 500);
+  }
+});
+
+// ── Recipe URL import via Claude API ──────────────────────────────
 
 app.post("/make-server-2a26506b/import-recipe", async (c) => {
   try {

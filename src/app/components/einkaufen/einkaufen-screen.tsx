@@ -617,18 +617,18 @@ function StorePopover({
   const options = [
     {
       icon: <ArrowUpDown className="w-4 h-4" />,
-      label: "Laden verschieben",
+      label: "Verschieben",
       action: onReorder,
     },
     {
-      icon: <Trash2 className="w-4 h-4" />,
-      label: "Laden entfernen",
-      action: onRemove,
+      icon: <Settings className="w-4 h-4" />,
+      label: "Anpassen",
+      action: onCategorySort,
     },
     {
-      icon: <Settings className="w-4 h-4" />,
-      label: "Kategorien anpassen",
-      action: onCategorySort,
+      icon: <Trash2 className="w-4 h-4" />,
+      label: "Löschen",
+      action: onRemove,
     },
   ];
 
@@ -855,30 +855,18 @@ function CategoryChip({
   selected?: boolean;
   onClick?: () => void;
 }) {
-  const colors = getCategoryChipColor(category);
   return (
     <button
       onClick={onClick}
       onPointerDown={(e) => e.preventDefault()}
       onMouseDown={(e) => e.preventDefault()}
-      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-sm font-medium transition whitespace-nowrap ${
+      className={`flex items-center px-2.5 py-1.5 rounded-full text-sm font-medium transition whitespace-nowrap ${
         selected
-          ? "bg-surface border-2"
-          : "bg-surface-2 border hover:opacity-80"
+          ? "bg-surface"
+          : "bg-surface-2 hover:opacity-80"
       }`}
-      style={
-        selected
-          ? { borderColor: colors.dot, color: colors.text }
-          : {
-              borderColor: "var(--zu-border)",
-              color: colors.text,
-            }
-      }
+      style={{ color: "var(--text-1)" }}
     >
-      <span
-        className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-        style={{ backgroundColor: colors.dot }}
-      />
       {category}
     </button>
   );
@@ -1899,7 +1887,6 @@ function CategorySortModal({
                 style={{ WebkitOverflowScrolling: "touch" }}
               >
                 {availableChips.slice(0, 12).map((chip) => {
-                  const colors = getCategoryChipColor(chip);
                   return (
                     <button
                       key={chip}
@@ -1908,19 +1895,11 @@ function CategorySortModal({
                       className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap"
                       style={{
                         background: "var(--surface-2)",
-                        border: "1px solid var(--zu-border)",
+                        color: "var(--text-1)",
                       }}
                     >
-                      <span style={{ color: "var(--text-2)" }}>
-                        +
-                      </span>
-                      <span
-                        className="w-2 h-2 rounded-full flex-shrink-0"
-                        style={{ backgroundColor: colors.dot }}
-                      />
-                      <span style={{ color: colors.text }}>
-                        {chip}
-                      </span>
+                      <span style={{ color: "var(--text-2)" }}>+</span>
+                      {chip}
                     </button>
                   );
                 })}
@@ -1942,8 +1921,6 @@ function CategorySortModal({
                 >
                   <div className="max-h-36 overflow-y-auto px-5">
                     {searchResults.map((result) => {
-                      const colors =
-                        getCategoryChipColor(result);
                       return (
                         <button
                           key={result}
@@ -1956,14 +1933,8 @@ function CategorySortModal({
                           className="w-full text-left px-3 py-2 hover:bg-surface-2 rounded-[10px] flex items-center gap-2 transition"
                         >
                           <span
-                            className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                            style={{
-                              backgroundColor: colors.dot,
-                            }}
-                          />
-                          <span
                             className="text-sm font-medium"
-                            style={{ color: colors.text }}
+                            style={{ color: "var(--text-1)" }}
                           >
                             {result}
                           </span>
@@ -2254,13 +2225,6 @@ function AddItemBar({
             }}
           >
             {quickChips.map((chip) => {
-              const template = findGroceryTemplate(
-                chip,
-                customTemplates,
-              );
-              const colors = template
-                ? getCategoryChipColor(template.category)
-                : getCategoryChipColor("Sonstiges");
               return (
                 <button
                   key={chip}
@@ -2270,15 +2234,10 @@ function AddItemBar({
                   className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition whitespace-nowrap"
                   style={{
                     background: "var(--surface-2)",
-                    color: "var(--text-2)",
-                    border: "1px solid var(--zu-border)",
+                    color: "var(--text-1)",
                   }}
                 >
-                  <span>+</span>
-                  <span
-                    className="w-2 h-2 rounded-full flex-shrink-0"
-                    style={{ backgroundColor: colors.dot }}
-                  />
+                  <span style={{ color: "var(--text-2)" }}>+</span>
                   {chip}
                 </button>
               );
@@ -2299,9 +2258,6 @@ function AddItemBar({
             >
               <div className="max-h-48 overflow-y-auto">
                 {searchResults.map((result) => {
-                  const colors = getCategoryChipColor(
-                    result.category,
-                  );
                   return (
                     <button
                       key={result.name}
@@ -2320,15 +2276,9 @@ function AddItemBar({
                         {result.name}
                       </span>
                       <span
-                        className="flex items-center gap-1.5 text-[10px] ml-2 flex-shrink-0 font-medium"
-                        style={{ color: colors.text }}
+                        className="text-[10px] ml-2 flex-shrink-0 font-medium"
+                        style={{ color: "var(--text-3)" }}
                       >
-                        <span
-                          className="w-2 h-2 rounded-full"
-                          style={{
-                            backgroundColor: colors.dot,
-                          }}
-                        />
                         {result.category}
                       </span>
                     </button>
@@ -2830,6 +2780,57 @@ function StoreSuggestionRow({
     </button>
   );
 }
+
+// ── StableDndContext ────────────────────────────────────────────────
+// Wraps @dnd-kit DndContext with ref-based handler forwarding so that
+// the internal useDndMonitorProvider dep-array never changes size
+// between renders (fixes "useLayoutEffect dep array size changed" warning).
+type StableDndContextProps = {
+  sensors: ReturnType<typeof useSensors>;
+  collisionDetection: typeof closestCenter;
+  modifiers: import("@dnd-kit/core").Modifier[];
+  onDragStart?: (e: DragStartEvent) => void;
+  onDragMove?: (e: unknown) => void;
+  onDragEnd?: (e: DragEndEvent) => void;
+  onDragCancel?: () => void;
+  children: React.ReactNode;
+};
+const StableDndContext = React.memo(function StableDndContext({
+  sensors,
+  collisionDetection,
+  modifiers,
+  children,
+  onDragStart,
+  onDragMove,
+  onDragEnd,
+  onDragCancel,
+}: StableDndContextProps) {
+  const startRef = useRef(onDragStart);
+  const moveRef = useRef(onDragMove);
+  const endRef = useRef(onDragEnd);
+  const cancelRef = useRef(onDragCancel);
+  startRef.current = onDragStart;
+  moveRef.current = onDragMove;
+  endRef.current = onDragEnd;
+  cancelRef.current = onDragCancel;
+  const stableStart = useCallback((e: DragStartEvent) => startRef.current?.(e), []);
+  const stableMove = useCallback((e: unknown) => moveRef.current?.(e), []);
+  const stableEnd = useCallback((e: DragEndEvent) => endRef.current?.(e), []);
+  const stableCancel = useCallback(() => cancelRef.current?.(), []);
+  return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={collisionDetection}
+      modifiers={modifiers}
+      onDragStart={stableStart}
+      onDragMove={stableMove}
+      onDragEnd={stableEnd}
+      onDragCancel={stableCancel}
+    >
+      {children}
+    </DndContext>
+  );
+});
 
 // ── Main Einkaufen Screen ──────────────────────────────────────────
 export function EinkaufenScreen({
@@ -4194,9 +4195,30 @@ export function EinkaufenScreen({
             className="flex flex-col items-center justify-center py-20 px-6"
             style={{ minHeight: "100%" }}
           >
-            <div className="w-14 h-14 rounded-xl bg-accent-light flex items-center justify-center mb-3">
-              <Search className="w-7 h-7 text-accent" />
-            </div>
+            <svg
+              width="120"
+              height="130"
+              viewBox="0 0 435 471"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              className="mb-5"
+              aria-hidden="true"
+            >
+              {/* Top folded flap */}
+              <path d="M333.5 22.5002L331 46.5002H103.5L101 22.5002L43 0.500244H164C164 17.621 187.953 31.5002 217.5 31.5002C247.047 31.5002 271 17.621 271 0.500244H392L333.5 22.5002Z" fill="var(--bag-flap)" />
+              {/* Left corner dark triangle */}
+              <path d="M101 22.5L103.5 46.5H17.5L101 22.5Z" fill="var(--bag-shadow)" />
+              {/* Right corner dark triangle */}
+              <path d="M333.5 22.5L331 46.5H417L333.5 22.5Z" fill="var(--bag-shadow)" />
+              {/* Left corner light fold */}
+              <path d="M42.5 0L101 22.5L43 39L42.5 0Z" fill="var(--bag-fold)" />
+              {/* Right corner light fold */}
+              <path d="M392 0L333.5 22.5L391.5 39L392 0Z" fill="var(--bag-fold)" />
+              {/* Bag body */}
+              <path d="M435 470.5H0L17.5 46.5H154.006C154.471 66.4279 182.72 82.5 217.5 82.5C252.28 82.5 280.529 66.4279 280.994 46.5H417L435 470.5Z" fill="var(--bag-body)" />
+              {/* Handle opening shadow — fixed anti-aliasing seam */}
+              <path d="M280.994 45.5C280.998 45.6664 281 45.8331 281 46C281 66.1584 252.57 82.5 217.5 82.5C182.43 82.5 154 66.1584 154 46C154 45.8331 154.002 45.6664 154.006 45.5H280.994Z" fill="var(--bag-flap)" />
+            </svg>
             <p className="text-base font-semibold text-text-1">
               Liste ist leer
             </p>
@@ -4234,8 +4256,8 @@ export function EinkaufenScreen({
           </div>
         ) : null}
 
-        {/* DndContext always mounted to prevent useLayoutEffect dep-array size change warning */}
-        <DndContext
+        {/* StableDndContext keeps handler refs stable → fixes useLayoutEffect dep-array size warning */}
+        <StableDndContext
           sensors={sensors}
           collisionDetection={closestCenter}
           modifiers={itemModifiers}
@@ -4276,7 +4298,7 @@ export function EinkaufenScreen({
               </div>
             )}
           </SortableContext>
-        </DndContext>
+        </StableDndContext>
 
         {/* Checked items — always at the end of the scroll area */}
         <div ref={checkedSectionRef}>

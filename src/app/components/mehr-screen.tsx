@@ -5,12 +5,13 @@ import {
   Bell,
   Moon,
   Sun,
-  Share2,
   Info,
   LogOut,
   ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
+import { AnimatePresence, motion } from "motion/react";
+import { HouseholdSettings } from "./household-settings";
 
 interface MehrScreenProps {
   onSignOut: () => void;
@@ -40,15 +41,15 @@ function useTheme() {
 
 export function MehrScreen({ onSignOut }: MehrScreenProps) {
   const { isDark, toggle } = useTheme();
+  const [showHouseholdSettings, setShowHouseholdSettings] = useState(false);
 
   const menuItems = [
-    { icon: User, label: "Profil & Konto", danger: false, action: undefined },
-    { icon: Home, label: "Haushalt verwalten", danger: false, action: undefined },
-    { icon: Bell, label: "Benachrichtigungen", danger: false, action: undefined },
-    { icon: isDark ? Sun : Moon, label: "Dark Mode", danger: false, action: toggle, isToggle: true },
-    { icon: Share2, label: "Teilen & Einladen", danger: false, action: undefined },
-    { icon: Info, label: "Über die App", danger: false, action: undefined },
-    { icon: LogOut, label: "Abmelden", danger: true, action: undefined },
+    { id: "profile", icon: User, label: "Profil & Konto", danger: false, action: undefined },
+    { id: "household", icon: Home, label: "Haushalt verwalten", danger: false, action: () => setShowHouseholdSettings(true) },
+    { id: "notifications", icon: Bell, label: "Benachrichtigungen", danger: false, action: undefined },
+    { id: "darkmode", icon: isDark ? Sun : Moon, label: "Dark Mode", danger: false, action: toggle, isToggle: true },
+    { id: "info", icon: Info, label: "Über die App", danger: false, action: undefined },
+    { id: "logout", icon: LogOut, label: "Abmelden", danger: true, action: undefined },
   ];
 
   const handleTap = (item: typeof menuItems[number]) => {
@@ -67,18 +68,26 @@ export function MehrScreen({ onSignOut }: MehrScreenProps) {
   };
 
   return (
-    <div className="flex-1 flex flex-col min-h-0" style={{ background: "var(--zu-bg)" }}>
+    <div className="flex-1 flex flex-col min-h-0 relative" style={{ background: "var(--zu-bg)" }}>
       <div className="flex-shrink-0 px-4 pt-4 pb-2" style={{ background: "var(--zu-bg)" }}>
-        <h2 className="text-lg font-bold text-text-1">Settings</h2>
+        <h2 className="text-lg font-bold text-text-1">Einstellungen</h2>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4">
-        <div className="bg-surface rounded-[16px] divide-y" style={{ boxShadow: "var(--shadow-card)", borderColor: "var(--zu-border)", borderWidth: 1, borderStyle: "solid" }}>
+        <div
+          className="bg-surface rounded-[16px] divide-y"
+          style={{
+            boxShadow: "var(--shadow-card)",
+            borderColor: "var(--zu-border)",
+            borderWidth: 1,
+            borderStyle: "solid",
+          }}
+        >
           {menuItems.map((item) => {
             const Icon = item.icon;
             return (
               <button
-                key={item.label}
+                key={item.id}
                 onClick={() => handleTap(item)}
                 className="w-full flex items-center gap-3 px-4 py-3.5 text-left active:bg-surface-2 transition"
                 style={{ borderColor: "var(--zu-border)" }}
@@ -128,6 +137,22 @@ export function MehrScreen({ onSignOut }: MehrScreenProps) {
           })}
         </div>
       </div>
+
+      {/* ── Household Settings overlay ── */}
+      <AnimatePresence>
+        {showHouseholdSettings && (
+          <motion.div
+            initial={{ x: "100%" }}
+            animate={{ x: 0 }}
+            exit={{ x: "100%" }}
+            transition={{ type: "spring", damping: 25, stiffness: 300 }}
+            className="absolute inset-0"
+            style={{ zIndex: 1000, background: "var(--zu-bg)" }}
+          >
+            <HouseholdSettings onClose={() => setShowHouseholdSettings(false)} />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

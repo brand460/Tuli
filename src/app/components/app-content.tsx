@@ -1,13 +1,78 @@
 import React, { useState } from "react";
-import { useAuth } from "./auth-context";
-import { LoginScreen } from "./login-screen";
-import { RegisterScreen } from "./register-screen";
-import { HouseholdSetup } from "./household-setup";
+import { AuthProvider, useAuth } from "./auth-context";
+import { AuthScreen } from "./auth-screen";
+import { OnboardingScreen } from "./onboarding-screen";
 import { MainShell } from "./main-shell";
 import { Loader2 } from "lucide-react";
 
-export function AppContent() {
-  // DEV MODE: Skip auth and household checks, go straight to main shell.
-  // Re-enable the full auth flow when ready to test login/registration.
+// ── Extract deep-link invite token from URL on app load ─────────
+function extractInviteFromUrl(): string | null {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("invite");
+    if (token) {
+      // Clean the token from the URL without a page reload
+      const clean = window.location.pathname + window.location.hash;
+      window.history.replaceState({}, "", clean);
+      return token.trim();
+    }
+    // Also support path format /invite/TOKEN
+    const pathMatch = window.location.pathname.match(/\/invite\/([^/]+)/);
+    if (pathMatch?.[1]) {
+      window.history.replaceState({}, "", "/");
+      return pathMatch[1].trim();
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+// ── Router ─────────────────────────────────────────────────────
+function AppRouter() {
+  const { session, household, loading } = useAuth();
+
+  // Capture invite token once on mount; survives auth flow via state
+  const [pendingToken] = useState<string | null>(extractInviteFromUrl);
+
+  // ── Loading splash ─────────────────────────────────────────
+  if (loading) {
+    return (
+      <div
+        className="flex flex-col items-center justify-center font-sans"
+        style={{ height: "100dvh", background: "var(--zu-bg)" }}
+      >
+        <svg
+          width="56" height="56" viewBox="0 0 72 72"
+          fill="none" xmlns="http://www.w3.org/2000/svg"
+          style={{ marginBottom: 16 }}
+        >
+          <rect width="72" height="72" rx="20" fill="var(--accent)" />
+          <path d="M36 16L56 33H50V56H40V44H32V56H22V33H16L36 16Z" fill="white" fillOpacity="0.95" />
+        </svg>
+        <Loader2 className="w-5 h-5 animate-spin" style={{ color: "var(--text-3)" }} />
+      </div>
+    );
+  }
+
+  // ── Not logged in → Auth screen ───────────────────────────
+  if (!session) {
+    return <AuthScreen pendingInvite={!!pendingToken} />;
+  }
+
+  // ── Logged in but no household → Onboarding ───────────────
+  if (!household) {
+    return <OnboardingScreen pendingToken={pendingToken} />;
+  }
+
+  // ── Logged in + household → App ──────────────────────────
   return <MainShell />;
+}
+
+export function AppContent() {
+  return (
+    <AuthProvider>
+      <AppRouter />
+    </AuthProvider>
+  );
 }

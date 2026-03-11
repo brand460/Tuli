@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-// DEV MODE: auth import removed temporarily
+import { useAuth } from "./auth-context";
 import {
   Calendar,
   ShoppingCart,
@@ -95,8 +95,7 @@ function useStableViewportHeight() {
 }
 
 export function MainShell() {
-  // DEV MODE: using mock data instead of useAuth()
-  const signOut = () => { console.log("signOut (dev mode - no-op)"); };
+  const { signOut } = useAuth();
   const [activeTab, setActiveTab] = useState<TabId>("einkaufen");
   const [einkaufenCount, setEinkaufenCount] = useState(0);
   const stableHeight = useStableViewportHeight();
@@ -191,7 +190,7 @@ export function MainShell() {
                   <PhosphorIcon
                     size={24}
                     weight={isActive ? "fill" : "regular"}
-                    color={isActive ? "var(--color-accent)" : "var(--color-text-3)"}
+                    color="var(--nav-icon)"
                     className="relative z-10"
                   />
                   {tab.id === "einkaufen" && einkaufenCount > 0 && (

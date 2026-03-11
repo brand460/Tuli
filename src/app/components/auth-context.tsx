@@ -22,9 +22,11 @@ interface AuthContextType {
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (name: string, email: string, password: string) => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
   createHousehold: (name: string) => Promise<void>;
   joinHousehold: (inviteCode: string) => Promise<void>;
+  joinByToken: (token: string) => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
 
@@ -128,6 +130,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (error) throw new Error(error.message);
   };
 
+  const signInWithGoogle = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: window.location.origin,
+      },
+    });
+    if (error) throw new Error(error.message);
+  };
+
   const signUp = async (name: string, email: string, password: string) => {
     // 1. Create user via server (admin API, auto-confirms email)
     await apiFetch("/signup", {
@@ -228,6 +240,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await loadProfile(authUser.id);
   };
 
+  const joinByToken = async (token: string) => {
+    // Accept the invite via server (validates token, adds to household_members)
+    await apiFetch("/invite/accept", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    });
+    // Reload profile+household state
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (authUser) await loadProfile(authUser.id);
+  };
+
   const refreshProfile = async () => {
     if (user) await loadProfile(user.id);
   };
@@ -242,9 +265,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         loading,
         signIn,
         signUp,
+        signInWithGoogle,
         signOut,
         createHousehold,
         joinHousehold,
+        joinByToken,
         refreshProfile,
       }}
     >

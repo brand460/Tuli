@@ -4,26 +4,23 @@ import { projectId, publicAnonKey } from "/utils/supabase/info";
 const supabaseUrl = `https://${projectId}.supabase.co`;
 
 // Singleton: prevent duplicate GoTrueClient instances during HMR.
-// detectSessionInUrl: false + persistSession: false eliminate the localStorage
-// storage-key that GoTrueClient uses for its internal multi-instance warning.
-// DEV BYPASS: re-enable persistSession when auth is turned on.
-const GLOBAL_KEY = "__supabase_client__" as const;
+const GLOBAL_KEY = "__supabase_client_v2__" as const;
 export const supabase: ReturnType<typeof createClient> =
   (globalThis as any)[GLOBAL_KEY] ??
   ((globalThis as any)[GLOBAL_KEY] = createClient(supabaseUrl, publicAnonKey, {
     auth: {
-      persistSession: false,
-      detectSessionInUrl: false,
-      autoRefreshToken: false,
+      persistSession: true,
+      detectSessionInUrl: true,
+      autoRefreshToken: true,
     },
   }));
 
 export const API_BASE = `${supabaseUrl}/functions/v1/make-server-2a26506b`;
 
 export async function apiFetch(path: string, options: RequestInit = {}) {
-  // DEV BYPASS: always use publicAnonKey since auth is disabled.
-  // When auth is re-enabled, restore session-token logic here.
-  const token = publicAnonKey;
+  // Use the current session token when available, fall back to publicAnonKey.
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token ?? publicAnonKey;
 
   const url = `${API_BASE}${path}`;
   const MAX_RETRIES = 5;
