@@ -1046,12 +1046,13 @@ app.post("/make-server-2a26506b/send-notifications", async (c) => {
     const now = Date.now();
     const windowMs = 60_000; // 60 seconds
 
-    // 1. Load ALL calendar events from all households via KV prefix
+    // 1. Load ALL calendar events from KV store (prefix search)
     const admin = supabaseAdmin();
     const { data: kvRows, error: kvErr } = await admin
       .from("kv_store_2a26506b")
       .select("key, value")
-      .like("key", "calendar_events:%");
+      .like("key", "calendar_events:%")
+      .neq("key", "calendar_events:dev-household");
 
     if (kvErr) {
       console.log("send-notifications: KV query error:", kvErr.message);
@@ -1062,48 +1063,57 @@ app.post("/make-server-2a26506b/send-notifications", async (c) => {
       return c.json({ ok: true, sent: 0, message: "Keine Kalender-Events gefunden." });
     }
 
-    // 2. Find events where a notification trigger falls within [now, now+60s]
+    // 2. Parse events and find those with due notifications
     interface NotificationTarget {
       eventId: string;
       householdId: string;
       title: string;
       startTime: string;
-      description: string;
       minutesBefore: number;
+      assignedTo: string[];
     }
 
     const targets: NotificationTarget[] = [];
 
     for (const row of kvRows) {
-      const events: any[] = row.value || [];
+      let events: any[];
+      try {
+        events = Array.isArray(row.value) ? row.value : JSON.parse(row.value as string);
+      } catch {
+        console.log(`send-notifications: failed to parse events for key ${row.key}`);
+        continue;
+      }
+
       const householdId = (row.key as string).replace("calendar_events:", "");
 
       for (const ev of events) {
-        // Skip events without notifications enabled
-        const notifications: number[] = ev.notifications || [];
-        if (notifications.length === 0 && !ev.notification_enabled) continue;
+        // Skip events without notification_enabled or empty notifications array
+        if (!ev.notification_enabled) continue;
+        const notifications: number[] = ev.notifications;
+        if (!Array.isArray(notifications) || notifications.length === 0) continue;
 
         const startMs = new Date(ev.start_time).getTime();
         if (isNaN(startMs)) continue;
 
-        for (const minutesBefore of notifications) {
-          const triggerMs = startMs - minutesBefore * 60_000;
-          // Check if trigger falls within [now, now + windowMs)
-          if (triggerMs >= now && triggerMs < now + windowMs) {
-            // Check deduplication: has this notification already been sent?
-            const dedupeKey = `notification_sent:${ev.id}:${minutesBefore}:${new Date(startMs).toISOString().slice(0, 10)}`;
-            const alreadySent = await kv.get(dedupeKey);
-            if (alreadySent) continue;
+        for (const minutes of notifications) {
+          const triggerMs = startMs - minutes * 60_000;
 
-            targets.push({
-              eventId: ev.id,
-              householdId,
-              title: ev.title || "Termin",
-              startTime: ev.start_time,
-              description: ev.description || "",
-              minutesBefore,
-            });
-          }
+          // Check if trigger falls within ±60s of now
+          if (Math.abs(triggerMs - now) >= windowMs) continue;
+
+          // Deduplication check
+          const dedupeKey = `notif_sent:${ev.id}:${minutes}`;
+          const alreadySent = await kv.get(dedupeKey);
+          if (alreadySent) continue;
+
+          targets.push({
+            eventId: ev.id,
+            householdId,
+            title: ev.title || "Termin",
+            startTime: ev.start_time,
+            minutesBefore: minutes,
+            assignedTo: Array.isArray(ev.assigned_to) ? ev.assigned_to : [],
+          });
         }
       }
     }
@@ -1116,7 +1126,7 @@ app.post("/make-server-2a26506b/send-notifications", async (c) => {
 
     let sent = 0;
 
-    // 3. Group targets by household to batch member lookups
+    // 3. Group targets by household for efficient member lookups
     const byHousehold = new Map<string, NotificationTarget[]>();
     for (const t of targets) {
       const list = byHousehold.get(t.householdId) || [];
@@ -1125,46 +1135,50 @@ app.post("/make-server-2a26506b/send-notifications", async (c) => {
     }
 
     for (const [householdId, hTargets] of byHousehold) {
-      // Get household member user IDs
+      // Pre-fetch all household members (fallback when assigned_to is empty)
+      let allMemberIds: string[] = [];
       const { data: members, error: memberErr } = await admin
         .from("household_members")
         .select("user_id")
         .eq("household_id", householdId);
 
-      if (memberErr || !members || members.length === 0) {
-        console.log(`send-notifications: no members for household ${householdId}`);
-        continue;
-      }
-
-      const userIds = members.map((m: any) => m.user_id);
-
-      // Get OneSignal player IDs for these users from KV
-      const playerKeys = userIds.map((uid: string) => `onesignal_player:${uid}`);
-      let playerData: any[];
-      try {
-        playerData = await kv.mget(playerKeys);
-      } catch {
-        playerData = [];
-      }
-
-      const playerIds = playerData
-        .filter((d: any) => d && d.player_id)
-        .map((d: any) => d.player_id);
-
-      if (playerIds.length === 0) {
-        console.log(`send-notifications: no player IDs for household ${householdId}`);
-        continue;
+      if (!memberErr && members && members.length > 0) {
+        allMemberIds = members.map((m: any) => m.user_id);
       }
 
       // 4. Send a push notification for each target event
       for (const target of hTargets) {
+        // Determine recipient user IDs: assigned_to or all household members
+        const recipientIds = target.assignedTo.length > 0
+          ? target.assignedTo
+          : allMemberIds;
+
+        if (recipientIds.length === 0) {
+          console.log(`send-notifications: no recipients for event ${target.eventId} in household ${householdId}`);
+          continue;
+        }
+
+        // Get OneSignal player IDs for recipients from KV
+        const playerKeys = recipientIds.map((uid: string) => `onesignal_player:${uid}`);
+        let playerData: any[];
+        try {
+          playerData = await kv.mget(playerKeys);
+        } catch {
+          playerData = [];
+        }
+
+        const playerIds = playerData
+          .filter((d: any) => d && d.player_id)
+          .map((d: any) => d.player_id);
+
+        if (playerIds.length === 0) {
+          console.log(`send-notifications: no player IDs for event ${target.eventId} recipients`);
+          continue;
+        }
+
+        // Format notification body with event time
         const startDate = new Date(target.startTime);
         const timeStr = `${startDate.getHours().toString().padStart(2, "0")}:${startDate.getMinutes().toString().padStart(2, "0")} Uhr`;
-
-        let body = timeStr;
-        if (target.description) {
-          body += ` — ${target.description.substring(0, 100)}`;
-        }
 
         try {
           const osRes = await fetch("https://onesignal.com/api/v1/notifications", {
@@ -1177,9 +1191,8 @@ app.post("/make-server-2a26506b/send-notifications", async (c) => {
               app_id: ONESIGNAL_APP_ID,
               include_player_ids: playerIds,
               headings: { de: target.title, en: target.title },
-              contents: { de: body, en: body },
-              // Optional: deep link back to app
-              url: `${Deno.env.get("SUPABASE_URL")?.replace(".supabase.co", ".vercel.app") || "https://zuhause.app"}`,
+              contents: { de: timeStr, en: timeStr },
+              url: `https://zuhause-app.vercel.app/?tab=kalender&event=${target.eventId}`,
             }),
           });
 
@@ -1188,8 +1201,8 @@ app.post("/make-server-2a26506b/send-notifications", async (c) => {
             console.log(`send-notifications: OneSignal API error for event ${target.eventId}:`, errText);
           } else {
             sent++;
-            // Mark as sent (dedupe — expires implicitly since we only check today's date)
-            const dedupeKey = `notification_sent:${target.eventId}:${target.minutesBefore}:${new Date(startDate).toISOString().slice(0, 10)}`;
+            // Mark as sent for deduplication
+            const dedupeKey = `notif_sent:${target.eventId}:${target.minutesBefore}`;
             await kv.set(dedupeKey, { sent_at: new Date().toISOString() });
             console.log(`send-notifications: sent notification for event "${target.title}" to ${playerIds.length} users`);
           }
