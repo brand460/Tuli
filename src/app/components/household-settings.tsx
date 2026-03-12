@@ -175,8 +175,10 @@ export function HouseholdSettings({ onClose }: HouseholdSettingsProps) {
         };
       });
 
-      setMembers(mapped);
+      console.log('Members:', memberRows);
+      console.log('Profiles:', profileRows);
 
+      setMembers(mapped);
       const me = mapped.find(m => m.is_me);
       setMyRole(me?.role || "member");
     } catch (err: any) {
