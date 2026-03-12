@@ -353,15 +353,16 @@ app.patch("/make-server-2a26506b/global-items", async (c) => {
     const key = `global_items:${household_id}`;
     const existing: any[] = (await withRetry(() => kv.get(key))) || [];
 
-    // 1. Suche zuerst nach original_name = oldName (falls Artikel bereits früher umbenannt wurde)
+    // 1. Suche zuerst nach name = oldName (der aktuelle angezeigte Name)
     let idx = existing.findIndex(
-      (it: any) => it.original_name && it.original_name.toLowerCase() === old_name.toLowerCase()
+      (it: any) => it.name.toLowerCase() === old_name.toLowerCase()
     );
 
-    // 2. Falls nicht gefunden: Suche nach name = oldName
+    // 2. Falls nicht gefunden: Suche nach original_name = oldName
+    //    (falls Frontend noch einen alten Namen hat, der nicht mehr aktuell ist)
     if (idx < 0) {
       idx = existing.findIndex(
-        (it: any) => it.name.toLowerCase() === old_name.toLowerCase()
+        (it: any) => it.original_name && it.original_name.toLowerCase() === old_name.toLowerCase()
       );
     }
 
