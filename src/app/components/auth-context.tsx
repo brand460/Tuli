@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from "react";
 import { supabase, apiFetch } from "./supabase-client";
+import { logoutOneSignal } from "./onesignal";
 import type { Session, User, RealtimeChannel } from "@supabase/supabase-js";
 
 interface Profile {
@@ -316,6 +317,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       supabase.removeChannel(profileChannelRef.current);
       profileChannelRef.current = null;
     }
+    // Clear OneSignal external user ID
+    await logoutOneSignal();
     await supabase.auth.signOut();
     setProfile(null);
     setHousehold(null);

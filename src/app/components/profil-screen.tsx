@@ -370,6 +370,7 @@ export function ProfilScreen({ onClose }: ProfilScreenProps) {
 
       {/* ── Scrollable content ── */}
       <div className="flex-1 overflow-y-auto pb-8" style={{ overscrollBehavior: "contain" }}>
+        <div style={{ maxWidth: 680, margin: "0 auto", width: "100%" }}>
 
         {/* ── Avatar hero ── */}
         <div className="flex flex-col items-center pt-6 pb-2">
@@ -631,6 +632,7 @@ export function ProfilScreen({ onClose }: ProfilScreenProps) {
         </Card>
 
         <div style={{ height: "env(safe-area-inset-bottom, 24px)" }} />
+        </div>
       </div>
 
       {/* ── Confirm: Sign out ── */}

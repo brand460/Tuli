@@ -374,6 +374,7 @@ export function HouseholdSettings({ onClose }: HouseholdSettingsProps) {
 
       {/* ── Scrollable content ── */}
       <div className="flex-1 overflow-y-auto pb-8" style={{ overscrollBehavior: "contain" }}>
+        <div style={{ maxWidth: 680, margin: "0 auto", width: "100%" }}>
 
         {/* ── Household name ── */}
         <SectionHeader title="Name" />
@@ -616,6 +617,7 @@ export function HouseholdSettings({ onClose }: HouseholdSettingsProps) {
         </Card>
 
         <div style={{ height: "env(safe-area-inset-bottom, 24px)" }} />
+        </div>
       </div>
 
       {/* ── Confirm: Leave ── */}

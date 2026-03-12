@@ -15,6 +15,8 @@ import { MehrScreen } from "./mehr-screen";
 import { ListenScreen } from "./listen/listen-screen";
 import { KochenScreen } from "./kochen/kochen-screen";
 import { ThemeColorProvider } from "./ui/theme-color-context";
+import { setupPushForUser } from "./onesignal";
+import { apiFetch } from "./supabase-client";
 
 type TabId = "kalender" | "einkaufen" | "listen" | "kochen" | "mehr";
 
@@ -95,10 +97,37 @@ function useStableViewportHeight() {
 }
 
 export function MainShell() {
-  const { signOut } = useAuth();
+  const { signOut, user, householdId } = useAuth();
   const [activeTab, setActiveTab] = useState<TabId>("einkaufen");
   const [einkaufenCount, setEinkaufenCount] = useState(0);
   const stableHeight = useStableViewportHeight();
+
+  // ── OneSignal Push Setup (once after login) ─────────────────────
+  const oneSignalInitRef = useRef(false);
+  useEffect(() => {
+    if (!user?.id || !householdId || oneSignalInitRef.current) return;
+    oneSignalInitRef.current = true;
+
+    (async () => {
+      try {
+        const playerId = await setupPushForUser(user.id);
+        if (playerId) {
+          // Save player ID to server (KV store)
+          await apiFetch("/onesignal/register", {
+            method: "POST",
+            body: JSON.stringify({
+              user_id: user.id,
+              player_id: playerId,
+              household_id: householdId,
+            }),
+          });
+          console.log("[OneSignal] Player ID registered:", playerId);
+        }
+      } catch (err) {
+        console.log("[OneSignal] Registration error:", err);
+      }
+    })();
+  }, [user?.id, householdId]);
 
   // Deep-link targets from Kalender navigation
   const [deepLinkRecipeId, setDeepLinkRecipeId] = useState<string | null>(null);

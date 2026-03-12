@@ -931,6 +931,209 @@ app.delete("/make-server-2a26506b/delete-account", async (c) => {
   }
 });
 
+// ── OneSignal Push Notification endpoints ──────────────────────────
+
+const ONESIGNAL_APP_ID = "a72cfa96-92c3-472b-8fa2-6b61bec1d724";
+
+// Register OneSignal player ID for a user
+app.post("/make-server-2a26506b/onesignal/register", async (c) => {
+  try {
+    const { user_id, player_id, household_id } = await c.req.json();
+    if (!user_id || !player_id) {
+      return c.json({ error: "user_id und player_id sind erforderlich." }, 400);
+    }
+
+    const key = `onesignal_player:${user_id}`;
+    await withRetry(() =>
+      kv.set(key, {
+        user_id,
+        player_id,
+        household_id: household_id || null,
+        updated_at: new Date().toISOString(),
+      })
+    );
+
+    console.log(`onesignal/register: user=${user_id} player=${player_id}`);
+    return c.json({ ok: true });
+  } catch (err) {
+    console.log("POST /onesignal/register error:", err);
+    return c.json({ error: `Fehler beim Registrieren der Player-ID: ${err}` }, 500);
+  }
+});
+
+// Send push notifications for upcoming calendar events
+// This endpoint is designed to be called by a cron job every minute.
+app.post("/make-server-2a26506b/send-notifications", async (c) => {
+  try {
+    const apiKey = Deno.env.get("ONESIGNAL_API_KEY");
+    if (!apiKey) {
+      console.log("send-notifications: ONESIGNAL_API_KEY not set");
+      return c.json({ error: "ONESIGNAL_API_KEY nicht konfiguriert." }, 500);
+    }
+
+    const now = Date.now();
+    const windowMs = 60_000; // 60 seconds
+
+    // 1. Load ALL calendar events from all households via KV prefix
+    const admin = supabaseAdmin();
+    const { data: kvRows, error: kvErr } = await admin
+      .from("kv_store_2a26506b")
+      .select("key, value")
+      .like("key", "calendar_events:%");
+
+    if (kvErr) {
+      console.log("send-notifications: KV query error:", kvErr.message);
+      return c.json({ error: `KV-Fehler: ${kvErr.message}` }, 500);
+    }
+
+    if (!kvRows || kvRows.length === 0) {
+      return c.json({ ok: true, sent: 0, message: "Keine Kalender-Events gefunden." });
+    }
+
+    // 2. Find events where a notification trigger falls within [now, now+60s]
+    interface NotificationTarget {
+      eventId: string;
+      householdId: string;
+      title: string;
+      startTime: string;
+      description: string;
+      minutesBefore: number;
+    }
+
+    const targets: NotificationTarget[] = [];
+
+    for (const row of kvRows) {
+      const events: any[] = row.value || [];
+      const householdId = (row.key as string).replace("calendar_events:", "");
+
+      for (const ev of events) {
+        // Skip events without notifications enabled
+        const notifications: number[] = ev.notifications || [];
+        if (notifications.length === 0 && !ev.notification_enabled) continue;
+
+        const startMs = new Date(ev.start_time).getTime();
+        if (isNaN(startMs)) continue;
+
+        for (const minutesBefore of notifications) {
+          const triggerMs = startMs - minutesBefore * 60_000;
+          // Check if trigger falls within [now, now + windowMs)
+          if (triggerMs >= now && triggerMs < now + windowMs) {
+            // Check deduplication: has this notification already been sent?
+            const dedupeKey = `notification_sent:${ev.id}:${minutesBefore}:${new Date(startMs).toISOString().slice(0, 10)}`;
+            const alreadySent = await kv.get(dedupeKey);
+            if (alreadySent) continue;
+
+            targets.push({
+              eventId: ev.id,
+              householdId,
+              title: ev.title || "Termin",
+              startTime: ev.start_time,
+              description: ev.description || "",
+              minutesBefore,
+            });
+          }
+        }
+      }
+    }
+
+    if (targets.length === 0) {
+      return c.json({ ok: true, sent: 0, message: "Keine fälligen Benachrichtigungen." });
+    }
+
+    console.log(`send-notifications: ${targets.length} notifications to send`);
+
+    let sent = 0;
+
+    // 3. Group targets by household to batch member lookups
+    const byHousehold = new Map<string, NotificationTarget[]>();
+    for (const t of targets) {
+      const list = byHousehold.get(t.householdId) || [];
+      list.push(t);
+      byHousehold.set(t.householdId, list);
+    }
+
+    for (const [householdId, hTargets] of byHousehold) {
+      // Get household member user IDs
+      const { data: members, error: memberErr } = await admin
+        .from("household_members")
+        .select("user_id")
+        .eq("household_id", householdId);
+
+      if (memberErr || !members || members.length === 0) {
+        console.log(`send-notifications: no members for household ${householdId}`);
+        continue;
+      }
+
+      const userIds = members.map((m: any) => m.user_id);
+
+      // Get OneSignal player IDs for these users from KV
+      const playerKeys = userIds.map((uid: string) => `onesignal_player:${uid}`);
+      let playerData: any[];
+      try {
+        playerData = await kv.mget(playerKeys);
+      } catch {
+        playerData = [];
+      }
+
+      const playerIds = playerData
+        .filter((d: any) => d && d.player_id)
+        .map((d: any) => d.player_id);
+
+      if (playerIds.length === 0) {
+        console.log(`send-notifications: no player IDs for household ${householdId}`);
+        continue;
+      }
+
+      // 4. Send a push notification for each target event
+      for (const target of hTargets) {
+        const startDate = new Date(target.startTime);
+        const timeStr = `${startDate.getHours().toString().padStart(2, "0")}:${startDate.getMinutes().toString().padStart(2, "0")} Uhr`;
+
+        let body = timeStr;
+        if (target.description) {
+          body += ` — ${target.description.substring(0, 100)}`;
+        }
+
+        try {
+          const osRes = await fetch("https://onesignal.com/api/v1/notifications", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Basic ${apiKey}`,
+            },
+            body: JSON.stringify({
+              app_id: ONESIGNAL_APP_ID,
+              include_player_ids: playerIds,
+              headings: { de: target.title, en: target.title },
+              contents: { de: body, en: body },
+              // Optional: deep link back to app
+              url: `${Deno.env.get("SUPABASE_URL")?.replace(".supabase.co", ".vercel.app") || "https://zuhause.app"}`,
+            }),
+          });
+
+          if (!osRes.ok) {
+            const errText = await osRes.text();
+            console.log(`send-notifications: OneSignal API error for event ${target.eventId}:`, errText);
+          } else {
+            sent++;
+            // Mark as sent (dedupe — expires implicitly since we only check today's date)
+            const dedupeKey = `notification_sent:${target.eventId}:${target.minutesBefore}:${new Date(startDate).toISOString().slice(0, 10)}`;
+            await kv.set(dedupeKey, { sent_at: new Date().toISOString() });
+            console.log(`send-notifications: sent notification for event "${target.title}" to ${playerIds.length} users`);
+          }
+        } catch (fetchErr) {
+          console.log(`send-notifications: fetch error for event ${target.eventId}:`, fetchErr);
+        }
+      }
+    }
+
+    return c.json({ ok: true, sent });
+  } catch (err) {
+    console.log("POST /send-notifications error:", err);
+    return c.json({ error: `Fehler beim Senden der Benachrichtigungen: ${err}` }, 500);
+  }
+});
+
 // Global error handler — ensures CORS headers are always returned even on crashes
 app.onError((err, c) => {
   console.log("Unhandled server error:", err);

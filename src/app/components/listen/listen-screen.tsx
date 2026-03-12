@@ -534,7 +534,7 @@ export function ListenScreen({ openPageId }: { openPageId?: string | null } = {}
     useSensor(PointerSensor, { activationConstraint: { distance: isTouch ? 999999 : 5 } }),
   );
 
-  // ── Render ─────────────────────────────────────────────────────
+  // ── Render ──────────────────────────────────��──────────────────
   if (!loaded) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -606,6 +606,10 @@ export function ListenScreen({ openPageId }: { openPageId?: string | null } = {}
       {/* Desktop sidebar */}
       {!isMobile && (
         <div className="w-60 flex-shrink-0 flex flex-col min-h-0" style={{ background: "var(--surface)", borderRight: "1px solid var(--zu-border)" }}>
+          {/* Desktop header – gleiche Position wie andere Tabs */}
+          <div className="flex-shrink-0 px-4 pt-4 pb-2" style={{ background: "var(--surface)" }}>
+            <h2 className="text-lg font-bold text-text-1">Notizen</h2>
+          </div>
           {sidebar}
         </div>
       )}
@@ -633,11 +637,11 @@ export function ListenScreen({ openPageId }: { openPageId?: string | null } = {}
       <div className="flex-1 flex flex-col min-h-0 min-w-0">
         {/* Mobile header */}
         {isMobile && (
-          <div className="flex-shrink-0 flex items-center justify-between px-4 pt-4 pb-2" style={{ background: "var(--zu-bg)" }}>
+          <div className="flex-shrink-0 relative px-4 pt-4 pb-2" style={{ background: "var(--zu-bg)" }}>
             <h2 className="text-lg font-bold text-text-1">Notizen</h2>
             <button
               onClick={() => setSidebarOpen(true)}
-              className="-mr-1.5 p-1.5 rounded-lg hover:bg-surface-2"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 rounded-lg active:bg-surface-2"
             >
               <Menu className="w-5 h-5 text-text-2" />
             </button>

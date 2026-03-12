@@ -17,6 +17,7 @@ export interface CalendarEvent {
   end_repeat_date?: string; // ISO date string – recurring events stop after this date
   notification_minutes: NotificationMinutes; // kept for backward compat
   notifications?: number[]; // array of notification values in minutes
+  notification_enabled?: boolean; // true when push notifications should be sent
   assigned_to?: string[]; // array of household member IDs
   linked_recipe_id: string | null;
   linked_list_id: string | null;

@@ -8,6 +8,7 @@ import {
   Info,
   LogOut,
   ChevronRight,
+  ChevronLeft,
 } from "lucide-react";
 import { toast } from "sonner";
 import { AnimatePresence, motion } from "motion/react";
@@ -44,13 +45,14 @@ export function MehrScreen({ onSignOut }: MehrScreenProps) {
   const { isDark, toggle } = useTheme();
   const [showHouseholdSettings, setShowHouseholdSettings] = useState(false);
   const [showProfilScreen, setShowProfilScreen] = useState(false);
+  const [showAboutScreen, setShowAboutScreen] = useState(false);
 
   const menuItems = [
     { id: "profile", icon: User, label: "Profil & Konto", danger: false, action: () => setShowProfilScreen(true) },
     { id: "household", icon: Home, label: "Haushalt verwalten", danger: false, action: () => setShowHouseholdSettings(true) },
     { id: "notifications", icon: Bell, label: "Benachrichtigungen", danger: false, action: undefined },
     { id: "darkmode", icon: isDark ? Sun : Moon, label: "Dark Mode", danger: false, action: toggle, isToggle: true },
-    { id: "info", icon: Info, label: "Über die App", danger: false, action: undefined },
+    { id: "info", icon: Info, label: "Über die App", danger: false, action: () => setShowAboutScreen(true) },
     { id: "logout", icon: LogOut, label: "Abmelden", danger: true, action: undefined },
   ];
 
@@ -75,9 +77,10 @@ export function MehrScreen({ onSignOut }: MehrScreenProps) {
         <h2 className="text-lg font-bold text-text-1">Einstellungen</h2>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4">
+      <div className="flex-1 overflow-y-auto">
+        <div style={{ maxWidth: 680, margin: "0 auto", width: "100%" }}>
         <div
-          className="bg-surface rounded-[16px] divide-y"
+          className="mx-4 bg-surface rounded-[16px] divide-y"
           style={{
             boxShadow: "var(--shadow-card)",
             borderColor: "var(--zu-border)",
@@ -138,6 +141,7 @@ export function MehrScreen({ onSignOut }: MehrScreenProps) {
             );
           })}
         </div>
+        </div>
       </div>
 
       {/* ── Household Settings overlay ── */}
@@ -171,6 +175,101 @@ export function MehrScreen({ onSignOut }: MehrScreenProps) {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ── About Screen overlay ── */}
+      <AnimatePresence>
+        {showAboutScreen && (
+          <motion.div
+            initial={{ x: "100%" }}
+            animate={{ x: 0 }}
+            exit={{ x: "100%" }}
+            transition={{ type: "spring", damping: 25, stiffness: 300 }}
+            className="absolute inset-0"
+            style={{ zIndex: 1000, background: "var(--zu-bg)" }}
+          >
+            <AboutScreen onClose={() => setShowAboutScreen(false)} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// ── About Screen ──────────────────────────────────────────────────────────────
+function AboutScreen({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="absolute inset-0 flex flex-col" style={{ background: "var(--zu-bg)" }}>
+      {/* Header */}
+      <div
+        className="flex-shrink-0 flex items-center gap-2 px-3 pt-4 pb-3"
+        style={{ borderBottom: "1px solid var(--zu-border)" }}
+      >
+        <button
+          onClick={onClose}
+          className="w-9 h-9 flex items-center justify-center rounded-xl active:bg-surface-2 transition"
+        >
+          <ChevronLeft className="w-5 h-5 text-text-1" />
+        </button>
+        <h2 className="text-base font-semibold text-text-1">Über die App</h2>
+      </div>
+
+      {/* Content – zentriert, etwas Luft nach unten für den Home-Indikator */}
+      <div className="flex-1 flex flex-col items-center justify-center px-8 pb-16">
+        {/* App-Icon */}
+        <div
+          className="w-20 h-20 rounded-[22px] flex items-center justify-center mb-5"
+          style={{
+            background: "var(--accent)",
+            boxShadow: "0 4px 16px color-mix(in srgb, var(--accent) 30%, transparent)",
+          }}
+        >
+          <span className="text-4xl" style={{ userSelect: "none" }}>🏠</span>
+        </div>
+
+        {/* Name + Tagline */}
+        <p className="text-2xl font-bold mb-1" style={{ color: "var(--text-1)" }}>
+          Tuli
+        </p>
+        <p
+          className="text-xs font-medium mb-10 tracking-widest uppercase"
+          style={{ color: "var(--text-3)" }}
+        >
+          Dein Zuhause, digital
+        </p>
+
+        {/* Haupttext */}
+        <p
+          className="text-sm leading-[1.75] text-center mb-4"
+          style={{ color: "var(--text-2)", maxWidth: 300 }}
+        >
+          Handgemacht von einem Mann mit einer Vision, seinen drei digitalen
+          Freunden Figma, Opus &amp; Sonnet und seiner Frau, die tapfer alle
+          Bugs ertragen hat.
+        </p>
+
+        {/* Danke-Zeile */}
+        <p
+          className="text-base font-semibold text-center mb-10"
+          style={{ color: "var(--text-1)", maxWidth: 300 }}
+        >
+          Danke für alles, Sandy.{" "}
+          <span style={{ userSelect: "none" }}>❤️</span>
+        </p>
+
+        {/* Trennlinie */}
+        <div
+          className="mb-8"
+          style={{ width: 40, height: 1, background: "var(--zu-border)" }}
+        />
+
+        {/* PS */}
+        <p
+          className="text-xs italic text-center"
+          style={{ color: "var(--text-3)", maxWidth: 260 }}
+        >
+          PS: alle verbleibenden Bugs sind Features…
+        </p>
+      </div>
     </div>
   );
 }

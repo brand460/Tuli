@@ -1196,15 +1196,23 @@ function DrumWheel({
   selectedIndex,
   onSelect,
   renderItem,
+  wrap = false,
 }: {
   items: readonly any[];
   selectedIndex: number;
   onSelect: (index: number) => void;
   renderItem: (item: any, index: number) => string;
+  wrap?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [offset, setOffset] = useState(-selectedIndex * ITEM_HEIGHT);
-  const offsetRef = useRef(-selectedIndex * ITEM_HEIGHT);
+  const N = items.length;
+  const COPIES = wrap ? 5 : 1;
+  const CENTER_COPY = wrap ? 2 : 0;
+  const toVirtual = useCallback((idx: number) => CENTER_COPY * N + idx, [CENTER_COPY, N]);
+  const initVIdx = toVirtual(selectedIndex);
+
+  const [offset, setOffset] = useState(-initVIdx * ITEM_HEIGHT);
+  const offsetRef = useRef(-initVIdx * ITEM_HEIGHT);
   const dragRef = useRef({
     active: false,
     startY: 0,
@@ -1216,11 +1224,21 @@ function DrumWheel({
   const animRef = useRef<number>(0);
   const didMount = useRef(false);
 
+  const totalVirtual = N * COPIES;
   const maxOffset = 0;
-  const minOffset = -(items.length - 1) * ITEM_HEIGHT;
+  const minOffset = -(totalVirtual - 1) * ITEM_HEIGHT;
   const paddingTop = Math.floor(VISIBLE_ITEMS / 2) * ITEM_HEIGHT;
 
-  const snapTo = useCallback((index: number) => {
+  const virtualItems = useMemo(() => {
+    if (!wrap) return items as any[];
+    const arr: any[] = [];
+    for (let c = 0; c < COPIES; c++) {
+      for (let i = 0; i < N; i++) arr.push(items[i]);
+    }
+    return arr;
+  }, [items, wrap, N, COPIES]);
+
+  const snapTo = useCallback((index: number, onComplete?: () => void) => {
     cancelAnimationFrame(animRef.current);
     const target = -index * ITEM_HEIGHT;
     const start = offsetRef.current;
@@ -1228,12 +1246,13 @@ function DrumWheel({
     if (Math.abs(distance) < 0.5) {
       offsetRef.current = target;
       setOffset(target);
+      onComplete?.();
       return;
     }
     const duration = 250;
-    const startTime = performance.now();
+    const sTime = performance.now();
     const animate = (now: number) => {
-      const elapsed = now - startTime;
+      const elapsed = now - sTime;
       const progress = Math.min(elapsed / duration, 1);
       const eased = 1 - Math.pow(1 - progress, 3);
       const current = start + distance * eased;
@@ -1241,13 +1260,23 @@ function DrumWheel({
       setOffset(current);
       if (progress < 1) {
         animRef.current = requestAnimationFrame(animate);
+      } else {
+        onComplete?.();
       }
     };
     animRef.current = requestAnimationFrame(animate);
   }, []);
 
+  const recenter = useCallback((actualIdx: number) => {
+    const centeredVIdx = CENTER_COPY * N + actualIdx;
+    const newOff = -centeredVIdx * ITEM_HEIGHT;
+    offsetRef.current = newOff;
+    setOffset(newOff);
+  }, [N, CENTER_COPY]);
+
   useEffect(() => {
-    const target = -selectedIndex * ITEM_HEIGHT;
+    const vIdx = toVirtual(selectedIndex);
+    const target = -vIdx * ITEM_HEIGHT;
     offsetRef.current = target;
     setOffset(target);
     didMount.current = true;
@@ -1256,9 +1285,10 @@ function DrumWheel({
   useEffect(() => {
     if (!didMount.current) return;
     if (!dragRef.current.active) {
-      snapTo(selectedIndex);
+      const vIdx = toVirtual(selectedIndex);
+      snapTo(vIdx);
     }
-  }, [selectedIndex, snapTo]);
+  }, [selectedIndex, snapTo, toVirtual]);
 
   useEffect(() => {
     return () => cancelAnimationFrame(animRef.current);
@@ -1289,15 +1319,17 @@ function DrumWheel({
       dragRef.current.lastTime = now;
 
       let newOffset = dragRef.current.startOffset + delta;
-      if (newOffset > maxOffset) {
-        newOffset = maxOffset + (newOffset - maxOffset) * 0.3;
-      } else if (newOffset < minOffset) {
-        newOffset = minOffset + (newOffset - minOffset) * 0.3;
+      if (!wrap) {
+        if (newOffset > maxOffset) {
+          newOffset = maxOffset + (newOffset - maxOffset) * 0.3;
+        } else if (newOffset < minOffset) {
+          newOffset = minOffset + (newOffset - minOffset) * 0.3;
+        }
       }
       offsetRef.current = newOffset;
       setOffset(newOffset);
     },
-    [maxOffset, minOffset]
+    [maxOffset, minOffset, wrap]
   );
 
   const handleDragEnd = useCallback(() => {
@@ -1307,11 +1339,17 @@ function DrumWheel({
     const velocityPx = dragRef.current.velocity * 120;
     const projected = offsetRef.current + velocityPx;
     const targetIdx = Math.round(-projected / ITEM_HEIGHT);
-    const clamped = Math.max(0, Math.min(items.length - 1, targetIdx));
 
-    snapTo(clamped);
-    onSelect(clamped);
-  }, [items.length, onSelect, snapTo]);
+    if (wrap) {
+      const actualIdx = ((targetIdx % N) + N) % N;
+      snapTo(targetIdx, () => recenter(actualIdx));
+      onSelect(actualIdx);
+    } else {
+      const clamped = Math.max(0, Math.min(items.length - 1, targetIdx));
+      snapTo(clamped);
+      onSelect(clamped);
+    }
+  }, [items.length, N, onSelect, snapTo, wrap, recenter]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -1349,7 +1387,7 @@ function DrumWheel({
       }}
     >
       <div style={{ transform: `translateY(${offset + paddingTop}px)` }}>
-        {items.map((item, i) => {
+        {virtualItems.map((item: any, i: number) => {
           const isCenter = i === centerIdx;
           return (
             <div key={i} style={{ height: ITEM_HEIGHT }} className="flex items-center justify-center">
@@ -1358,7 +1396,7 @@ function DrumWheel({
                   isCenter ? "font-medium text-text-1" : "font-normal text-text-3"
                 }`}
               >
-                {renderItem(item, i)}
+                {renderItem(item, wrap ? i % N : i)}
               </span>
             </div>
           );
@@ -1375,11 +1413,13 @@ function DateTimePickerSheet({
   allDay,
   onChange,
   onClose,
+  disabledUntilAfter,
 }: {
   value: string;
   allDay: boolean;
   onChange: (iso: string) => void;
   onClose: () => void;
+  disabledUntilAfter?: string;
 }) {
   const d = new Date(value);
   const currentYear = new Date().getFullYear();
@@ -1388,6 +1428,7 @@ function DateTimePickerSheet({
     [currentYear]
   );
   const dayOptions = useMemo(() => Array.from({ length: 31 }, (_, i) => i + 1), []);
+  const hourOptions = useMemo(() => Array.from({ length: 24 }, (_, i) => i), []);
 
   const [dayIdx, setDayIdx] = useState(d.getDate() - 1);
   const [monthIdx, setMonthIdx] = useState(d.getMonth());
@@ -1402,14 +1443,26 @@ function DateTimePickerSheet({
     return snapped >= 12 ? 11 : snapped;
   });
 
-  const handleDone = () => {
+  const computeSelectedDate = useCallback(() => {
     const selectedYear = yearOptions[yearIdx];
     const selectedMonth = monthIdx;
     const maxDay = new Date(selectedYear, selectedMonth + 1, 0).getDate();
     const selectedDay = Math.min(dayIdx + 1, maxDay);
     const selectedHour = allDay ? 0 : hourIdx;
     const selectedMinute = allDay ? 0 : MINUTE_OPTIONS[minuteIdx];
-    const newDate = new Date(selectedYear, selectedMonth, selectedDay, selectedHour, selectedMinute, 0);
+    return new Date(selectedYear, selectedMonth, selectedDay, selectedHour, selectedMinute, 0);
+  }, [yearOptions, yearIdx, monthIdx, dayIdx, hourIdx, minuteIdx, allDay]);
+
+  const isDisabled = useMemo(() => {
+    if (!disabledUntilAfter) return false;
+    const selected = computeSelectedDate();
+    const ref = new Date(disabledUntilAfter);
+    return selected.getTime() <= ref.getTime();
+  }, [computeSelectedDate, disabledUntilAfter]);
+
+  const handleDone = () => {
+    if (isDisabled) return;
+    const newDate = computeSelectedDate();
     onChange(newDate.toISOString());
     onClose();
   };
@@ -1475,10 +1528,11 @@ function DateTimePickerSheet({
                 <div className="w-px my-4 flex-shrink-0" style={{ background: "var(--zu-border)" }} />
                 <div className="flex-1 relative z-20">
                   <DrumWheel
-                    items={Array.from({ length: 24 }, (_, i) => i)}
+                    items={hourOptions}
                     selectedIndex={hourIdx}
                     onSelect={setHourIdx}
                     renderItem={(item) => String(item).padStart(2, "0")}
+                    wrap
                   />
                 </div>
                 <div className="flex items-center justify-center w-3 relative z-20">
@@ -1490,6 +1544,7 @@ function DateTimePickerSheet({
                     selectedIndex={minuteIdx}
                     onSelect={setMinuteIdx}
                     renderItem={(item) => String(item).padStart(2, "0")}
+                    wrap
                   />
                 </div>
               </>
@@ -1500,10 +1555,20 @@ function DateTimePickerSheet({
         <div className="px-5 pb-[calc(1rem+env(safe-area-inset-bottom))]">
           <button
             onClick={handleDone}
-            className="w-full py-3 rounded-full bg-accent text-white font-semibold text-sm hover:bg-accent-dark transition"
+            disabled={isDisabled}
+            className={`w-full py-3 rounded-full font-semibold text-sm transition ${
+              isDisabled
+                ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                : "bg-accent text-white hover:bg-accent-dark"
+            }`}
           >
             Fertig
           </button>
+          {isDisabled && (
+            <p className="text-xs text-center mt-2 text-text-3">
+              Endzeit muss nach der Startzeit liegen
+            </p>
+          )}
         </div>
       </motion.div>
     </motion.div>
@@ -2003,6 +2068,7 @@ function EventEditorSheet({
   onNavigate?: (tab: string, itemId?: string | null) => void;
   onClose: () => void;
 }) {
+  const { householdId } = useAuth();
   const [title, setTitle] = useState(event.title);
   const [startTime, setStartTime] = useState(event.start_time);
   const [endTime, setEndTime] = useState(event.end_time);
@@ -2018,6 +2084,22 @@ function EventEditorSheet({
   const [assignedTo, setAssignedTo] = useState<string[]>(event.assigned_to || []);
   const [linkedPageId, setLinkedPageId] = useState<string | null>(event.linked_page_id ?? null);
   const [linkedRecipeId, setLinkedRecipeId] = useState<string | null>(event.linked_recipe_id ?? null);
+
+  // ── Auto-adjust endTime when startTime changes ─────────────────
+  const prevStartRef = useRef(startTime);
+  useEffect(() => {
+    if (prevStartRef.current === startTime) return;
+    const prevStartMs = new Date(prevStartRef.current).getTime();
+    const newStartMs = new Date(startTime).getTime();
+    const currentEndMs = new Date(endTime).getTime();
+    const prevDiff = currentEndMs - prevStartMs;
+    const ONE_HOUR = 3600000;
+    // Adjust if: end <= new start, OR gap was still the default 1h
+    if (currentEndMs <= newStartMs || prevDiff === ONE_HOUR) {
+      setEndTime(new Date(newStartMs + ONE_HOUR).toISOString());
+    }
+    prevStartRef.current = startTime;
+  }, [startTime]); // intentionally not including endTime to avoid loops
 
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
@@ -2222,6 +2304,7 @@ function EventEditorSheet({
       description,
       notification_minutes: (notifications[0] ?? 0) as NotificationMinutes,
       notifications,
+      notification_enabled: notifications.length > 0,
       assigned_to: assignedTo,
       linked_page_id: linkedPageId,
       linked_recipe_id: linkedRecipeId,
@@ -2726,6 +2809,7 @@ function EventEditorSheet({
             allDay={allDay}
             onChange={(iso) => setEndTime(iso)}
             onClose={() => setShowEndPicker(false)}
+            disabledUntilAfter={startTime}
           />
         )}
       </AnimatePresence>
