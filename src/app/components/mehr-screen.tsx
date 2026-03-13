@@ -10,15 +10,31 @@ import {
   ChevronRight,
   ChevronLeft,
   Package,
+  Loader,
 } from "lucide-react";
 import { toast } from "sonner";
 import { AnimatePresence, motion } from "motion/react";
 import { HouseholdSettings } from "./household-settings";
 import { ProfilScreen } from "./profil-screen";
 import { MeineArtikelScreen } from "./meine-artikel-screen";
+import { setupPushForUser } from "./onesignal";
+import { apiFetch } from "./supabase-client";
 
 interface MehrScreenProps {
   onSignOut: () => void;
+  user: { id: string } | null;
+  householdId: string | null;
+}
+
+function isPwa(): boolean {
+  try {
+    return (
+      (window.navigator as any).standalone === true ||
+      window.matchMedia("(display-mode: standalone)").matches
+    );
+  } catch {
+    return false;
+  }
 }
 
 function useTheme() {
@@ -43,18 +59,70 @@ function useTheme() {
   return { isDark, toggle: () => setIsDark((p) => !p) };
 }
 
-export function MehrScreen({ onSignOut }: MehrScreenProps) {
+export function MehrScreen({ onSignOut, user, householdId }: MehrScreenProps) {
   const { isDark, toggle } = useTheme();
   const [showHouseholdSettings, setShowHouseholdSettings] = useState(false);
   const [showProfilScreen, setShowProfilScreen] = useState(false);
   const [showAboutScreen, setShowAboutScreen] = useState(false);
   const [showMeineArtikel, setShowMeineArtikel] = useState(false);
 
+  // ── Notification permission state ────────────────────────────────
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission | null>(() => {
+    if (typeof Notification === "undefined") return null;
+    return Notification.permission;
+  });
+  const [notifLoading, setNotifLoading] = useState(false);
+
+  // Refresh permission state when tab becomes visible (in case user changed it in system settings)
+  useEffect(() => {
+    const onVisible = () => {
+      if (typeof Notification !== "undefined") {
+        setNotifPermission(Notification.permission);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
+
+  const showNotifButton =
+    isPwa() &&
+    notifPermission !== null &&
+    notifPermission !== "granted";
+
+  const handleEnableNotifications = async () => {
+    if (!user?.id || notifLoading) return;
+    setNotifLoading(true);
+    try {
+      const playerId = await setupPushForUser(user.id);
+      const newPerm = typeof Notification !== "undefined" ? Notification.permission : null;
+      setNotifPermission(newPerm);
+
+      if (newPerm === "granted" && playerId) {
+        await apiFetch("/onesignal/register", {
+          method: "POST",
+          body: JSON.stringify({
+            user_id: user.id,
+            player_id: playerId,
+            household_id: householdId,
+          }),
+        });
+        toast("Benachrichtigungen aktiviert ✅");
+      } else {
+        toast("Bitte Benachrichtigungen in den iOS Einstellungen erlauben");
+      }
+    } catch (err) {
+      console.log("[MehrScreen] enableNotifications error:", err);
+      toast("Bitte Benachrichtigungen in den iOS Einstellungen erlauben");
+    } finally {
+      setNotifLoading(false);
+    }
+  };
+  // ─────────────────────────────────────────────────────────────────
+
   const menuItems = [
     { id: "profile", icon: User, label: "Profil & Konto", danger: false, action: () => setShowProfilScreen(true) },
     { id: "household", icon: Home, label: "Haushalt verwalten", danger: false, action: () => setShowHouseholdSettings(true) },
     { id: "meine-artikel", icon: Package, label: "Alle Artikel", danger: false, action: () => setShowMeineArtikel(true) },
-    { id: "notifications", icon: Bell, label: "Benachrichtigungen", danger: false, action: undefined },
     { id: "darkmode", icon: isDark ? Sun : Moon, label: "Dark Mode", danger: false, action: toggle, isToggle: true },
     { id: "info", icon: Info, label: "Über die App", danger: false, action: () => setShowAboutScreen(true) },
     { id: "logout", icon: LogOut, label: "Abmelden", danger: true, action: undefined },
@@ -145,6 +213,40 @@ export function MehrScreen({ onSignOut }: MehrScreenProps) {
             );
           })}
         </div>
+
+          {/* ── Benachrichtigungen-Banner (nur PWA + nicht granted) ── */}
+          {showNotifButton && (
+            <button
+              onClick={handleEnableNotifications}
+              disabled={notifLoading}
+              className="mx-4 mt-3 w-[calc(100%-2rem)] flex items-center gap-3 px-4 py-3.5 rounded-[16px] active:opacity-80 transition-opacity text-left"
+              style={{
+                background: "color-mix(in srgb, var(--accent) 12%, transparent)",
+                border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)",
+                boxShadow: "var(--shadow-card)",
+              }}
+            >
+              <div
+                className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                style={{ background: "var(--accent)" }}
+              >
+                {notifLoading ? (
+                  <Loader className="w-[18px] h-[18px] text-white animate-spin" />
+                ) : (
+                  <Bell className="w-[18px] h-[18px] text-white" />
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold" style={{ color: "var(--accent)" }}>
+                  Benachrichtigungen aktivieren
+                </p>
+                <p className="text-xs mt-0.5 truncate" style={{ color: "var(--text-2)" }}>
+                  Erhalte Erinnerungen für Kalender-Events
+                </p>
+              </div>
+              <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: "var(--accent)" }} />
+            </button>
+          )}
         </div>
       </div>
 

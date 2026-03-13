@@ -195,7 +195,7 @@ export function MainShell() {
           )}
           {visitedTabs.has("mehr") && (
             <div className={`absolute inset-0 flex flex-col overflow-hidden ${activeTab === "mehr" ? "" : "hidden"}`}>
-              <MehrScreen onSignOut={signOut} />
+              <MehrScreen onSignOut={signOut} user={user} householdId={householdId} />
             </div>
           )}
         </div>
