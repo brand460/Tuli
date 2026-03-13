@@ -44,7 +44,18 @@ interface AuthContextType {
   refreshProfile: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextType | null>(null);
+// Store the context on window so it survives Vite HMR module re-executions.
+// Without this, every hot reload creates a NEW createContext() instance;
+// components that imported the new instance but still live under the old
+// AuthProvider's instance get null from useContext() → the fallback warning.
+const CONTEXT_KEY = "__tuli_auth_context__";
+declare global {
+  interface Window { [CONTEXT_KEY]?: ReturnType<typeof createContext<AuthContextType | null>> }
+}
+if (!window[CONTEXT_KEY]) {
+  window[CONTEXT_KEY] = createContext<AuthContextType | null>(null);
+}
+const AuthContext = window[CONTEXT_KEY]!;
 
 const noopAsync = async () => {};
 const noopAsyncId = async () => ({ id: "" });

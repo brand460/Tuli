@@ -17,7 +17,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { HouseholdSettings } from "./household-settings";
 import { ProfilScreen } from "./profil-screen";
 import { MeineArtikelScreen } from "./meine-artikel-screen";
-import { setupPushForUser } from "./onesignal";
+import { registerAfterPermission } from "./onesignal";
 import { apiFetch } from "./supabase-client";
 
 interface MehrScreenProps {
@@ -73,6 +73,20 @@ export function MehrScreen({ onSignOut, user, householdId }: MehrScreenProps) {
   });
   const [notifLoading, setNotifLoading] = useState(false);
 
+  // Track whether window.OneSignal is ready (SDK must be initialized before button is shown,
+  // so requestPermission() can be called directly without any async init work in the handler)
+  const [oneSignalReady, setOneSignalReady] = useState(() => !!window.OneSignal);
+  useEffect(() => {
+    if (oneSignalReady) return;
+    const interval = setInterval(() => {
+      if (window.OneSignal) {
+        setOneSignalReady(true);
+        clearInterval(interval);
+      }
+    }, 500);
+    return () => clearInterval(interval);
+  }, [oneSignalReady]);
+
   // Refresh permission state when tab becomes visible (in case user changed it in system settings)
   useEffect(() => {
     const onVisible = () => {
@@ -86,18 +100,37 @@ export function MehrScreen({ onSignOut, user, householdId }: MehrScreenProps) {
 
   const showNotifButton =
     isPwa() &&
+    oneSignalReady &&
     notifPermission !== null &&
     notifPermission !== "granted";
 
   const handleEnableNotifications = async () => {
     if (!user?.id || notifLoading) return;
+    const OS = window.OneSignal;
+    if (!OS?.Notifications?.requestPermission) {
+      toast("Benachrichtigungen werden auf diesem Gerät nicht unterstützt");
+      return;
+    }
     setNotifLoading(true);
     try {
-      const playerId = await setupPushForUser(user.id);
+      // ⚠️ iOS: requestPermission() MUST be the very first await in the click handler.
+      // Any await before this breaks the user-gesture context and iOS silently rejects.
+      const granted = await OS.Notifications.requestPermission();
+      console.log("[MehrScreen] requestPermission() result:", granted);
+
       const newPerm = typeof Notification !== "undefined" ? Notification.permission : null;
       setNotifPermission(newPerm);
 
-      if (newPerm === "granted" && playerId) {
+      if (!granted || newPerm !== "granted") {
+        toast("Bitte Benachrichtigungen in den iOS Einstellungen erlauben");
+        return;
+      }
+
+      // Permission granted — now login + get player ID (no permission prompt inside)
+      const playerId = await registerAfterPermission(user.id);
+      console.log("[MehrScreen] registerAfterPermission returned:", playerId);
+
+      if (playerId) {
         await apiFetch("/onesignal/register", {
           method: "POST",
           body: JSON.stringify({
@@ -106,10 +139,8 @@ export function MehrScreen({ onSignOut, user, householdId }: MehrScreenProps) {
             household_id: householdId,
           }),
         });
-        toast("Benachrichtigungen aktiviert ✅");
-      } else {
-        toast("Bitte Benachrichtigungen in den iOS Einstellungen erlauben");
       }
+      toast("Benachrichtigungen aktiviert ✅");
     } catch (err) {
       console.log("[MehrScreen] enableNotifications error:", err);
       toast("Bitte Benachrichtigungen in den iOS Einstellungen erlauben");

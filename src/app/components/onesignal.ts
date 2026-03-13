@@ -220,6 +220,78 @@ export async function setupPushForUser(userId: string): Promise<string | null> {
 }
 
 /**
+ * After the user has already granted permission via a direct button click
+ * (where requestPermission() was called as the very first await),
+ * this function logs the user into OneSignal and waits for the
+ * subscription/player ID to appear — without calling requestPermission() again.
+ *
+ * Returns the player ID string, or null on failure.
+ */
+export async function registerAfterPermission(userId: string): Promise<string | null> {
+  console.log("[OneSignal] registerAfterPermission() called, userId:", userId);
+  try {
+    // initOneSignal() is already resolved at this point — returns cached instance instantly
+    const OS = await initOneSignal();
+
+    // Link Supabase user ID to OneSignal
+    try {
+      await OS.login(userId);
+      console.log("[OneSignal] registerAfterPermission ✅ login() done");
+    } catch (loginErr) {
+      console.log("[OneSignal] registerAfterPermission ⚠️ login() error (non-fatal):", loginErr);
+    }
+
+    // Immediate check
+    let subId: string | null = OS.User?.PushSubscription?.id || null;
+    if (subId) {
+      console.log("[OneSignal] registerAfterPermission ✅ Subscription ID immediate:", subId);
+      return subId;
+    }
+
+    // Poll + event listener (subscription may appear with a short delay)
+    subId = await new Promise<string | null>((resolve) => {
+      let resolved = false;
+      const done = (id: string | null, source: string) => {
+        if (resolved) return;
+        resolved = true;
+        console.log(`[OneSignal] registerAfterPermission — resolved via ${source}:`, id);
+        resolve(id);
+      };
+
+      const giveUpTimer = setTimeout(() => {
+        done(OS.User?.PushSubscription?.id || null, "timeout (8s)");
+      }, 8000);
+
+      try {
+        OS.User.PushSubscription.addEventListener("change", (event: any) => {
+          clearTimeout(giveUpTimer);
+          done(event?.current?.id || null, "change event");
+        });
+      } catch (listenerErr) {
+        console.log("[OneSignal] registerAfterPermission ⚠️ change listener error:", listenerErr);
+      }
+
+      let pollCount = 0;
+      const pollTimer = setInterval(() => {
+        pollCount++;
+        const id = OS.User?.PushSubscription?.id;
+        if (id) {
+          clearInterval(pollTimer);
+          clearTimeout(giveUpTimer);
+          done(id, `poll #${pollCount}`);
+        }
+        if (pollCount >= 16) clearInterval(pollTimer);
+      }, 500);
+    });
+
+    return subId;
+  } catch (err) {
+    console.log("[OneSignal] registerAfterPermission ❌ fatal error:", err);
+    return null;
+  }
+}
+
+/**
  * Returns the current subscription/player ID without prompting.
  */
 export async function getPlayerId(): Promise<string | null> {
