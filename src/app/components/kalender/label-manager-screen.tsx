@@ -491,7 +491,7 @@ export function LabelManagerScreen({
             style={{ borderBottom: "1px solid var(--zu-border)" }}
           >
             <div className="flex-shrink-0 w-[20px]" /> {/* spacer for drag handle */}
-            <Plus className="w-5 h-5 flex-shrink-0" style={{ color: "var(--color-accent)" }} />
+            <Plus className="w-5 h-5 flex-shrink-0" style={{ color: "var(--text-3)" }} />
             <input
               ref={newInputRef}
               type="search"
@@ -502,7 +502,7 @@ export function LabelManagerScreen({
               data-lpignore="true"
               data-1p-ignore="true"
               data-form-type="other"
-              placeholder="Kategorie hinzufügen\u2026"
+              placeholder="Kategorie hinzufügen"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               onKeyDown={(e) => {

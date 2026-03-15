@@ -119,6 +119,25 @@ export function MainShell() {
   // Deep-link targets from Kalender navigation
   const [deepLinkRecipeId, setDeepLinkRecipeId] = useState<string | null>(null);
   const [deepLinkPageId, setDeepLinkPageId] = useState<string | null>(null);
+  const [deepLinkEventId, setDeepLinkEventId] = useState<string | null>(null);
+
+  // ── URL Deep-Link beim ersten Mount auflösen ─────────────────────
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get("tab") as TabId | null;
+    const eventId = params.get("event");
+    if (tab && tabs.some((t) => t.id === tab)) {
+      handleTabChange(tab);
+      if (eventId && tab === "kalender") {
+        setDeepLinkEventId(eventId);
+      }
+    }
+    // URL-Parameter entfernen ohne Page Reload
+    if (tab) {
+      window.history.replaceState({}, "", "/");
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Track which tabs have been visited — only mount their component once visited
   const [visitedTabs, setVisitedTabs] = useState<Set<TabId>>(new Set(["einkaufen"]));
@@ -175,7 +194,11 @@ export function MainShell() {
         >
           {visitedTabs.has("kalender") && (
             <div className={`absolute inset-0 flex flex-col overflow-hidden ${activeTab === "kalender" ? "" : "hidden"}`}>
-              <KalenderScreen onNavigate={handleNavigate} />
+              <KalenderScreen
+                onNavigate={handleNavigate}
+                openEventId={deepLinkEventId}
+                onDeepLinkHandled={() => setDeepLinkEventId(null)}
+              />
             </div>
           )}
           {visitedTabs.has("einkaufen") && (

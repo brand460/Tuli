@@ -518,7 +518,11 @@ function useIsDesktop() {
 
 // ── Main Component ─────────────────────────────────────────────────
 
-export function KalenderScreen({ onNavigate }: { onNavigate?: (tab: string, itemId?: string | null) => void } = {}) {
+export function KalenderScreen({ onNavigate, openEventId, onDeepLinkHandled }: {
+  onNavigate?: (tab: string, itemId?: string | null) => void;
+  openEventId?: string | null;
+  onDeepLinkHandled?: () => void;
+} = {}) {
   const { householdId, householdMembers: authMembers } = useAuth();
   const isDesktop = useIsDesktop();
   const today = useMemo(() => new Date(), []);
@@ -683,6 +687,24 @@ export function KalenderScreen({ onNavigate }: { onNavigate?: (tab: string, item
   // ── Back-gesture handlers for drawers/modals ──────────────────
   useBackHandler(showEditor, () => { setShowEditor(false); setEditingEvent(null); });
   useBackHandler(showRecurringPrompt, () => { setShowRecurringPrompt(false); setPendingEdit(null); });
+
+  // ── Deep-Link: Event per Push-Notification öffnen ─────────────
+  useEffect(() => {
+    if (!openEventId || events.length === 0) return;
+    const timer = setTimeout(() => {
+      const target = events.find((e) => e.id === openEventId);
+      if (target) {
+        console.log("[Kalender] Deep-Link öffnet Event:", target.id, target.title);
+        setEditingEvent({ ...target });
+        setShowEditor(true);
+      } else {
+        console.warn("[Kalender] Deep-Link Event nicht gefunden:", openEventId);
+      }
+      onDeepLinkHandled?.();
+    }, 300);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openEventId, events]);
 
   // ── Event CRUD ───────────────────────────────────���─────────────
 

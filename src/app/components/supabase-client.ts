@@ -12,6 +12,7 @@ export const supabase: ReturnType<typeof createClient> =
       persistSession: true,
       detectSessionInUrl: false, // OAuthCallbackHandler übernimmt als einziger den exchangeCodeForSession-Aufruf
       autoRefreshToken: true,
+      flowType: 'pkce',
     },
   }));
 

@@ -4,7 +4,10 @@ import { AppContent } from "./components/app-content";
 
 // Theme initialization — runs synchronously before React renders
 // to prevent flash of wrong theme on startup.
-(() => {
+// The resolved statusColor is also exported so <Helmet> can use the
+// same value instead of re-reading localStorage (avoids a second
+// read and guarantees Helmet never overwrites with the wrong color).
+const _initThemeColor = (() => {
   try {
     const saved = localStorage.getItem("theme");
     const isDark = saved === "dark";
@@ -29,8 +32,11 @@ import { AppContent } from "./components/app-content";
       el.style.setProperty("background", gestureColor, "important");
       el.style.setProperty("background-color", gestureColor, "important");
     }
+
+    return statusColor;
   } catch (_) {
     // localStorage not available — stay with defaults
+    return "#F7F7F5";
   }
 })();
 
@@ -55,7 +61,9 @@ export default function App() {
       <Helmet>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, interactive-widget=resizes-visual" />
         <link rel="manifest" href="/manifest.json" />
-        <meta name="theme-color" content="#F7F7F5" />
+        {/* theme-color wird dynamisch aus dem IIFE-Ergebnis gesetzt —
+            niemals statisch, damit Dark Mode korrekt erkannt wird. */}
+        <meta name="theme-color" content={_initThemeColor} />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="apple-mobile-web-app-title" content="Zuhause" />
