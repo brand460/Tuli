@@ -1788,34 +1788,32 @@ function RecipeEditView({
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    e.target.value = ""; // reset for re-selection
+    e.target.value = "";
 
     setUploading(true);
     setShowImageSheet(false);
     try {
       const blob = await compressImage(file, 800);
+      const arrayBuffer = await blob.arrayBuffer();
+      const uint8Array = new Uint8Array(arrayBuffer);
 
-      // Get fresh auth token
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
-      if (!token) throw new Error("Nicht angemeldet");
+      const path = `${householdId}/${recipe.id}.jpg`;
 
-      const formData = new FormData();
-      formData.append("file", blob, `${recipe.id}.jpg`);
-      formData.append("household_id", householdId);
-      formData.append("recipe_id", recipe.id);
+      const { error } = await supabase.storage
+        .from("recipe-images")
+        .upload(path, uint8Array, {
+          contentType: "image/jpeg",
+          upsert: true,
+        });
 
-      const res = await fetch(`${API_BASE}/recipe-image-upload`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
+      if (error) throw new Error(error.message);
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Upload fehlgeschlagen");
+      const { data: { publicUrl } } = supabase.storage
+        .from("recipe-images")
+        .getPublicUrl(path);
 
-      update({ image_url: data.url });
-      toast.success("Bild hochgeladen");
+      update({ image_url: publicUrl });
+      toast.success("Bild hochgeladen ✅");
     } catch (err: any) {
       console.error("[RecipeEdit] Image upload error:", err);
       toast.error(err?.message || "Upload fehlgeschlagen");
