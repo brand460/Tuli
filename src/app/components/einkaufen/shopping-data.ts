@@ -1096,3 +1096,13 @@ export function buildMergedItems(
 
   return result;
 }
+
+/**
+ * Returns the dot color for a known item, or null if the item is unknown.
+ * "Known" means it appears in the provided mergedItems list (built via buildMergedItems).
+ */
+export function getItemCategoryDot(name: string, mergedItems: GroceryTemplate[]): string | null {
+  const match = mergedItems.find(i => i.name.toLowerCase() === name.toLowerCase());
+  if (!match) return null;
+  return getCategoryChipColor(match.category).dot;
+}

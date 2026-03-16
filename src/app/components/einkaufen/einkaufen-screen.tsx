@@ -66,6 +66,7 @@ import {
   buildExcludeSet,
   CATEGORY_COLORS,
   getCategoryChipColor,
+  getItemCategoryDot,
 } from "./shopping-data";
 import { API_BASE, apiFetch } from "../supabase-client";
 import { publicAnonKey } from "/utils/supabase/info";
@@ -998,6 +999,7 @@ function SortableShoppingItem({
   animatingCheckId,
   isTransferDragging,
   onEditingChange,
+  mergedItems,
 }: {
   item: ShoppingItem;
   onToggle: () => void;
@@ -1008,6 +1010,7 @@ function SortableShoppingItem({
   animatingCheckId: string | null;
   isTransferDragging?: boolean;
   onEditingChange?: (editing: boolean) => void;
+  mergedItems: GroceryTemplate[];
 }) {
   const {
     attributes,
@@ -1283,6 +1286,16 @@ function SortableShoppingItem({
             <Check className="w-3.5 h-3.5 text-white" />
           )}
         </button>
+        {/* Category dot — only for known items */}
+        {(() => {
+          const dotColor = getItemCategoryDot(item.name, mergedItems);
+          return dotColor ? (
+            <span
+              className="flex-shrink-0 w-2 h-2 rounded-full"
+              style={{ backgroundColor: dotColor }}
+            />
+          ) : null;
+        })()}
         <div className="flex-1 min-w-0">
           {isEditingName && !item.is_checked ? (
             <input
@@ -2457,19 +2470,19 @@ function AddItemBar({
                           true,
                         )
                       }
-                      className="w-full text-left px-4 py-2.5 hover:bg-surface-2 flex items-center justify-between transition"
+                      className="w-full text-left px-4 py-2.5 hover:bg-surface-2 flex items-center gap-2 transition"
                     >
-                      <span className="text-sm text-text-1">
+                      <span
+                        className="w-2 h-2 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: resultColor.dot }}
+                      />
+                      <span className="text-sm text-text-1 flex-1 min-w-0">
                         {result.name}
                       </span>
                       <span
-                        className="flex items-center gap-1.5 text-[10px] ml-2 flex-shrink-0 font-medium"
+                        className="text-[10px] ml-2 flex-shrink-0 font-medium"
                         style={{ color: "var(--text-2)" }}
                       >
-                        <span
-                          className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: resultColor.dot }}
-                        />
                         {result.category}
                       </span>
                     </button>
@@ -3416,6 +3429,9 @@ export function EinkaufenScreen({
   const existingStoreIds = useMemo(() => {
     return new Set(stores.map((s) => s.id));
   }, [stores]);
+
+  // Merged items used for category-dot lookups (known items only, no shopping-list extras)
+  const mergedItemsForDot = useMemo(() => buildMergedItems(globalItems), [globalItems]);
 
   const customTemplates = useMemo(() => {
     // buildMergedItems correctly handles renames and soft-deletes:
@@ -4581,6 +4597,7 @@ export function EinkaufenScreen({
                       storeTransferActive &&
                       activeDragId === item.id
                     }
+                    mergedItems={mergedItemsForDot}
                   />
                 ))}
               </div>

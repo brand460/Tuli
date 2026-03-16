@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "motion/react";
+import Cropper from "react-easy-crop";
+import type { Area, Point } from "react-easy-crop";
 import {
   Plus, Search, Heart, Clock, ChevronLeft, Star, Minus, ExternalLink,
   Pencil, X, Loader2, Link2, FileText, Camera, Trash2,
@@ -17,7 +20,7 @@ import { useBackHandler, pushBack, popBack } from "../ui/use-back-handler";
 import { useAuth, type HouseholdMember } from "../auth-context";
 import { useKeyboardOffset } from "../ui/use-keyboard-offset";
 import { INGREDIENT_UNITS } from "./ingredient-units";
-import { GROCERY_DATABASE, DEFAULT_STORES, buildMergedItems, buildExcludeSet, getCategoryChipColor, getLogoUrl } from "../einkaufen/shopping-data";
+import { GROCERY_DATABASE, DEFAULT_STORES, buildMergedItems, buildExcludeSet, getCategoryChipColor, getLogoUrl, getItemCategoryDot, getAllCategories } from "../einkaufen/shopping-data";
 
 const DRAWER_SPRING = { type: "spring" as const, damping: 25, stiffness: 300 };
 
@@ -175,6 +178,14 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
   const [urlInput, setUrlInput] = useState("");
   const [importing, setImporting] = useState(false);
 
+  // Photo extraction workflow
+  const [photoCropSrc, setPhotoCropSrc] = useState<string | null>(null);
+  const [photoCrop, setPhotoCrop] = useState<Point>({ x: 0, y: 0 });
+  const [photoZoom, setPhotoZoom] = useState(1);
+  const [photoCroppedArea, setPhotoCroppedArea] = useState<Area | null>(null);
+  const [photoExtracting, setPhotoExtracting] = useState(false);
+  const photoFileRef = useRef<HTMLInputElement>(null);
+
   // Meal plan modals
   const [showMealPicker, setShowMealPicker] = useState(false);
   const [showFreetextInput, setShowFreetextInput] = useState(false);
@@ -206,12 +217,17 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
   // Segmented control
   const [kochenTab, setKochenTab] = useState<"rezepte" | "wochenplaner">("rezepte");
 
+  // ── Custom recipe categories (user-defined, lazy-persisted) ────────
+  const [customRecipeCategories, setCustomRecipeCategories] = useState<string[]>([]);
+
   // ── Keyboard offset for drawers ────────────────────────────────────
   const { bottomOffset, vpHeight } = useKeyboardOffset();
 
   // ── Back-gesture handlers for drawers/modals ──────────────────────
   useBackHandler(showAddSheet, () => setShowAddSheet(false));
   useBackHandler(showUrlImport, () => { setShowUrlImport(false); setUrlInput(""); });
+  useBackHandler(!!photoCropSrc && !photoExtracting, () => { setPhotoCropSrc(null); });
+  useBackHandler(photoExtracting, () => {}); // block back during extraction
   useBackHandler(showMealPicker, () => { setShowMealPicker(false); setMealPickerDate(null); });
   useBackHandler(!!entryPopover, () => setEntryPopover(null));
   useBackHandler(showEditEntrySheet, () => setShowEditEntrySheet(false));
@@ -222,13 +238,16 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
 
   const loadData = useCallback(async () => {
     try {
-      const [recipeRes, mealRes, storeRes] = await Promise.all([
+      const [recipeRes, mealRes, storeRes, customCatRes] = await Promise.all([
         apiFetch(`/recipes?household_id=${householdId}`),
         apiFetch(`/meal-plan?household_id=${householdId}`),
         apiFetch(`/store-settings?household_id=${householdId}`),
+        apiFetch(`/custom-recipe-categories?household_id=${householdId}`).catch(() => ({ categories: [] })),
       ]);
       setRecipes(recipeRes.recipes || []);
       setMealPlan(mealRes.entries || []);
+      const capitalizeFirst = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+      setCustomRecipeCategories((customCatRes.categories || []).map(capitalizeFirst));
       // Merge StoreSettingEntry[] with DEFAULT_STORES to get full StoreInfo objects
       // (same logic as applyStoreSettings in einkaufen-screen)
       const rawSettings: Array<{ store_id: string; position: number; is_visible: boolean }> =
@@ -390,6 +409,7 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
       ...editRecipe,
       ingredients: editRecipe.ingredients.filter((ing) => ing.name.trim() !== ""),
       steps: editRecipe.steps.filter((step) => step.description.trim() !== ""),
+      categories: editRecipe.categories.map((c) => c.charAt(0).toUpperCase() + c.slice(1)),
     };
     const updated = recipes.map((r) => (r.id === cleanedRecipe.id ? cleanedRecipe : r));
     // If new recipe (not in list), add
@@ -397,6 +417,29 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
       updated.push(cleanedRecipe);
     }
     await saveRecipes(updated);
+
+    // ── Lazy-persist new custom categories ──
+    // Determine all currently "known" categories (built-in + already persisted custom)
+    // Case-insensitive so "Vegan" from import doesn't duplicate a known "Vegan" entry
+    const allKnownLower = [...RECIPE_CATEGORIES, ...customRecipeCategories].map((k) =>
+      k.toLowerCase(),
+    );
+    const newCats = cleanedRecipe.categories.filter(
+      (c) => !allKnownLower.includes(c.toLowerCase()),
+    );
+    if (newCats.length > 0) {
+      const merged = [...customRecipeCategories, ...newCats.filter((c) => !customRecipeCategories.includes(c))];
+      setCustomRecipeCategories(merged);
+      try {
+        await apiFetch("/custom-recipe-categories", {
+          method: "PUT",
+          body: JSON.stringify({ household_id: householdId, categories: merged }),
+        });
+      } catch (err) {
+        console.log("[saveEdit] Fehler beim Speichern custom recipe categories:", err);
+      }
+    }
+
     setSelectedRecipeId(cleanedRecipe.id);
     setActiveView("detail");
     setEditRecipe(null);
@@ -537,6 +580,7 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
         body: JSON.stringify({ url: urlInput.trim(), anthropic_api_key: anthropicKey }),
       });
       if (res.recipe) {
+        const capitalizeFirst = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
         const newRecipe: Recipe = {
           ...emptyRecipe(),
           ...res.recipe,
@@ -546,7 +590,7 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
           rating: 0,
           comment: "",
           is_favorite: false,
-          categories: res.recipe.categories || [],
+          categories: (res.recipe.categories || []).map(capitalizeFirst),
           ingredients: (res.recipe.ingredients && res.recipe.ingredients.length > 0)
             ? res.recipe.ingredients
             : [{ name: "", quantity: "", unit: "" }],
@@ -565,6 +609,162 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
       toast.error(err?.message || "Import fehlgeschlagen");
     } finally {
       setImporting(false);
+    }
+  };
+
+  // ── Photo file selection ─────────────────────────────────────────────
+  const handlePhotoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      setPhotoCropSrc(dataUrl);
+      setPhotoCrop({ x: 0, y: 0 });
+      setPhotoZoom(1);
+      setPhotoCroppedArea(null);
+    };
+    reader.readAsDataURL(file);
+    // Reset input so same file can be selected again
+    e.target.value = "";
+  };
+
+  // ── Photo extraction via Claude Vision ──────────────────────────────
+  const handlePhotoExtract = async () => {
+    if (!photoCropSrc || !photoCroppedArea) return;
+
+    const anthropicKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
+    if (!anthropicKey) {
+      toast.error("VITE_ANTHROPIC_API_KEY nicht gesetzt");
+      setPhotoCropSrc(null);
+      return;
+    }
+
+    const croppedSrc = photoCropSrc;
+    const croppedArea = photoCroppedArea;
+    setPhotoCropSrc(null);
+    setPhotoExtracting(true);
+
+    try {
+      // Crop the image
+      const croppedBlob = await getCroppedImg(croppedSrc, croppedArea);
+      // Compress for Claude (higher res for text readability)
+      const compressedBlob = await compressImage(new File([croppedBlob], "photo.jpg", { type: "image/jpeg" }), 1200);
+      // Convert to base64
+      const base64Image = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as string;
+          resolve(result.split(",")[1]); // strip data:image/jpeg;base64,
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(compressedBlob);
+      });
+
+      // Call Claude Vision API with 30s timeout
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000);
+
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": anthropicKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 2000,
+          messages: [{
+            role: "user",
+            content: [
+              {
+                type: "image",
+                source: { type: "base64", media_type: "image/jpeg", data: base64Image }
+              },
+              {
+                type: "text",
+                text: `Extrahiere das Rezept aus diesem Bild. Antworte NUR mit einem JSON-Objekt, kein weiterer Text, keine Markdown-Backticks.
+Format:
+{
+  "title": "Rezeptname",
+  "prep_time_minutes": null,
+  "cook_time_minutes": null,
+  "servings": 4,
+  "categories": ["Kategorie"],
+  "ingredients": [{"name": "Zutat", "quantity": "250", "unit": "g", "category": "Obst & Gemüse"}],
+  "steps": [{"position": 1, "description": "Schritt 1"}]
+}
+Verfügbare Zutaten-Kategorien: Obst & Gemüse, Backwaren, Fleisch & Wurst, Milch & Käse, Eier, Nudeln & Reis, Konserven, Saucen & Gewürze, Kaffee & Tee, Müsli & Frühstück, Tiefkühl, Süßwaren & Snacks, Getränke, Veggie & Bio, Haushalt & Reinigung, Körperpflege, Gesundheit & Medizin, Sonstiges.
+Regeln:
+- Mengenangaben wie "nach Geschmack", "etwas", "nach Belieben" → quantity leer lassen
+- ALLE Zutaten extrahieren inkl. Toppings, optionale Zutaten und Untergruppen
+- Bei Untergruppen (z.B. "Für das Topping:") den Gruppennamen als Prefix: "Topping: Kirschtomaten"
+- Alternativen (z.B. "Butter oder Öl") → erste Option nehmen
+- Schritte vollständig extrahieren, auch wenn mehrzeilig
+- Falls kein Rezept erkennbar: { "error": "Kein Rezept gefunden" }`
+              }
+            ]
+          }]
+        }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error("Claude API error:", errText);
+        throw new Error("API-Fehler");
+      }
+
+      const data = await response.json();
+      const text = data.content?.[0]?.text || "";
+      // Parse JSON (strip potential markdown backticks just in case)
+      const cleanText = text.replace(/^```json?\n?/i, "").replace(/\n?```$/i, "").trim();
+      const parsed = JSON.parse(cleanText);
+
+      if (parsed.error) {
+        toast.error("Kein Rezept erkannt — bitte nochmal versuchen");
+        return;
+      }
+
+      // Build recipe object (same logic as URL import)
+      const capitalizeFirst = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+      const newRecipe: Recipe = {
+        ...emptyRecipe(),
+        ...parsed,
+        id: genId(),
+        household_id: householdId || "",
+        created_at: new Date().toISOString(),
+        rating: 0,
+        comment: "",
+        is_favorite: false,
+        image_url: null,
+        source_url: "",
+        description: "",
+        categories: (parsed.categories || []).map(capitalizeFirst),
+        ingredients: (parsed.ingredients && parsed.ingredients.length > 0)
+          ? parsed.ingredients
+          : [{ name: "", quantity: "", unit: "" }],
+        steps: parsed.steps || [],
+      };
+
+      setEditRecipe(newRecipe);
+      setActiveView("edit");
+      setShowAddSheet(false);
+      pushBack(() => { setEditRecipe(null); setActiveView("main"); });
+      toast.success("Rezept erkannt — bitte prüfen ✅");
+    } catch (err: any) {
+      console.error("Photo extraction error:", err);
+      if (err?.name === "AbortError") {
+        toast.error("Zeitüberschreitung — bitte nochmal versuchen");
+      } else {
+        toast.error("Rezeptextraktion fehlgeschlagen");
+      }
+    } finally {
+      setPhotoExtracting(false);
     }
   };
 
@@ -646,9 +846,12 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
     const updatedMeal = mealPlan.filter((e) => e.recipe_id !== id);
     await saveRecipes(updated);
     await saveMealPlan(updatedMeal);
-    popBack(); // pop detail history entry
+    // Navigate first, then clear all related state
     setActiveView("main");
     setSelectedRecipeId(null);
+    setEditRecipe(null);
+    setDeleteConfirm(null); // prevent Wochenplaner delete drawer from appearing
+    popBack(); // remove detail-view back handler
     toast.success("Rezept gelöscht");
   };
 
@@ -669,11 +872,11 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
     return (
       <RecipeDetailView
         recipe={selectedRecipe}
-        onBack={() => { popBack(); setActiveView("main"); setSelectedRecipeId(null); }}
+        onBack={() => { popBack(); setActiveView("main"); setSelectedRecipeId(null); setDeleteConfirm(null); }}
         onEdit={() => openEditMode(selectedRecipe)}
         onToggleFavorite={() => toggleFavorite(selectedRecipe.id)}
         onSetRating={(r) => setRating(selectedRecipe.id, r)}
-        onDelete={() => setDeleteConfirm(selectedRecipe.id)}
+        onDelete={() => deleteRecipe(selectedRecipe.id)}
         onSaveComment={async (comment) => {
           const updated = recipes.map((r) =>
             r.id === selectedRecipe.id ? { ...r, comment } : r
@@ -700,6 +903,7 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
           else setActiveView("main");
         }}
         householdId={householdId || ""}
+        customRecipeCategories={customRecipeCategories}
       />
     );
   }
@@ -1580,7 +1784,10 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
               </button>
               <button
                 className="flex items-center gap-3 p-3 rounded-xl bg-surface-2 hover:bg-accent-light transition text-left"
-                onClick={() => toast.info("Foto-Upload kommt bald")}
+                onClick={() => {
+                  setShowAddSheet(false);
+                  photoFileRef.current?.click();
+                }}
               >
                 <div className="w-10 h-10 rounded-xl bg-accent-light flex items-center justify-center">
                   <Camera className="w-5 h-5 text-accent" />
@@ -1590,6 +1797,15 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
                   <p className="text-xs text-text-3">Rezept aus einem Foto extrahieren</p>
                 </div>
               </button>
+              {/* Hidden file input for photo extraction */}
+              <input
+                ref={photoFileRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={handlePhotoFileChange}
+              />
               </div>
             </motion.div>
           </motion.div>
@@ -1666,6 +1882,97 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
             onAdd={addIngredientsToShopping}
             onSkip={() => { setShowIngredientsModal(false); setIngredientsRecipe(null); }}
           />
+        )}
+      </AnimatePresence>
+
+      {/* ── Photo Crop Screen (full-page overlay) ── */}
+      <AnimatePresence>
+        {photoCropSrc && !photoExtracting && (
+          <motion.div
+            className="fixed inset-0 z-[3000] flex flex-col"
+            style={{ background: "#000", touchAction: "none" }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+          >
+            {/* Header */}
+            <div
+              className="flex items-center justify-center px-4 flex-shrink-0"
+              style={{ paddingTop: "max(env(safe-area-inset-top), 16px)", paddingBottom: 8 }}
+            >
+              <span className="text-white text-sm font-semibold">Schneide den Rezeptbereich aus</span>
+            </div>
+
+            {/* Cropper area — free aspect ratio */}
+            <div className="relative flex-1">
+              <Cropper
+                image={photoCropSrc}
+                crop={photoCrop}
+                zoom={photoZoom}
+                aspect={undefined as any}
+                onCropChange={setPhotoCrop}
+                onZoomChange={setPhotoZoom}
+                onCropComplete={(_croppedArea, pixels) => setPhotoCroppedArea(pixels)}
+                style={{
+                  containerStyle: { background: "#000" },
+                  mediaStyle: {},
+                  cropAreaStyle: {},
+                }}
+              />
+            </div>
+
+            {/* Zoom hint */}
+            <div className="flex justify-center pb-2 flex-shrink-0">
+              <span className="text-white/50 text-xs">Zwei Finger zum Zoomen</span>
+            </div>
+
+            {/* Buttons */}
+            <div
+              className="flex gap-3 px-4 flex-shrink-0"
+              style={{ paddingBottom: "max(env(safe-area-inset-bottom), 24px)", paddingTop: 12 }}
+            >
+              <button
+                className="flex-1 py-3 rounded-2xl text-sm font-semibold"
+                style={{ background: "rgba(255,255,255,0.15)", color: "#fff" }}
+                onClick={() => setPhotoCropSrc(null)}
+              >
+                Abbrechen
+              </button>
+              <button
+                className="flex-1 py-3 rounded-2xl text-sm font-semibold flex items-center justify-center gap-2"
+                style={{ background: "var(--color-accent)", color: "#fff" }}
+                onClick={handlePhotoExtract}
+              >
+                <Camera className="w-4 h-4" />
+                Extrahieren
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Photo Extraction Loading Screen ── */}
+      <AnimatePresence>
+        {photoExtracting && (
+          <motion.div
+            className="fixed inset-0 z-[3000] flex flex-col items-center justify-center"
+            style={{ background: "var(--zu-bg)" }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+          >
+            <motion.div
+              animate={{ scale: [1, 1.15, 1] }}
+              transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+              className="text-6xl mb-6 select-none"
+            >
+              🍳
+            </motion.div>
+            <p className="text-base font-semibold text-text-1 mb-1">Rezept wird erkannt...</p>
+            <p className="text-sm text-text-3">Bitte einen Moment Geduld</p>
+          </motion.div>
         )}
       </AnimatePresence>
 
@@ -1962,102 +2269,237 @@ function RecipeDetailView({
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      {/* Hero Image */}
-      <div className="relative flex-shrink-0" style={{ height: 220 }}>
-        {recipe.image_url ? (
-          <ImageWithFallback src={recipe.image_url} alt={recipe.title} className="w-full h-full object-cover" />
-        ) : (
-          <div className="w-full h-full bg-gradient-to-br from-accent-light to-accent-light/50 flex items-center justify-center text-5xl">
-            🍽️
+
+      {/* ── Mobile layout (< 768px) ─────────────────────────────────── */}
+      <div className="md:hidden flex-1 flex flex-col min-h-0">
+        {/* Hero Image */}
+        <div className="relative flex-shrink-0" style={{ height: 220 }}>
+          {recipe.image_url ? (
+            <ImageWithFallback src={recipe.image_url} alt={recipe.title} className="w-full h-full object-cover" />
+          ) : (
+            <div className="w-full h-full bg-gradient-to-br from-accent-light to-accent-light/50 flex items-center justify-center text-5xl">
+              🍽️
+            </div>
+          )}
+          <div className="absolute top-3 left-3 right-3 flex items-center justify-between">
+            <button onClick={onBack} className="w-8 h-8 rounded-full bg-surface/80 flex items-center justify-center">
+              <ChevronLeft className="w-5 h-5 text-text-2" />
+            </button>
+            <div className="flex gap-2">
+              <button onClick={onToggleFavorite} className="w-8 h-8 rounded-full bg-surface/80 flex items-center justify-center">
+                <Heart className={`w-4 h-4 ${recipe.is_favorite ? "fill-accent text-accent" : "text-text-2"}`} />
+              </button>
+              <button onClick={onEdit} className="w-8 h-8 rounded-full bg-surface/80 flex items-center justify-center">
+                <Pencil className="w-4 h-4 text-text-2" />
+              </button>
+            </div>
           </div>
-        )}
-        <div className="absolute top-3 left-3 right-3 flex items-center justify-between">
-          <button onClick={onBack} className="w-8 h-8 rounded-full bg-surface/80 flex items-center justify-center">
-            <ChevronLeft className="w-5 h-5 text-text-2" />
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto px-4 pb-6">
+          <h1 className="text-2xl font-bold text-text-1 mt-4">{recipe.title}</h1>
+
+          {/* Rating + Categories */}
+          <div className="flex items-center gap-1 mt-2">
+            {[1, 2, 3, 4, 5].map((s) => (
+              <button key={s} onClick={() => onSetRating(s)}>
+                <Star className={`w-5 h-5 ${s <= recipe.rating ? "fill-accent text-accent" : "text-text-3"}`} />
+              </button>
+            ))}
+            {recipe.categories.length > 0 && (
+              <div className="flex flex-wrap gap-1 ml-3">
+                {recipe.categories.map((c) => (
+                  <span key={c} className="px-2 py-0.5 bg-accent-light text-accent-dark text-xs rounded-full">{c}</span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Time + Servings */}
+          <div className="flex items-center gap-4 mt-3 text-sm text-text-2">
+            {totalTime(recipe) && (
+              <span className="flex items-center gap-1"><Clock className="w-4 h-4" /> {totalTime(recipe)}</span>
+            )}
+            <div className="flex items-center gap-2">
+              <button onClick={() => setServings(Math.max(1, servings - 1))} className="w-6 h-6 rounded-full bg-surface-2 flex items-center justify-center">
+                <Minus className="w-3 h-3" />
+              </button>
+              <span className="font-medium text-text-1">{servings} Portionen</span>
+              <button onClick={() => setServings(servings + 1)} className="w-6 h-6 rounded-full bg-surface-2 flex items-center justify-center">
+                <Plus className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+
+          {/* Source URL */}
+          {recipe.source_url && (
+            <a href={recipe.source_url} target="_blank" rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-accent mt-2 hover:underline">
+              <ExternalLink className="w-3 h-3" /> Original-Link
+            </a>
+          )}
+
+          {/* Description */}
+          {recipe.description && <p className="text-sm text-text-2 mt-3">{recipe.description}</p>}
+
+          {/* Ingredients */}
+          {recipe.ingredients.length > 0 && (
+            <div className="mt-5">
+              <h3 className="text-base font-semibold text-text-1 mb-2">Zutaten</h3>
+              <div className="space-y-1.5">
+                {recipe.ingredients.map((ing, i) => {
+                  const qty = ing.quantity ? parseFloat(ing.quantity) : NaN;
+                  const scaledQty = !isNaN(qty) ? (qty * scale).toFixed(qty * scale % 1 === 0 ? 0 : 1) : ing.quantity;
+                  return (
+                    <div key={i} className="flex items-center gap-2 text-sm">
+                      <span className="w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0" />
+                      <span className="text-text-2">
+                        {scaledQty && <span className="font-medium">{scaledQty} </span>}
+                        {ing.unit && <span>{ing.unit} </span>}
+                        {ing.name}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Steps */}
+          {recipe.steps.length > 0 && (
+            <div className="mt-5">
+              <h3 className="text-base font-semibold text-text-1 mb-2">Zubereitung</h3>
+              <div className="space-y-3">
+                {recipe.steps.sort((a, b) => a.position - b.position).map((step, i) => (
+                  <div key={i} className="flex gap-3">
+                    <div className="w-6 h-6 rounded-full bg-accent-light flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <span className="text-xs font-bold text-accent-dark">{i + 1}</span>
+                    </div>
+                    <p className="text-sm text-text-2 leading-relaxed">{step.description}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Comment — read-only, only shown when set */}
+          {recipe.comment?.trim() && (
+            <div className="mt-5">
+              <h3 className="text-base font-semibold text-text-1 mb-2">Kommentare</h3>
+              <p className="text-sm text-text-2 leading-relaxed whitespace-pre-wrap">{recipe.comment}</p>
+            </div>
+          )}
+
+          {/* Delete */}
+          <button onClick={() => setShowDeleteConfirm(true)} className="flex items-center gap-2 text-sm text-danger mt-6">
+            <Trash2 className="w-4 h-4" /> Rezept löschen
           </button>
-          <div className="flex gap-2">
-            <button onClick={onToggleFavorite} className="w-8 h-8 rounded-full bg-surface/80 flex items-center justify-center">
-              <Heart className="w-4 h-4 text-text-2" />
-            </button>
-            <button onClick={onEdit} className="w-8 h-8 rounded-full bg-surface/80 flex items-center justify-center">
-              <Pencil className="w-4 h-4 text-text-2" />
-            </button>
-          </div>
         </div>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto px-4 pb-6">
-        <h1 className="text-2xl font-bold text-text-1 mt-4">{recipe.title}</h1>
+      {/* ── Tablet layout (≥ 768px) ─────────────────────────────────── */}
+      <div className="hidden md:flex flex-col flex-1 min-h-0 overflow-y-auto">
 
-        {/* Rating */}
-        <div className="flex items-center gap-1 mt-2">
-          {[1, 2, 3, 4, 5].map((s) => (
-            <button key={s} onClick={() => onSetRating(s)}>
-              <Star
-                className={`w-5 h-5 ${s <= recipe.rating ? "fill-accent text-accent" : "text-text-3"}`}
-              />
+        {/* Row 1 — Image (40%) + Header (60%) */}
+        <div className="relative grid flex-shrink-0" style={{ gridTemplateColumns: "40% 60%" }}>
+
+          {/* Left: image */}
+          <div className="relative" style={{ height: 240 }}>
+            {recipe.image_url ? (
+              <ImageWithFallback src={recipe.image_url} alt={recipe.title} className="w-full h-full object-cover rounded-xl" />
+            ) : (
+              <div className="w-full h-full bg-gradient-to-br from-accent-light to-accent-light/50 flex items-center justify-center text-6xl rounded-xl">
+                🍽️
+              </div>
+            )}
+            {/* Back button over image */}
+            <button onClick={onBack} className="absolute top-3 left-3 w-8 h-8 rounded-full bg-surface/80 flex items-center justify-center">
+              <ChevronLeft className="w-5 h-5 text-text-2" />
             </button>
-          ))}
-          {recipe.categories.length > 0 && (
-            <div className="flex gap-1 ml-3">
-              {recipe.categories.map((c) => (
-                <span key={c} className="px-2 py-0.5 bg-accent-light text-accent-dark text-xs rounded-full">
-                  {c}
-                </span>
+          </div>
+
+          {/* Right: title, categories, stars, time, link */}
+          <div className="relative px-6 py-4 flex flex-col justify-center">
+            {/* Favorite + Edit — top right */}
+            <div className="absolute top-3 right-3 flex gap-2">
+              <button onClick={onToggleFavorite} className="w-8 h-8 rounded-full bg-surface-2 flex items-center justify-center">
+                <Heart className={`w-4 h-4 ${recipe.is_favorite ? "fill-accent text-accent" : "text-text-2"}`} />
+              </button>
+              <button onClick={onEdit} className="w-8 h-8 rounded-full bg-surface-2 flex items-center justify-center">
+                <Pencil className="w-4 h-4 text-text-2" />
+              </button>
+            </div>
+
+            {/* Title */}
+            <h1 className="text-3xl font-bold text-text-1 pr-20 leading-tight">{recipe.title}</h1>
+
+            {/* Categories — plain accent-coloured text, no chip style */}
+            {recipe.categories.length > 0 && (
+              <div className="flex flex-wrap gap-3 mt-2">
+                {recipe.categories.map((c) => (
+                  <span key={c} className="text-sm font-medium" style={{ color: "var(--color-accent)" }}>{c}</span>
+                ))}
+              </div>
+            )}
+
+            {/* Stars */}
+            <div className="flex items-center gap-1 mt-2">
+              {[1, 2, 3, 4, 5].map((s) => (
+                <button key={s} onClick={() => onSetRating(s)}>
+                  <Star className={`w-5 h-5 ${s <= recipe.rating ? "fill-accent text-accent" : "text-text-3"}`} />
+                </button>
               ))}
             </div>
-          )}
-        </div>
 
-        {/* Time + Servings */}
-        <div className="flex items-center gap-4 mt-3 text-sm text-text-2">
-          {totalTime(recipe) && (
-            <span className="flex items-center gap-1">
-              <Clock className="w-4 h-4" /> {totalTime(recipe)}
-            </span>
-          )}
-          <div className="flex items-center gap-2">
-            <button onClick={() => setServings(Math.max(1, servings - 1))} className="w-6 h-6 rounded-full bg-surface-2 flex items-center justify-center">
-              <Minus className="w-3 h-3" />
-            </button>
-            <span className="font-medium text-text-1">{servings} Portionen</span>
-            <button onClick={() => setServings(servings + 1)} className="w-6 h-6 rounded-full bg-surface-2 flex items-center justify-center">
-              <Plus className="w-3 h-3" />
-            </button>
+            {/* Time */}
+            {totalTime(recipe) && (
+              <span className="flex items-center gap-1 mt-2 text-sm text-text-2">
+                <Clock className="w-4 h-4" /> {totalTime(recipe)}
+              </span>
+            )}
+
+            {/* Source URL */}
+            {recipe.source_url && (
+              <a href={recipe.source_url} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-accent mt-1 hover:underline">
+                <ExternalLink className="w-3 h-3" /> Original-Link
+              </a>
+            )}
+
+            {/* Description */}
+            {recipe.description && null}
           </div>
         </div>
 
-        {/* Source URL */}
-        {recipe.source_url && (
-          <a
-            href={recipe.source_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-xs text-accent mt-2 hover:underline"
-          >
-            <ExternalLink className="w-3 h-3" /> Original-Link
-          </a>
-        )}
+        {/* Row 2 — Ingredients (25%) + Steps + Comment (75%) */}
+        <div className="grid gap-8 px-6 mt-6 pb-10" style={{ gridTemplateColumns: "25% 1fr" }}>
 
-        {/* Description */}
-        {recipe.description && (
-          <p className="text-sm text-text-2 mt-3">{recipe.description}</p>
-        )}
+          {/* Left: Ingredients + stepper + delete */}
+          <div className="flex flex-col">
+            <h3 className="text-base font-semibold text-text-1 mb-2">Zutaten</h3>
 
-        {/* Ingredients */}
-        {recipe.ingredients.length > 0 && (
-          <div className="mt-5">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-base font-semibold text-text-1">Zutaten</h3>
+            {/* Portionen-Stepper */}
+            <div className="flex items-center gap-2 mb-3">
+              <button onClick={() => setServings(Math.max(1, servings - 1))}
+                className="w-7 h-7 rounded-full bg-surface-2 flex items-center justify-center">
+                <Minus className="w-3 h-3" />
+              </button>
+              <span className="text-sm font-medium text-text-1">{servings} Portionen</span>
+              <button onClick={() => setServings(servings + 1)}
+                className="w-7 h-7 rounded-full bg-surface-2 flex items-center justify-center">
+                <Plus className="w-3 h-3" />
+              </button>
             </div>
-            <div className="space-y-1.5">
+
+            {/* Ingredient list */}
+            <div className="space-y-1.5 flex-1">
               {recipe.ingredients.map((ing, i) => {
                 const qty = ing.quantity ? parseFloat(ing.quantity) : NaN;
                 const scaledQty = !isNaN(qty) ? (qty * scale).toFixed(qty * scale % 1 === 0 ? 0 : 1) : ing.quantity;
                 return (
                   <div key={i} className="flex items-center gap-2 text-sm">
-                    <span className="w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0" />
+                    <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: "var(--color-accent)" }} />
                     <span className="text-text-2">
                       {scaledQty && <span className="font-medium">{scaledQty} </span>}
                       {ing.unit && <span>{ing.unit} </span>}
@@ -2067,53 +2509,41 @@ function RecipeDetailView({
                 );
               })}
             </div>
-          </div>
-        )}
 
-        {/* Steps */}
-        {recipe.steps.length > 0 && (
-          <div className="mt-5">
-            <h3 className="text-base font-semibold text-text-1 mb-2">Zubereitung</h3>
-            <div className="space-y-3">
-              {recipe.steps
-                .sort((a, b) => a.position - b.position)
-                .map((step, i) => (
-                  <div key={i} className="flex gap-3">
-                    <div className="w-6 h-6 rounded-full bg-accent-light flex items-center justify-center flex-shrink-0 mt-0.5">
-                      <span className="text-xs font-bold text-accent-dark">{i + 1}</span>
+            {/* Delete */}
+            <button onClick={() => setShowDeleteConfirm(true)}
+              className="flex items-center gap-2 text-sm text-danger mt-6 self-start">
+              <Trash2 className="w-4 h-4" /> Rezept löschen
+            </button>
+          </div>
+
+          {/* Right: Steps + Comment */}
+          <div>
+            {recipe.steps.length > 0 && (
+              <div>
+                <h3 className="text-base font-semibold text-text-1 mb-3">Zubereitung</h3>
+                <div className="space-y-4">
+                  {recipe.steps.sort((a, b) => a.position - b.position).map((step, i) => (
+                    <div key={i} className="flex gap-3">
+                      <div className="w-6 h-6 rounded-full bg-accent-light flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <span className="text-xs font-bold text-accent-dark">{i + 1}</span>
+                      </div>
+                      <p className="text-sm text-text-2 leading-relaxed">{step.description}</p>
                     </div>
-                    <p className="text-sm text-text-2 leading-relaxed">{step.description}</p>
-                  </div>
-                ))}
-            </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Comment — read-only, only shown when set */}
+            {recipe.comment?.trim() && (
+              <div className="mt-6">
+                <h3 className="text-base font-semibold text-text-1 mb-2">Kommentare</h3>
+                <p className="text-sm text-text-2 leading-relaxed whitespace-pre-wrap">{recipe.comment}</p>
+              </div>
+            )}
           </div>
-        )}
-
-        {/* Comment */}
-        <div className="mt-5">
-          <h3 className="text-base font-semibold text-text-1 mb-2">Kommentare</h3>
-          <textarea
-            value={comment}
-            onChange={(e) => handleCommentChange(e.target.value)}
-            placeholder="Eigene Notizen..."
-            name="recipe-comment"
-            autoComplete="off"
-            autoCapitalize="sentences"
-            data-lpignore="true"
-            data-1p-ignore="true"
-            data-form-type="other"
-            className="w-full px-3 py-2 bg-surface-2 rounded-xl text-sm border-0 outline-none resize-none"
-            rows={3}
-          />
         </div>
-
-        {/* Delete */}
-        <button
-          onClick={() => setShowDeleteConfirm(true)}
-          className="flex items-center gap-2 text-sm text-danger mt-6"
-        >
-          <Trash2 className="w-4 h-4" /> Rezept löschen
-        </button>
       </div>
 
       {/* Calendar FAB — add to Wochenplaner */}
@@ -2524,6 +2954,134 @@ interface GlobalItem {
   deleted?: boolean;
 }
 
+// ── Shared category chip for ingredient category picker ──────────────
+function IngCategoryChip({ category, onClick }: { category: string; onClick: () => void }) {
+  const colors = getCategoryChipColor(category);
+  return (
+    <button
+      onClick={onClick}
+      onPointerDown={(e) => e.preventDefault()}
+      onMouseDown={(e) => e.preventDefault()}
+      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full font-medium transition bg-surface-2 hover:opacity-80 whitespace-nowrap text-[12px]"
+      style={{ color: "var(--text-1)" }}
+    >
+      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: colors.dot }} />
+      {category}
+    </button>
+  );
+}
+
+// ── Category picker drawer for new ingredients ───────────────────────
+function IngCategoryPickerModal({
+  itemName,
+  onSelect,
+  onClose,
+}: {
+  itemName: string;
+  onSelect: (category: string) => void;
+  onClose: () => void;
+}) {
+  const [filterQuery, setFilterQuery] = useState("");
+  const filterInputRef = useRef<HTMLInputElement>(null);
+  const { bottomOffset, vpHeight } = useKeyboardOffset();
+
+  useEffect(() => {
+    setTimeout(() => filterInputRef.current?.focus(), 100);
+  }, []);
+
+  const allCats = useMemo(() => getAllCategories(), []);
+  const filtered = useMemo(() => {
+    if (!filterQuery.trim()) return allCats;
+    const q = filterQuery.toLowerCase().trim();
+    return allCats.filter((c) => c.toLowerCase().includes(q));
+  }, [allCats, filterQuery]);
+
+  return createPortal(
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-black/40"
+      style={{ touchAction: "none", zIndex: 9999 }}
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ y: "100%" }}
+        animate={{ y: 0 }}
+        exit={{ y: "100%" }}
+        transition={DRAWER_SPRING}
+        onClick={(e) => e.stopPropagation()}
+        className="fixed left-0 right-0 w-full bg-surface rounded-t-[20px] flex flex-col"
+        style={{
+          bottom: bottomOffset,
+          maxHeight: vpHeight - 72,
+          boxShadow: "var(--shadow-elevated)",
+          zIndex: 9999,
+        }}
+      >
+        {/* Handle bar */}
+        <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
+          <div className="w-9 h-1 rounded-full" style={{ background: "var(--zu-border)" }} />
+        </div>
+        <div className="px-5 pb-2 flex-shrink-0">
+          <h3 className="text-base font-bold text-text-1">Kategorie wählen</h3>
+          <p className="text-sm text-text-2 mt-0.5">Für &bdquo;{itemName}&ldquo;</p>
+        </div>
+        {/* Search field */}
+        <div className="px-5 pb-2 flex-shrink-0">
+          <div
+            className="flex items-center gap-2 bg-surface-2 rounded-xl px-3 py-2"
+            style={{ border: "1px solid var(--zu-border)" }}
+          >
+            <Search className="w-4 h-4 text-text-3 flex-shrink-0" />
+            <input
+              ref={filterInputRef}
+              type="search"
+              inputMode="text"
+              autoComplete="off"
+              autoCapitalize="sentences"
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-form-type="other"
+              value={filterQuery}
+              onChange={(e) => setFilterQuery(e.target.value)}
+              placeholder="Kategorie suchen..."
+              className="flex-1 bg-transparent outline-none text-sm text-text-1 placeholder:text-text-3"
+              style={{ caretColor: "var(--accent)" }}
+            />
+            {filterQuery && (
+              <button
+                type="button"
+                onPointerDown={(e) => e.preventDefault()}
+                onClick={() => setFilterQuery("")}
+                className="text-text-3 hover:text-text-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </div>
+        <div
+          className="flex-1 overflow-y-auto px-5 pb-5 min-h-0"
+          style={{ overscrollBehavior: "contain", touchAction: "pan-y" }}
+        >
+          <div className="flex flex-wrap gap-2">
+            {filtered.map((cat) => (
+              <IngCategoryChip key={cat} category={cat} onClick={() => onSelect(cat)} />
+            ))}
+            {filtered.length === 0 && (
+              <p className="text-sm text-text-2 text-center py-4 w-full">
+                Keine Kategorien gefunden
+              </p>
+            )}
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>,
+    document.body,
+  );
+}
+
 // ══════════════════════════════════════════════════════════════════════
 // COMPRESS IMAGE HELPER
 // ══════════════════════════════════════════════════════════════════════
@@ -2555,6 +3113,33 @@ function compressImage(file: File, maxSize: number = 800): Promise<Blob> {
   });
 }
 
+// ── Crop helper: draw the cropped area onto a canvas and return JPEG blob ──
+async function getCroppedImg(imageSrc: string, pixelCrop: Area): Promise<Blob> {
+  const image = new Image();
+  image.crossOrigin = "anonymous";
+  image.src = imageSrc;
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve();
+    image.onerror = () => reject(new Error("Bild konnte nicht geladen werden"));
+  });
+  const canvas = document.createElement("canvas");
+  canvas.width = pixelCrop.width;
+  canvas.height = pixelCrop.height;
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(
+    image,
+    pixelCrop.x, pixelCrop.y, pixelCrop.width, pixelCrop.height,
+    0, 0, pixelCrop.width, pixelCrop.height,
+  );
+  return new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob(
+      (blob) => blob ? resolve(blob) : reject(new Error("toBlob fehlgeschlagen")),
+      "image/jpeg",
+      0.85,
+    )
+  );
+}
+
 // ══════════════════════════════════════════════════════════════════════
 // RECIPE EDIT VIEW
 // ══════════════════════════════════════════════════════════════════════
@@ -2565,12 +3150,14 @@ function RecipeEditView({
   onSave,
   onCancel,
   householdId,
+  customRecipeCategories = [],
 }: {
   recipe: Recipe;
   onChange: (r: Recipe) => void;
   onSave: () => void;
   onCancel: () => void;
   householdId: string;
+  customRecipeCategories?: string[];
 }) {
   const update = (partial: Partial<Recipe>) => onChange({ ...recipe, ...partial });
 
@@ -2581,10 +3168,18 @@ function RecipeEditView({
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ── Crop state ──
+  const [cropImageSrc, setCropImageSrc] = useState<string | null>(null);
+  const [crop, setCrop] = useState<Point>({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
+
   // ── Ingredient autocomplete state ──
   const [activeIngIdx, setActiveIngIdx] = useState<number | null>(null);
   const [ingQuery, setIngQuery] = useState("");
   const [globalItems, setGlobalItems] = useState<GlobalItem[]>([]);
+  // State for "new unknown ingredient → pick category" flow
+  const [pendingCustomIngName, setPendingCustomIngName] = useState<{ name: string; idx: number } | null>(null);
 
   // Fetch global items for autocomplete
   useEffect(() => {
@@ -2601,17 +3196,19 @@ function RecipeEditView({
 
   // Build merged suggestion list using shared buildMergedItems — correctly
   // handles renames (old DB entries suppressed) and soft-deletes.
+  const mergedItemsForDot = useMemo(() => buildMergedItems(globalItems), [globalItems]);
+
   const ingredientSuggestions = useMemo(() => {
     if (!ingQuery.trim()) return [];
     const q = ingQuery.toLowerCase();
-    const merged = buildMergedItems(globalItems);
-    return merged
+    return mergedItemsForDot
       .filter((g) => g.name.toLowerCase().includes(q))
       .slice(0, 8)
       .map((g) => ({ name: g.name, category: g.category }));
-  }, [ingQuery, globalItems]);
+  }, [ingQuery, mergedItemsForDot]);
 
-  // ── Back handlers for image drawers ──
+  // ── Back handlers for image drawers & crop screen ──
+  useBackHandler(!!cropImageSrc, () => setCropImageSrc(null));
   useBackHandler(showImageSheet, () => setShowImageSheet(false));
   useBackHandler(showUrlInput, () => { setShowUrlInput(false); setImageUrlDraft(""); });
 
@@ -2657,6 +3254,47 @@ function RecipeEditView({
     setIngQuery("");
   };
 
+  // ── New unknown ingredient → category picker flow ──────────────────
+  const handleAddUnknownIngredient = (idx: number, name: string) => {
+    setActiveIngIdx(null);
+    setIngQuery("");
+    setPendingCustomIngName({ name, idx });
+  };
+
+  const handleCustomIngCategoryPicked = async (category: string) => {
+    if (!pendingCustomIngName) return;
+    const { name, idx } = pendingCustomIngName;
+    setPendingCustomIngName(null);
+
+    // 1. Persist to global_items via server
+    try {
+      await apiFetch("/global-items", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ household_id: householdId, name, category }),
+      });
+    } catch (err) {
+      console.log("[RecipeEdit] upsertGlobalItem error:", err);
+    }
+
+    // 2. Update local globalItems so dot appears immediately everywhere
+    setGlobalItems((prev) => {
+      const existing = prev.findIndex((g) => g.name.toLowerCase() === name.toLowerCase());
+      if (existing >= 0) {
+        const copy = [...prev];
+        copy[existing] = { ...copy[existing], category, times_used: copy[existing].times_used + 1 };
+        return copy;
+      }
+      return [...prev, { name, category, times_used: 0, created_by_household_id: householdId }];
+    });
+
+    // 3. Set the ingredient name in the recipe row
+    selectIngredientSuggestion(idx, name);
+  };
+
+  // Close category picker on back gesture
+  useBackHandler(!!pendingCustomIngName, () => setPendingCustomIngName(null));
+
   const addIngredient = () => {
     const newIngredients = [...recipe.ingredients, { name: "", quantity: "", unit: "" }];
     update({ ingredients: newIngredients });
@@ -2694,10 +3332,11 @@ function RecipeEditView({
   };
 
   const toggleCategory = (cat: string) => {
-    if (recipe.categories.includes(cat)) {
-      update({ categories: recipe.categories.filter((c) => c !== cat) });
+    const normCat = cat.charAt(0).toUpperCase() + cat.slice(1);
+    if (recipe.categories.some((c) => c.toLowerCase() === normCat.toLowerCase())) {
+      update({ categories: recipe.categories.filter((c) => c.toLowerCase() !== normCat.toLowerCase()) });
     } else {
-      update({ categories: [...recipe.categories, cat] });
+      update({ categories: [...recipe.categories, normCat] });
     }
   };
 
@@ -2713,38 +3352,52 @@ function RecipeEditView({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recipe.steps.length]);
 
-  // ── Image upload via file picker ──
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // ── Image upload via file picker — opens crop screen first ──
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = "";
-
-    setUploading(true);
     setShowImageSheet(false);
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      setCropImageSrc(dataUrl);
+      setCrop({ x: 0, y: 0 });
+      setZoom(1);
+      setCroppedAreaPixels(null);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // ── Upload cropped blob to Supabase Storage ──
+  const uploadCroppedBlob = async (blob: Blob) => {
+    const arrayBuffer = await blob.arrayBuffer();
+    const uint8Array = new Uint8Array(arrayBuffer);
+    const path = `${householdId}/${recipe.id}.jpg`;
+    const { error } = await supabase.storage
+      .from("recipe-images")
+      .upload(path, uint8Array, { contentType: "image/jpeg", upsert: true });
+    if (error) throw new Error(error.message);
+    const { data: { publicUrl } } = supabase.storage
+      .from("recipe-images")
+      .getPublicUrl(path);
+    return `${publicUrl}?t=${Date.now()}`;
+  };
+
+  // ── Crop confirm: crop → compress → upload ──
+  const handleCropConfirm = async () => {
+    if (!cropImageSrc || !croppedAreaPixels) return;
+    const src = cropImageSrc;
+    setCropImageSrc(null);
+    setUploading(true);
     try {
-      const blob = await compressImage(file, 800);
-      const arrayBuffer = await blob.arrayBuffer();
-      const uint8Array = new Uint8Array(arrayBuffer);
-
-      const path = `${householdId}/${recipe.id}.jpg`;
-
-      const { error } = await supabase.storage
-        .from("recipe-images")
-        .upload(path, uint8Array, {
-          contentType: "image/jpeg",
-          upsert: true,
-        });
-
-      if (error) throw new Error(error.message);
-
-      const { data: { publicUrl } } = supabase.storage
-        .from("recipe-images")
-        .getPublicUrl(path);
-
+      const blob = await getCroppedImg(src, croppedAreaPixels);
+      const publicUrl = await uploadCroppedBlob(blob);
       update({ image_url: publicUrl });
-      toast.success("Bild hochgeladen ✅");
+      toast.success("Bild gespeichert ✅");
     } catch (err: any) {
-      console.error("[RecipeEdit] Image upload error:", err);
+      console.error("[RecipeEdit] Crop upload error:", err);
       toast.error(err?.message || "Upload fehlgeschlagen");
     } finally {
       setUploading(false);
@@ -2896,45 +3549,81 @@ function RecipeEditView({
           </div>
 
           {/* Categories */}
-          <div className="mt-4">
-            <label className="text-xs text-text-3 mb-1 block px-[0px] pt-[12px] pb-[0px]">Kategorien</label>
-            <div className="flex flex-wrap gap-2">
-              {RECIPE_CATEGORIES.filter((c) => c !== "Alle" && c !== "Favoriten" && c !== "Schnell").map((cat) => (
-                <button
-                  key={cat}
-                  onClick={() => toggleCategory(cat)}
-                  className={`px-3 py-1 rounded-full text-xs transition ${
-                    recipe.categories.includes(cat)
-                      ? "font-semibold"
-                      : "font-medium"
-                  }`}
-                  style={
-                    recipe.categories.includes(cat)
-                      ? {
-                          background: "var(--accent-light)",
-                          color: "var(--accent)",
-                          border: "1.5px solid var(--accent)",
+          {(() => {
+            // All "known" toggleable categories: built-in + user-persisted custom
+            const builtInCats = RECIPE_CATEGORIES.filter(
+              (c) => c !== "Alle" && c !== "Favoriten" && c !== "Schnell",
+            );
+            const allKnownCatsList = [...RECIPE_CATEGORIES, ...customRecipeCategories];
+            const allKnownLower = allKnownCatsList.map((k) => k.toLowerCase());
+            // "Extra" = in recipe.categories but NOT in any known list — case-insensitive
+            const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+            const extraCategories = recipe.categories.filter(
+              (c) => !allKnownLower.includes(c.toLowerCase()),
+            );
+            return (
+              <div className="mt-4">
+                <label className="text-xs text-text-3 mb-1 block px-[0px] pt-[12px] pb-[0px]">Kategorien</label>
+                <div className="flex flex-wrap gap-2">
+                  {/* ── Built-in + persisted custom: toggleable ── */}
+                  {[...builtInCats, ...customRecipeCategories].map((cat) => {
+                    const selected = recipe.categories.some(
+                      (c) => c.toLowerCase() === cat.toLowerCase(),
+                    );
+                    return (
+                      <button
+                        key={cat}
+                        onClick={() => toggleCategory(cat)}
+                        className={`px-3 py-1 rounded-full text-xs transition ${selected ? "font-semibold" : "font-medium"}`}
+                        style={
+                          selected
+                            ? { background: "var(--accent-light)", color: "var(--accent)", border: "1.5px solid var(--accent)" }
+                            : { background: "var(--surface-2)", color: "var(--text-2)", border: "1px solid var(--zu-border)" }
                         }
-                      : {
-                          background: "var(--surface-2)",
-                          color: "var(--text-2)",
-                          border: "1px solid var(--zu-border)",
-                        }
-                  }
-                >
-                  {cat}
-                </button>
-              ))}
-            </div>
-          </div>
+                      >
+                        {cat}
+                      </button>
+                    );
+                  })}
+                  {/* ── Import extras: always selected, removable with × ── */}
+                  {extraCategories.map((cat) => (
+                    <span
+                      key={cat}
+                      className="inline-flex items-center gap-1 pl-3 pr-2 py-1 rounded-full text-xs font-semibold"
+                      style={{ background: "var(--accent-light)", color: "var(--accent)", border: "1.5px solid var(--accent)" }}
+                    >
+                      {capitalise(cat)}
+                      <button
+                        onPointerDown={(e) => {
+                          e.preventDefault();
+                          update({ categories: recipe.categories.filter((c) => c !== cat) });
+                        }}
+                        className="flex items-center justify-center w-4 h-4 rounded-full hover:bg-accent/20 transition"
+                        aria-label={`${cat} entfernen`}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* ── Ingredients ── */}
           <div className="mt-4">
             <label className="text-xs text-text-3 mb-2 block px-[0px] pt-[12px] pb-[0px]">Zutaten</label>
             <div className="space-y-2">
-              {recipe.ingredients.map((ing, i) => (
+              {recipe.ingredients.map((ing, i) => {
+                const ingDotColor = getItemCategoryDot(ing.name, mergedItemsForDot);
+                return (
                 <div key={i} className="relative">
                   <div className="flex items-center gap-2">
+                    {/* Category dot — always reserves space; colored when known */}
+                    <span
+                      className="flex-shrink-0 w-2 h-2 rounded-full"
+                      style={{ backgroundColor: ingDotColor ?? "transparent" }}
+                    />
                     {/* Name — no background, like shopping list */}
                     <input
                       ref={(el) => { ingNameRefs.current[i] = el; }}
@@ -3016,44 +3705,63 @@ function RecipeEditView({
                     </button>
                   </div>
                   {/* Autocomplete dropdown — opens upward */}
-                  {activeIngIdx === i && ingQuery.trim() && ingredientSuggestions.length > 0 && (
-                    <div
-                      className="absolute left-0 right-0 z-50 rounded-xl overflow-hidden"
-                      style={{
-                        bottom: "100%",
-                        marginBottom: 4,
-                        background: "var(--surface)",
-                        border: "1px solid var(--zu-border)",
-                        boxShadow: "0 -4px 16px rgba(0,0,0,0.12)",
-                        maxHeight: 200,
-                        overflowY: "auto",
-                      }}
-                    >
-                      {ingredientSuggestions.map((s) => {
-                        const catColor = getCategoryChipColor(s.category);
-                        return (
-                          <button
-                            key={s.name}
-                            onPointerDown={(e) => e.preventDefault()}
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => selectIngredientSuggestion(i, s.name)}
-                            className="w-full text-left px-3 py-2.5 hover:bg-surface-2 flex items-center justify-between transition"
-                          >
-                            <span className="text-sm text-text-1">{s.name}</span>
-                            <div className="flex items-center gap-1.5 ml-2 flex-shrink-0">
+                  {(() => {
+                    const trimmed = ingQuery.trim();
+                    if (!trimmed || activeIngIdx !== i) return null;
+                    const exactMatch = mergedItemsForDot.some(
+                      (g) => g.name.toLowerCase() === trimmed.toLowerCase(),
+                    );
+                    const showAddBtn = !exactMatch;
+                    if (ingredientSuggestions.length === 0 && !showAddBtn) return null;
+                    return (
+                      <div
+                        className="absolute left-0 right-0 z-50 rounded-xl overflow-hidden"
+                        style={{
+                          bottom: "100%",
+                          marginBottom: 4,
+                          background: "var(--surface)",
+                          border: "1px solid var(--zu-border)",
+                          boxShadow: "0 -4px 16px rgba(0,0,0,0.12)",
+                          maxHeight: 200,
+                          overflowY: "auto",
+                        }}
+                      >
+                        {ingredientSuggestions.map((s) => {
+                          const catColor = getCategoryChipColor(s.category);
+                          return (
+                            <button
+                              key={s.name}
+                              onPointerDown={(e) => e.preventDefault()}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => selectIngredientSuggestion(i, s.name)}
+                              className="w-full text-left px-3 py-2.5 hover:bg-surface-2 flex items-center gap-2 transition"
+                            >
                               <span
                                 className="w-2 h-2 rounded-full flex-shrink-0"
                                 style={{ backgroundColor: catColor.dot }}
                               />
-                              <span className="text-[10px] text-text-3">{s.category}</span>
-                            </div>
+                              <span className="text-sm text-text-1 flex-1 min-w-0">{s.name}</span>
+                              <span className="text-[10px] text-text-3 ml-2 flex-shrink-0">{s.category}</span>
+                            </button>
+                          );
+                        })}
+                        {showAddBtn && (
+                          <button
+                            onPointerDown={(e) => e.preventDefault()}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => handleAddUnknownIngredient(i, trimmed)}
+                            className="w-full text-left px-3 py-2.5 hover:bg-surface-2 transition"
+                          >
+                            <span className="text-sm text-accent font-medium">
+                              + &bdquo;{trimmed}&ldquo; hinzufügen&hellip;
+                            </span>
                           </button>
-                        );
-                      })}
-                    </div>
-                  )}
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
-              ))}
+              ); })}
             </div>
             <button onClick={addIngredient} className="text-xs text-accent font-medium flex items-center gap-1 mt-2">
               <Plus className="w-3 h-3" /> Hinzufügen
@@ -3111,6 +3819,25 @@ function RecipeEditView({
             <button onClick={addStep} className="text-xs text-accent font-medium flex items-center gap-1 mt-2">
               <Plus className="w-3 h-3" /> Hinzufügen
             </button>
+          </div>
+
+          {/* ── Kommentare ── */}
+          <div className="mt-4">
+            <label className="text-xs text-text-3 mb-2 block px-[0px] pt-[12px] pb-[0px]">Kommentare</label>
+            <textarea
+              value={recipe.comment || ""}
+              onChange={(e) => update({ comment: e.target.value })}
+              placeholder="Eigene Notizen, Tipps, Varianten..."
+              name="recipe-comment-edit"
+              autoComplete="off"
+              autoCapitalize="sentences"
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-form-type="other"
+              className="w-full px-3 py-2.5 bg-surface-2 rounded-xl text-sm border-0 outline-none resize-none"
+              rows={3}
+              style={{ caretColor: "var(--color-accent)" }}
+            />
           </div>
         </div>
       </div>
@@ -3173,6 +3900,72 @@ function RecipeEditView({
         )}
       </AnimatePresence>
 
+      {/* ── Crop Screen (full-page overlay, above all other drawers) ── */}
+      <AnimatePresence>
+        {cropImageSrc && (
+          <motion.div
+            className="fixed inset-0 z-[3000] flex flex-col"
+            style={{ background: "#000", touchAction: "none" }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+          >
+            {/* Header */}
+            <div
+              className="flex items-center justify-center px-4 pt-[env(safe-area-inset-top)] flex-shrink-0"
+              style={{ paddingTop: "max(env(safe-area-inset-top), 16px)", paddingBottom: 12 }}
+            >
+              <span className="text-white text-sm font-semibold">Bild zuschneiden</span>
+            </div>
+
+            {/* Cropper area */}
+            <div className="relative flex-1">
+              <Cropper
+                image={cropImageSrc}
+                crop={crop}
+                zoom={zoom}
+                aspect={4 / 5}
+                onCropChange={setCrop}
+                onZoomChange={setZoom}
+                onCropComplete={(_croppedArea, pixels) => setCroppedAreaPixels(pixels)}
+                style={{
+                  containerStyle: { background: "#000" },
+                  mediaStyle: {},
+                  cropAreaStyle: {},
+                }}
+              />
+            </div>
+
+            {/* Zoom hint */}
+            <div className="flex justify-center pb-2 flex-shrink-0">
+              <span className="text-white/50 text-xs">Zwei Finger zum Zoomen</span>
+            </div>
+
+            {/* Buttons */}
+            <div
+              className="flex gap-3 px-4 pb-[env(safe-area-inset-bottom)] flex-shrink-0"
+              style={{ paddingBottom: "max(env(safe-area-inset-bottom), 24px)", paddingTop: 12 }}
+            >
+              <button
+                className="flex-1 py-3 rounded-2xl text-sm font-semibold"
+                style={{ background: "rgba(255,255,255,0.15)", color: "#fff" }}
+                onClick={() => setCropImageSrc(null)}
+              >
+                Abbrechen
+              </button>
+              <button
+                className="flex-1 py-3 rounded-2xl text-sm font-semibold"
+                style={{ background: "var(--color-accent)", color: "#fff" }}
+                onClick={handleCropConfirm}
+              >
+                Übernehmen
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ── URL Input Bottom Sheet ── */}
       <AnimatePresence>
         {showUrlInput && (
@@ -3210,16 +4003,32 @@ function RecipeEditView({
               <button
                 disabled={!imageUrlDraft.trim()}
                 onClick={() => {
-                  update({ image_url: imageUrlDraft.trim() || null });
+                  const urlSrc = imageUrlDraft.trim();
+                  if (!urlSrc) return;
                   setShowUrlInput(false);
                   setImageUrlDraft("");
+                  setCropImageSrc(urlSrc);
+                  setCrop({ x: 0, y: 0 });
+                  setZoom(1);
+                  setCroppedAreaPixels(null);
                 }}
                 className="w-full py-2.5 rounded-xl bg-accent text-white text-sm font-medium disabled:opacity-40"
               >
-                Übernehmen
+                Weiter
               </button>
             </motion.div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Category picker for new unknown ingredients ── */}
+      <AnimatePresence>
+        {pendingCustomIngName && (
+          <IngCategoryPickerModal
+            itemName={pendingCustomIngName.name}
+            onSelect={handleCustomIngCategoryPicked}
+            onClose={() => setPendingCustomIngName(null)}
+          />
         )}
       </AnimatePresence>
     </div>

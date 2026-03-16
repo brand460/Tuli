@@ -272,6 +272,40 @@ app.put("/make-server-2a26506b/custom-categories", async (c) => {
   }
 });
 
+// ── Custom recipe categories ────────────────────────────────────────
+
+// GET — load custom recipe categories
+app.get("/make-server-2a26506b/custom-recipe-categories", async (c) => {
+  try {
+    const householdId = c.req.query("household_id");
+    if (!householdId) {
+      return c.json({ error: "household_id ist erforderlich." }, 400);
+    }
+    const key = `custom_recipe_categories:${householdId}`;
+    const categories = await withRetry(() => kv.get(key));
+    return c.json({ categories: categories || [] });
+  } catch (err) {
+    console.log("GET /custom-recipe-categories error:", err);
+    return c.json({ error: `Fehler beim Laden der Rezept-Kategorien: ${err}` }, 500);
+  }
+});
+
+// PUT — save custom recipe categories
+app.put("/make-server-2a26506b/custom-recipe-categories", async (c) => {
+  try {
+    const { household_id, categories } = await c.req.json();
+    if (!household_id) {
+      return c.json({ error: "household_id ist erforderlich." }, 400);
+    }
+    const key = `custom_recipe_categories:${household_id}`;
+    await withRetry(() => kv.set(key, categories || []));
+    return c.json({ ok: true });
+  } catch (err) {
+    console.log("PUT /custom-recipe-categories error:", err);
+    return c.json({ error: `Fehler beim Speichern der Rezept-Kategorien: ${err}` }, 500);
+  }
+});
+
 // ── Global custom items (user-created articles) ────────────────────
 
 // GET global items for a household
@@ -1013,13 +1047,90 @@ app.post("/make-server-2a26506b/import-recipe", async (c) => {
 
     // Fetch the webpage content
     let pageContent: string;
+    let extractedImageUrl: string | null = null;
     try {
       const pageRes = await fetch(url, {
         headers: { "User-Agent": "Mozilla/5.0 (compatible; RecipeBot/1.0)" },
       });
-      pageContent = await pageRes.text();
+      const rawHtml = await pageRes.text();
+
+      // ── Image extraction from raw HTML (before stripping tags) ──
+      const baseUrl = new URL(url).origin;
+      const toAbsolute = (src: string): string | null => {
+        if (!src) return null;
+        if (/^https?:\/\//i.test(src)) return src;
+        if (src.startsWith("//")) return "https:" + src;
+        if (src.startsWith("/")) return baseUrl + src;
+        return baseUrl + "/" + src;
+      };
+
+      // 1. og:image (two attribute orders)
+      const ogMatch =
+        rawHtml.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) ||
+        rawHtml.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
+      if (ogMatch?.[1]) extractedImageUrl = toAbsolute(ogMatch[1]);
+
+      // 2. twitter:image
+      if (!extractedImageUrl) {
+        const twMatch =
+          rawHtml.match(/<meta[^>]+(?:name|property)=["']twitter:image["'][^>]+content=["']([^"']+)["']/i) ||
+          rawHtml.match(/<meta[^>]+content=["']([^"']+)["'][^>]+(?:name|property)=["']twitter:image["']/i);
+        if (twMatch?.[1]) extractedImageUrl = toAbsolute(twMatch[1]);
+      }
+
+      // 3. <img itemprop="image">
+      if (!extractedImageUrl) {
+        const ipMatch =
+          rawHtml.match(/<img[^>]+itemprop=["']image["'][^>]+src=["']([^"']+)["']/i) ||
+          rawHtml.match(/<img[^>]+src=["']([^"']+)["'][^>]+itemprop=["']image["']/i);
+        if (ipMatch?.[1]) extractedImageUrl = toAbsolute(ipMatch[1]);
+      }
+
+      // 4. JSON-LD Recipe image
+      if (!extractedImageUrl) {
+        const ldBlocks = rawHtml.match(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
+        if (ldBlocks) {
+          outer: for (const block of ldBlocks) {
+            const inner = block.replace(/<script[^>]*>/, "").replace(/<\/script>/, "");
+            try {
+              const ld = JSON.parse(inner);
+              const entries = Array.isArray(ld) ? ld : [ld];
+              for (const entry of entries) {
+                const recipeEntry = entry["@type"] === "Recipe" ? entry
+                  : entry["@graph"]?.find?.((n: any) => n["@type"] === "Recipe");
+                if (recipeEntry?.image) {
+                  const img = Array.isArray(recipeEntry.image) ? recipeEntry.image[0] : recipeEntry.image;
+                  const imgUrl = typeof img === "string" ? img : (img?.url || img?.contentUrl);
+                  if (imgUrl) { extractedImageUrl = toAbsolute(imgUrl); break outer; }
+                }
+              }
+            } catch { /* ignore JSON-LD parse errors */ }
+          }
+        }
+      }
+
+      // 5. Largest <img> by width attribute
+      if (!extractedImageUrl) {
+        let bestW = 0;
+        let bestSrc: string | null = null;
+        const imgRe = /<img[^>]+>/gi;
+        let imgTag: RegExpExecArray | null;
+        while ((imgTag = imgRe.exec(rawHtml)) !== null) {
+          const tag = imgTag[0];
+          const srcM = tag.match(/src=["']([^"']+)["']/i);
+          const wM = tag.match(/width=["']?(\d+)/i);
+          if (srcM && wM) {
+            const w = parseInt(wM[1], 10);
+            if (w > bestW) { bestW = w; bestSrc = srcM[1]; }
+          }
+        }
+        if (bestSrc) extractedImageUrl = toAbsolute(bestSrc);
+      }
+
+      console.log("import-recipe: extracted image url:", extractedImageUrl);
+
       // Strip HTML tags and limit length to ~15000 chars for Claude
-      pageContent = pageContent
+      pageContent = rawHtml
         .replace(/<script[\s\S]*?<\/script>/gi, "")
         .replace(/<style[\s\S]*?<\/style>/gi, "")
         .replace(/<[^>]+>/g, " ")
@@ -1041,20 +1152,7 @@ app.post("/make-server-2a26506b/import-recipe", async (c) => {
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
         max_tokens: 2048,
-        system: `Du bist ein Rezept-Extraktor. Extrahiere aus dem folgenden Web-Inhalt ein Rezept als JSON:
-{
-  "title": "",
-  "description": "",
-  "prep_time_minutes": null,
-  "cook_time_minutes": null,
-  "servings": null,
-  "ingredients": [{"name": "", "quantity": "", "unit": ""}],
-  "steps": [{"position": 1, "description": ""}],
-  "image_url": null,
-  "categories": [],
-  "source_url": ""
-}
-Felder die du nicht finden kannst setzt du auf null. Antworte NUR mit dem JSON.`,
+        system: `Du bist ein Rezept-Extraktor. Extrahiere aus dem folgenden Web-Inhalt ein Rezept als JSON:\n{\n  \"title\": \"\",\n  \"description\": \"\",\n  \"prep_time_minutes\": null,\n  \"cook_time_minutes\": null,\n  \"servings\": null,\n  \"ingredients\": [{\"name\": \"\", \"quantity\": \"\", \"unit\": \"\"}],\n  \"steps\": [{\"position\": 1, \"description\": \"\"}],\n  \"image_url\": null,\n  \"categories\": [],\n  \"source_url\": \"\"\n}\n\nRegeln für Zutaten:\n- Extrahiere ALLE Zutaten inklusive optionaler Zutaten, Toppings, Saucen, Garnituren und Untergruppen — lasse keine einzige Zutat weg.\n- Wenn Zutaten in Gruppen unterteilt sind (z.B. \"Für den Teig:\", \"Toppings:\", \"Sauce:\"), füge alle Gruppen flach als einzelne Zutaten in die ingredients-Liste ein — ignoriere Gruppenüberschriften, behalte aber alle Zutaten daraus.\n- Zutaten die als \"optional\" markiert sind nicht ignorieren — extrahiere sie mit dem Suffix \" (optional)\" am Ende des Namens.\n- Bei Alternativzutaten (z.B. \"Bulgur oder Quinoa\") nimm die erste genannte Option als Hauptzutat.\n- Mengenangaben: quantity darf NUR echte Mengen enthalten — Zahlen, Brüche (½, ¼, ¾), Dezimalzahlen oder Ranges (1-2). Unspezifische Angaben wie \"nach Geschmack\", \"nach Belieben\", \"etwas\", \"wenig\", \"reichlich\", \"optional\" oder ähnliche Formulierungen dürfen NICHT in quantity stehen — setze quantity in diesen Fällen auf \"\" (leerer String) und füge \" (nach Geschmack)\" als Suffix im Namen hinzu oder lasse den Hinweis ganz weg.\n\nFelder die du nicht finden kannst setzt du auf null. Antworte NUR mit dem JSON.`,
         messages: [
           { role: "user", content: `URL: ${url}\n\nInhalt:\n${pageContent}` },
         ],
@@ -1083,6 +1181,11 @@ Felder die du nicht finden kannst setzt du auf null. Antworte NUR mit dem JSON.`
 
     // Ensure source_url is set
     recipe.source_url = recipe.source_url || url;
+
+    // Server-extracted image takes priority over Claude's guess
+    if (extractedImageUrl) {
+      recipe.image_url = extractedImageUrl;
+    }
 
     return c.json({ recipe });
   } catch (err) {
