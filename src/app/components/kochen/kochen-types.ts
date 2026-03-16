@@ -36,6 +36,8 @@ export interface MealPlanEntry {
   recipe_id: string | null;
   free_text: string | null;
   household_id: string;
+  meal_type?: "fruehstueck" | "mittag" | "abend";
+  assigned_to?: string[]; // user IDs
 }
 
 export const RECIPE_CATEGORIES = [

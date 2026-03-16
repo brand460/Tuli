@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { motion, AnimatePresence } from "motion/react";
 import {
   Plus, Search, Heart, Clock, ChevronLeft, Star, Minus, ExternalLink,
-  Pencil, X, Loader2, Link2, FileText, Camera, Trash2, ArrowRightLeft, RefreshCw,
-  Image as ImageIcon,
+  Pencil, X, Loader2, Link2, FileText, Camera, Trash2,
+  Image as ImageIcon, ShoppingCart, CalendarPlus,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase, apiFetch, API_BASE } from "../supabase-client";
@@ -14,12 +14,49 @@ import type {
 } from "./kochen-types";
 import { RECIPE_CATEGORIES } from "./kochen-types";
 import { useBackHandler, pushBack, popBack } from "../ui/use-back-handler";
-import { useAuth } from "../auth-context";
+import { useAuth, type HouseholdMember } from "../auth-context";
 import { useKeyboardOffset } from "../ui/use-keyboard-offset";
 import { INGREDIENT_UNITS } from "./ingredient-units";
-import { GROCERY_DATABASE, buildMergedItems, buildExcludeSet, getCategoryChipColor } from "../einkaufen/shopping-data";
+import { GROCERY_DATABASE, DEFAULT_STORES, buildMergedItems, buildExcludeSet, getCategoryChipColor, getLogoUrl } from "../einkaufen/shopping-data";
 
 const DRAWER_SPRING = { type: "spring" as const, damping: 25, stiffness: 300 };
+
+// ── Store Logo (lokal, identisch mit StoreLogo in einkaufen-screen) ──
+function StoreLogoKochen({ store, size = 48, isSelected }: { store: any; size?: number; isSelected?: boolean }) {
+  const [imgError, setImgError] = useState(false);
+  const logoUrl = getLogoUrl(store.domain);
+  const showLogo = logoUrl && !imgError;
+  return (
+    <div
+      className="rounded-full flex items-center justify-center overflow-hidden transition-all"
+      style={{
+        width: size,
+        height: size,
+        backgroundColor: showLogo ? "var(--color-surface-2)" : store.bgColor || "var(--color-surface-2)",
+        border: isSelected ? "2.5px solid var(--color-accent)" : "2.5px solid transparent",
+      }}
+    >
+      {store.emoji ? (
+        <span className="select-none" style={{ fontSize: size * 0.45 }}>{store.emoji}</span>
+      ) : showLogo ? (
+        <img
+          src={logoUrl!}
+          alt={store.name}
+          className="object-contain p-1.5"
+          style={{ width: size * 0.75, height: size * 0.75, imageRendering: "crisp-edges" }}
+          onError={() => setImgError(true)}
+        />
+      ) : (
+        <span
+          className="font-bold select-none"
+          style={{ fontSize: size * 0.35, color: imgError ? "#6B7280" : (store.color || "#fff") }}
+        >
+          {(store.name || "?").charAt(0).toUpperCase()}
+        </span>
+      )}
+    </div>
+  );
+}
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -27,9 +64,16 @@ function genId() {
   return crypto.randomUUID?.() || Math.random().toString(36).slice(2, 12);
 }
 
-function fmtDate(d: Date) {
-  return d.toISOString().split("T")[0];
+// WICHTIG: toISOString() liefert UTC → Off-by-one in lokalen Zeitzonen.
+// Immer lokale Zeitzone verwenden:
+function fmtLocalDate(d: Date): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
+// Alias damit alle bestehenden fmtDate-Aufrufe korrekt arbeiten
+const fmtDate = fmtLocalDate;
 
 function dayLabel(d: Date) {
   const days = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
@@ -47,7 +91,7 @@ function totalTime(r: Recipe) {
 
 function isToday(d: Date) {
   const now = new Date();
-  return fmtDate(d) === fmtDate(now);
+  return fmtLocalDate(d) === fmtLocalDate(now);
 }
 
 // Generate 11 days: today −3 .. today +7
@@ -62,6 +106,25 @@ function generateDays(): Date[] {
   }
   return result;
 }
+
+// Generate 14 days starting from today
+function generateFutureDays(): Date[] {
+  const result: Date[] = [];
+  const now = new Date();
+  for (let i = 0; i < 14; i++) {
+    const d = new Date(now);
+    d.setDate(d.getDate() + i);
+    d.setHours(0, 0, 0, 0);
+    result.push(d);
+  }
+  return result;
+}
+
+const MEAL_TYPES = [
+  { id: "fruehstueck" as const, label: "Frühstück", emoji: "🌅" },
+  { id: "mittag" as const, label: "Mittag", emoji: "☀️" },
+  { id: "abend" as const, label: "Abend", emoji: "🌙" },
+];
 
 // ── Empty recipe template ──────────────────────────────────────────
 
@@ -91,7 +154,7 @@ function emptyRecipe(): Recipe {
 // ══════════════════════════════════════════════════════════════════════
 
 export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } = {}) {
-  const { householdId } = useAuth();
+  const { householdId, householdMembers } = useAuth();
   // ── State ──────────────────────────────────────────────────────────
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [mealPlan, setMealPlan] = useState<MealPlanEntry[]>([]);
@@ -118,11 +181,17 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
   const [mealPickerDate, setMealPickerDate] = useState<string | null>(null);
   const [freetextValue, setFreetextValue] = useState("");
   const [mealPickerSearch, setMealPickerSearch] = useState("");
+  const [mealPickerMealType, setMealPickerMealType] = useState<"fruehstueck" | "mittag" | "abend">("mittag");
+  const [mealPickerUserIds, setMealPickerUserIds] = useState<string[]>([]);
+  const [mealPickerTab, setMealPickerTab] = useState<"rezept" | "freitext">("rezept");
+  const [mealPickerSelectedRecipeId, setMealPickerSelectedRecipeId] = useState<string | null>(null);
 
-  // Day popover (long-press on occupied day)
-  const [dayPopover, setDayPopover] = useState<{ date: string; x: number; y: number } | null>(null);
-  const [showMoveSheet, setShowMoveSheet] = useState(false);
-  const [moveSourceDate, setMoveSourceDate] = useState<string | null>(null);
+  // Entry popover (long-press on meal entry card)
+  const [entryPopover, setEntryPopover] = useState<{ entry: MealPlanEntry; x: number; y: number } | null>(null);
+  const [showEditEntrySheet, setShowEditEntrySheet] = useState(false);
+  const [editEntryDate, setEditEntryDate] = useState<string>("");
+  const [editEntryMealType, setEditEntryMealType] = useState<"fruehstueck" | "mittag" | "abend">("mittag");
+  const [editUserIds, setEditUserIds] = useState<string[]>([]);
 
   // Zutaten-Transfer modal
   const [showIngredientsModal, setShowIngredientsModal] = useState(false);
@@ -134,10 +203,6 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
   // Delete confirmation
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
-  // Wochenplaner scroll ref
-  const weekScrollRef = useRef<HTMLDivElement>(null);
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   // Segmented control
   const [kochenTab, setKochenTab] = useState<"rezepte" | "wochenplaner">("rezepte");
 
@@ -148,9 +213,8 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
   useBackHandler(showAddSheet, () => setShowAddSheet(false));
   useBackHandler(showUrlImport, () => { setShowUrlImport(false); setUrlInput(""); });
   useBackHandler(showMealPicker, () => { setShowMealPicker(false); setMealPickerDate(null); });
-  useBackHandler(showFreetextInput, () => setShowFreetextInput(false));
-  useBackHandler(!!dayPopover, () => setDayPopover(null));
-  useBackHandler(showMoveSheet, () => setShowMoveSheet(false));
+  useBackHandler(!!entryPopover, () => setEntryPopover(null));
+  useBackHandler(showEditEntrySheet, () => setShowEditEntrySheet(false));
   useBackHandler(showIngredientsModal, () => { setShowIngredientsModal(false); setIngredientsRecipe(null); });
   useBackHandler(!!deleteConfirm, () => setDeleteConfirm(null));
 
@@ -165,7 +229,21 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
       ]);
       setRecipes(recipeRes.recipes || []);
       setMealPlan(mealRes.entries || []);
-      setStores(storeRes.settings || []);
+      // Merge StoreSettingEntry[] with DEFAULT_STORES to get full StoreInfo objects
+      // (same logic as applyStoreSettings in einkaufen-screen)
+      const rawSettings: Array<{ store_id: string; position: number; is_visible: boolean }> =
+        storeRes.settings || [];
+      const settingsMap = new Map(rawSettings.map((s) => [s.store_id, s]));
+      const mergedStores = DEFAULT_STORES.filter((s) => {
+        if (s.id === "alle") return false; // "Alle" makes no sense in add-to-shopping drawer
+        const setting = settingsMap.get(s.id);
+        return setting ? setting.is_visible !== false : true;
+      }).sort((a, b) => {
+        const pa = settingsMap.get(a.id)?.position ?? 999;
+        const pb = settingsMap.get(b.id)?.position ?? 999;
+        return pa - pb;
+      });
+      setStores(mergedStores.length > 0 ? mergedStores : DEFAULT_STORES.filter((s) => s.id !== "alle"));
     } catch (err) {
       console.error("Fehler beim Laden der Kochen-Daten:", err);
       toast.error("Fehler beim Laden");
@@ -202,17 +280,7 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
     };
   }, [loadData]);
 
-  // Center today in the week scroller on mount and when switching to wochenplaner tab
-  useEffect(() => {
-    if (kochenTab === "wochenplaner" && weekScrollRef.current) {
-      // Today is at index 3 (0-based), each card ~120px wide + 12px gap
-      const cardWidth = 120;
-      const gap = 12;
-      const idx = 3;
-      const scrollLeft = idx * (cardWidth + gap) - weekScrollRef.current.clientWidth / 2 + cardWidth / 2;
-      weekScrollRef.current.scrollLeft = Math.max(0, scrollLeft);
-    }
-  }, [loading, kochenTab]);
+  // No horizontal scroll centering needed — vertical table layout now
 
   // ── Save helpers ───────────────────────────────────────────────────
 
@@ -249,8 +317,12 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
   const days = useMemo(() => generateDays(), []);
 
   const mealByDate = useMemo(() => {
-    const m = new Map<string, MealPlanEntry>();
-    mealPlan.forEach((e) => m.set(e.date, e));
+    const m = new Map<string, MealPlanEntry[]>();
+    mealPlan.forEach((e) => {
+      const arr = m.get(e.date) || [];
+      arr.push(e);
+      m.set(e.date, arr);
+    });
     return m;
   }, [mealPlan]);
 
@@ -349,90 +421,104 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
     await saveRecipes(updated);
   };
 
-  // ── Day interactions ───────────────────────────────────────────────
+  // ── Entry interactions (Wochenplaner table) ─────────────────────────
 
-  const handleDayTap = (dateStr: string) => {
-    const entry = mealByDate.get(dateStr);
-    if (entry?.recipe_id) {
-      openRecipeDetail(entry.recipe_id);
-    } else if (!entry) {
-      // Empty day → open picker
-      setMealPickerDate(dateStr);
-      setShowMealPicker(true);
-    }
-  };
+  const entryLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const entryLongPressPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  const handleDayLongPressStart = (dateStr: string, e: React.TouchEvent | React.MouseEvent) => {
-    const entry = mealByDate.get(dateStr);
-    if (!entry) return;
-    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
-    const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
-    longPressTimer.current = setTimeout(() => {
-      setDayPopover({ date: dateStr, x: clientX, y: clientY });
+  const handleEntryPointerDown = (entry: MealPlanEntry, e: React.PointerEvent) => {
+    entryLongPressPos.current = { x: e.clientX, y: e.clientY };
+    entryLongPressTimer.current = setTimeout(() => {
+      setEntryPopover({ entry, x: e.clientX, y: e.clientY });
     }, 500);
   };
 
-  const handleDayLongPressEnd = () => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
+  const handleEntryPointerUp = () => {
+    if (entryLongPressTimer.current) {
+      clearTimeout(entryLongPressTimer.current);
+      entryLongPressTimer.current = null;
     }
   };
 
+  const handleEntryPointerMove = (e: React.PointerEvent) => {
+    if (entryLongPressTimer.current) {
+      const dx = Math.abs(e.clientX - entryLongPressPos.current.x);
+      const dy = Math.abs(e.clientY - entryLongPressPos.current.y);
+      if (dx > 5 || dy > 5) {
+        clearTimeout(entryLongPressTimer.current);
+        entryLongPressTimer.current = null;
+      }
+    }
+  };
+
+  const handleEntryTap = (entry: MealPlanEntry) => {
+    if (entry.recipe_id) {
+      openRecipeDetail(entry.recipe_id);
+    }
+  };
+
+  const openDayPicker = (dateStr: string) => {
+    setMealPickerDate(dateStr);
+    setMealPickerMealType("mittag");
+    setMealPickerUserIds(householdMembers.map((m) => m.id));
+    setMealPickerTab("rezept");
+    setMealPickerSelectedRecipeId(null);
+    setMealPickerSearch("");
+    setFreetextValue("");
+    setShowMealPicker(true);
+  };
+
   const assignRecipeToDate = async (recipeId: string, dateStr: string) => {
-    const existing = mealPlan.filter((e) => e.date !== dateStr);
-    existing.push({
+    const newEntry: MealPlanEntry = {
       id: genId(),
       date: dateStr,
       recipe_id: recipeId,
       free_text: null,
+      meal_type: mealPickerMealType,
+      assigned_to: mealPickerUserIds.length > 0 ? mealPickerUserIds : householdMembers.map((m) => m.id),
       household_id: householdId || "",
-    });
-    await saveMealPlan(existing);
+    };
+    await saveMealPlan([...mealPlan, newEntry]);
     setShowMealPicker(false);
     setMealPickerDate(null);
     setMealPickerSearch("");
 
-    // Offer ingredient transfer
-    const recipe = recipes.find((r) => r.id === recipeId);
-    if (recipe && recipe.ingredients.length > 0) {
-      setIngredientsRecipe(recipe);
-      setSelectedIngredients(recipe.ingredients.map(() => true));
-      setShowIngredientsModal(true);
-    }
   };
 
   const assignFreetextToDate = async (text: string, dateStr: string) => {
-    const existing = mealPlan.filter((e) => e.date !== dateStr);
-    existing.push({
+    const newEntry: MealPlanEntry = {
       id: genId(),
       date: dateStr,
       recipe_id: null,
       free_text: text,
+      meal_type: mealPickerMealType,
+      assigned_to: mealPickerUserIds.length > 0 ? mealPickerUserIds : householdMembers.map((m) => m.id),
       household_id: householdId || "",
-    });
-    await saveMealPlan(existing);
+    };
+    await saveMealPlan([...mealPlan, newEntry]);
     setShowFreetextInput(false);
     setFreetextValue("");
     setMealPickerDate(null);
   };
 
-  const deleteMealEntry = async (dateStr: string) => {
-    await saveMealPlan(mealPlan.filter((e) => e.date !== dateStr));
-    setDayPopover(null);
+  const deleteMealEntry = async (entryId: string) => {
+    await saveMealPlan(mealPlan.filter((e) => e.id !== entryId));
+    setEntryPopover(null);
     setDeleteConfirm(null);
   };
 
-  const moveMealEntry = async (fromDate: string, toDate: string) => {
-    const entry = mealByDate.get(fromDate);
-    if (!entry) return;
-    const updated = mealPlan.filter((e) => e.date !== fromDate);
-    updated.push({ ...entry, id: genId(), date: toDate });
+  const saveEntryEdits = async () => {
+    if (!entryPopover) return;
+    const entryId = entryPopover.entry.id;
+    const updated = mealPlan.map((e) =>
+      e.id === entryId
+        ? { ...e, date: editEntryDate, meal_type: editEntryMealType, assigned_to: editUserIds }
+        : e
+    );
     await saveMealPlan(updated);
-    setShowMoveSheet(false);
-    setMoveSourceDate(null);
-    setDayPopover(null);
-    toast.success("Verschoben");
+    setShowEditEntrySheet(false);
+    setEntryPopover(null);
+    toast.success("Gespeichert");
   };
 
   // ── URL import ─────────────────────────────────────────────────────
@@ -486,29 +572,65 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
 
   const addIngredientsToShopping = async () => {
     if (!ingredientsRecipe) return;
+    const UNITS_NAME_ONLY = ["tl", "el", "päckchen", "pck", "pk"];
     try {
       const shoppingRes = await apiFetch(`/shopping?household_id=${householdId}`);
       const existingItems: any[] = shoppingRes.items || [];
       const chosen = ingredientsRecipe.ingredients.filter((_, i) => selectedIngredients[i]);
-      const newItems = chosen.map((ing, i) => ({
-        id: genId(),
-        name: `${ing.quantity ? ing.quantity + " " : ""}${ing.unit ? ing.unit + " " : ""}${ing.name}`.trim(),
-        store: ingredientStore,
-        category: "Sonstiges",
-        is_checked: false,
-        position: existingItems.length + i,
-        quantity: 1,
-        unit: null,
-        household_id: householdId || "",
-      }));
+
+      // Build lookup map for merge-by-name
+      const existingMap = new Map<string, any>();
+      existingItems.forEach((item) => existingMap.set(item.name.toLowerCase(), item));
+
+      let addedCount = 0;
+      const updatedItems = [...existingItems];
+
+      for (const ing of chosen) {
+        const dbMatch = GROCERY_DATABASE.find(
+          (g) => g.name.toLowerCase() === ing.name.toLowerCase()
+        );
+        const category = dbMatch?.category || "Sonstiges";
+
+        const unitNorm = (ing.unit || "").trim().toLowerCase();
+        const skipQtyUnit = UNITS_NAME_ONLY.includes(unitNorm);
+
+        const itemName = ing.name.trim();
+        const rawQty = ing.quantity ? parseFloat(ing.quantity) || 1 : 1;
+        const itemQty = skipQtyUnit ? 1 : rawQty;
+        const itemUnit = skipQtyUnit ? null : (ing.unit || null);
+
+        const existingKey = itemName.toLowerCase();
+        const existingEntry = existingMap.get(existingKey);
+
+        if (existingEntry) {
+          existingEntry.quantity = (existingEntry.quantity || 1) + itemQty;
+        } else {
+          const storeVal = ingredientStore === "alle" ? null : ingredientStore;
+          const newItem = {
+            id: genId(),
+            name: itemName,
+            store: storeVal,
+            category,
+            is_checked: false,
+            position: updatedItems.length,
+            quantity: itemQty,
+            unit: itemUnit,
+            household_id: householdId || "",
+          };
+          updatedItems.push(newItem);
+          existingMap.set(existingKey, newItem);
+          addedCount++;
+        }
+      }
+
       await apiFetch("/shopping", {
         method: "PUT",
         body: JSON.stringify({
           household_id: householdId,
-          items: [...existingItems, ...newItems],
+          items: updatedItems,
         }),
       });
-      toast.success(`${chosen.length} Zutaten hinzugefügt`);
+      toast.success(`${addedCount} Zutaten hinzugefügt`);
     } catch (err) {
       console.error("Fehler beim Hinzufügen zur Einkaufsliste:", err);
       toast.error("Fehler beim Hinzufügen");
@@ -552,13 +674,6 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
         onToggleFavorite={() => toggleFavorite(selectedRecipe.id)}
         onSetRating={(r) => setRating(selectedRecipe.id, r)}
         onDelete={() => setDeleteConfirm(selectedRecipe.id)}
-        onAddToShopping={() => {
-          if (selectedRecipe.ingredients.length > 0) {
-            setIngredientsRecipe(selectedRecipe);
-            setSelectedIngredients(selectedRecipe.ingredients.map(() => true));
-            setShowIngredientsModal(true);
-          }
-        }}
         onSaveComment={async (comment) => {
           const updated = recipes.map((r) =>
             r.id === selectedRecipe.id ? { ...r, comment } : r
@@ -566,6 +681,7 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
           await saveRecipes(updated);
         }}
         stores={stores}
+        mealPlan={mealPlan}
       />
     );
   }
@@ -630,83 +746,176 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
         </div>
       </div>
 
-      {/* WOCHENPLANER — only when tab active */}
+      {/* WOCHENPLANER — vertical table, only when tab active */}
       {kochenTab === "wochenplaner" && (
-      <div className="flex-shrink-0 border-b border-border" style={{ background: 'var(--surface)' }}>
+      <div className="flex-1 overflow-y-auto">
         <div style={{ maxWidth: 680, margin: "0 auto", width: "100%" }}>
-        <div className="px-4 pt-3 pb-1" />
-        <div
-          ref={weekScrollRef}
-          className="flex gap-3 overflow-x-auto px-4 pb-4 pt-1 scrollbar-hide"
-          style={{ scrollSnapType: "x mandatory" }}
-        >
           {days.map((d) => {
             const dateStr = fmtDate(d);
-            const entry = mealByDate.get(dateStr);
-            const recipe = entry?.recipe_id ? recipes.find((r) => r.id === entry.recipe_id) : null;
+            const entries = mealByDate.get(dateStr) || [];
             const today = isToday(d);
             return (
               <div
                 key={dateStr}
-                className="flex-shrink-0 flex flex-col items-center"
-                style={{ width: 120, scrollSnapAlign: "center" }}
+                className="flex border-b border-border"
+                style={{ marginBottom: 0 }}
               >
-                {/* Day label */}
-                <div className={`text-xs font-medium mb-1 ${today ? "text-accent" : "text-text-3"}`}>
-                  {dayLabel(d)} {dateNum(d)}
-                </div>
-                {/* Card */}
+                {/* Day label column — aligned to top of first card */}
                 <div
-                  className={`w-full rounded-xl overflow-hidden cursor-pointer transition-all ${
-                    today ? "ring-2 ring-accent ring-offset-1" : "border border-border"
-                  }`}
-                  style={{ height: 140 }}
-                  onClick={() => handleDayTap(dateStr)}
-                  onTouchStart={(e) => handleDayLongPressStart(dateStr, e)}
-                  onTouchEnd={handleDayLongPressEnd}
-                  onTouchCancel={handleDayLongPressEnd}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    if (entry) {
-                      setDayPopover({ date: dateStr, x: e.clientX, y: e.clientY });
-                    }
-                  }}
+                  className="flex-shrink-0 flex flex-col items-center pt-3 pb-2"
+                  style={{ width: 72 }}
                 >
-                  {recipe ? (
-                    <div className="h-full flex flex-col">
-                      <div className="flex-1 bg-surface-2">
-                        {recipe.image_url ? (
-                          <ImageWithFallback
-                            src={recipe.image_url}
-                            alt={recipe.title}
-                            className="w-full h-full object-cover"
-                          />
+                  <span
+                    className="text-xs font-bold"
+                    style={{ color: today ? "var(--color-accent)" : "var(--color-text-1)" }}
+                  >
+                    {dayLabel(d)}
+                  </span>
+                  <span
+                    className="text-[11px]"
+                    style={{ color: today ? "var(--color-accent)" : "var(--color-text-3)" }}
+                  >
+                    {dateNum(d)}
+                  </span>
+                </div>
+
+                {/* Content column */}
+                <div className="flex-1 min-w-0 pt-2 pb-2 pr-3 flex flex-col gap-1.5">
+                  {entries.map((entry) => {
+                    const recipe = entry.recipe_id
+                      ? recipes.find((r) => r.id === entry.recipe_id)
+                      : null;
+                    const isFreeText = !!entry.free_text && !entry.recipe_id;
+                    const mealType = MEAL_TYPES.find((m) => m.id === entry.meal_type);
+                    const assignedMembers = (entry.assigned_to || [])
+                      .map((uid) => householdMembers.find((m) => m.id === uid))
+                      .filter(Boolean) as HouseholdMember[];
+
+                    return (
+                      <div
+                        key={entry.id}
+                        className="flex items-center gap-2 rounded-xl px-2 py-1.5 cursor-pointer active:scale-[0.98] transition-all"
+                        style={{
+                          background: isFreeText ? "var(--accent-light)" : "var(--color-surface-2)",
+                          border: isFreeText ? "1px dashed color-mix(in srgb, var(--color-accent) 30%, transparent)" : "1px solid transparent",
+                          touchAction: "pan-y",
+                          WebkitUserSelect: "none",
+                          userSelect: "none",
+                          WebkitTouchCallout: "none",
+                        } as React.CSSProperties}
+                        onClick={() => handleEntryTap(entry)}
+                        onPointerDown={(e) => handleEntryPointerDown(entry, e)}
+                        onPointerUp={handleEntryPointerUp}
+                        onPointerCancel={handleEntryPointerUp}
+                        onPointerMove={handleEntryPointerMove}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          setEntryPopover({ entry, x: e.clientX, y: e.clientY });
+                        }}
+                      >
+                        {/* Thumbnail / Freitext Icon */}
+                        {isFreeText ? (
+                          <div
+                            className="w-10 h-10 rounded-lg flex-shrink-0 flex items-center justify-center text-lg"
+                            style={{ background: "var(--accent-light)" }}
+                          >
+                            📝
+                          </div>
                         ) : (
-                          <div className="w-full h-full flex items-center justify-center text-2xl">
-                            🍽️
+                          <div className="w-10 h-10 rounded-lg flex-shrink-0 overflow-hidden bg-surface">
+                            {recipe?.image_url ? (
+                              <ImageWithFallback
+                                src={recipe.image_url}
+                                alt={recipe.title}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-lg">
+                                🍽️
+                              </div>
+                            )}
                           </div>
                         )}
+
+                        {/* Name + chips */}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-text-1 truncate">
+                            {recipe?.title || entry.free_text || "–"}
+                          </p>
+                          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                            {mealType && (
+                              <span
+                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium"
+                                style={{ background: "var(--color-surface)", color: "var(--color-text-2)" }}
+                              >
+                                {mealType.emoji} {mealType.label}
+                              </span>
+                            )}
+                            {/* Avatar chips */}
+                            {assignedMembers.length > 0 && (
+                              <div className="flex -space-x-1.5">
+                                {assignedMembers.slice(0, 4).map((member) => {
+                                  const initials = member.display_name
+                                    .split(" ")
+                                    .map((n) => n[0] || "")
+                                    .join("")
+                                    .toUpperCase()
+                                    .slice(0, 2);
+                                  return (
+                                    <div
+                                      key={member.id}
+                                      className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[8px] font-semibold overflow-hidden"
+                                      style={{
+                                        background: member.avatar_url ? undefined : member.initials_color,
+                                        border: "1.5px solid var(--color-surface-2)",
+                                      }}
+                                    >
+                                      {member.avatar_url ? (
+                                        <img src={member.avatar_url} alt="" className="w-full h-full object-cover" />
+                                      ) : (
+                                        <span>{initials}</span>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                      <div className="px-2 py-1.5 bg-surface">
-                        <p className="text-xs font-medium text-text-1 truncate">{recipe.title}</p>
-                      </div>
-                    </div>
-                  ) : entry?.free_text ? (
-                    <div className="h-full flex flex-col items-center justify-center bg-accent-light px-2">
-                      <span className="text-2xl mb-1">📝</span>
-                      <p className="text-xs text-text-2 text-center truncate w-full">{entry.free_text}</p>
-                    </div>
-                  ) : (
-                    <div className="h-full flex items-center justify-center bg-surface-2">
-                      <Plus className="w-6 h-6 text-text-3" />
-                    </div>
-                  )}
+                    );
+                  })}
+
+                  {/* "+ Hinzufügen" button — full width */}
+                  <button
+                    onClick={() => openDayPicker(dateStr)}
+                    className="w-full py-2 rounded-xl text-xs flex items-center justify-center gap-1 transition-all mt-0.5"
+                    style={{ background: "var(--color-surface-2)", color: "var(--color-text-3)" }}
+                    onPointerEnter={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.background = "var(--accent-light)";
+                      (e.currentTarget as HTMLButtonElement).style.color = "var(--color-accent)";
+                    }}
+                    onPointerLeave={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.background = "var(--color-surface-2)";
+                      (e.currentTarget as HTMLButtonElement).style.color = "var(--color-text-3)";
+                    }}
+                    onPointerDown={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.background = "var(--accent-light)";
+                      (e.currentTarget as HTMLButtonElement).style.color = "var(--color-accent)";
+                    }}
+                    onPointerUp={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.background = "var(--color-surface-2)";
+                      (e.currentTarget as HTMLButtonElement).style.color = "var(--color-text-3)";
+                    }}
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Hinzufügen
+                  </button>
                 </div>
               </div>
             );
           })}
         </div>
-        </div>{/* /maxWidth */}
       </div>
       )}
 
@@ -878,46 +1087,37 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
 
       {/* ── OVERLAYS / MODALS ─────────────────────────────────────── */}
 
-      {/* Day Popover */}
-      {dayPopover && (
+      {/* Entry Popover (long-press on meal card) */}
+      {entryPopover && (
         <div className="contents">
-          <div className="fixed inset-0 z-[1000]" onClick={() => setDayPopover(null)} />
+          <div className="fixed inset-0 z-[1000]" onClick={() => setEntryPopover(null)} />
           <div
-            className="fixed z-[1000] rounded-xl py-2 min-w-[200px]"
+            className="fixed z-[1000] rounded-xl py-2 min-w-[180px]"
             style={{
-              top: Math.min(dayPopover.y, window.innerHeight - 200),
-              left: Math.min(dayPopover.x, window.innerWidth - 220),
+              top: Math.min(entryPopover.y, window.innerHeight - 160),
+              left: Math.min(entryPopover.x, window.innerWidth - 200),
               background: 'var(--surface)',
               boxShadow: 'var(--shadow-elevated)',
               border: '1px solid var(--zu-border)',
             }}
           >
             <button
-              className="w-full text-left px-4 py-2.5 text-sm text-text-2 hover:bg-surface-2 rounded-lg"
+              className="w-full text-left px-4 py-2.5 text-sm text-text-2 hover:bg-surface-2 rounded-lg flex items-center gap-2.5"
               onClick={() => {
-                const entry = mealByDate.get(dayPopover.date);
-                if (entry?.recipe_id) {
-                  setDayPopover(null);
-                  setMealPickerDate(dayPopover.date);
-                  setShowMealPicker(true);
-                }
+                setEditEntryDate(entryPopover.entry.date);
+                setEditEntryMealType(entryPopover.entry.meal_type || "mittag");
+                setEditUserIds(entryPopover.entry.assigned_to || householdMembers.map((m) => m.id));
+                setShowEditEntrySheet(true);
               }}
             >
-              Rezept ändern
+              <Pencil className="w-4 h-4 text-text-3" />
+              Bearbeiten
             </button>
             <button
-              className="w-full text-left px-4 py-2.5 text-sm text-text-2 hover:bg-surface-2 rounded-lg"
-              onClick={() => {
-                setMoveSourceDate(dayPopover.date);
-                setShowMoveSheet(true);
-              }}
+              className="w-full text-left px-4 py-2.5 text-sm text-danger hover:bg-danger-light rounded-lg flex items-center gap-2.5"
+              onClick={() => { setDeleteConfirm(entryPopover.entry.id); setEntryPopover(null); }}
             >
-              Verschieben
-            </button>
-            <button
-              className="w-full text-left px-4 py-2.5 text-sm text-danger hover:bg-danger-light rounded-lg"
-              onClick={() => setDeleteConfirm(dayPopover.date)}
-            >
+              <Trash2 className="w-4 h-4" />
               Löschen
             </button>
           </div>
@@ -948,13 +1148,13 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
               <div className="flex gap-3">
                 <button
                   className="flex-1 py-2.5 rounded-full text-sm font-semibold bg-surface-2 text-text-2"
-                  onClick={() => setDeleteConfirm(null)}
+                  onClick={() => { setDeleteConfirm(null); setEntryPopover(null); }}
                 >
                   Abbrechen
                 </button>
                 <button
                   className="flex-1 py-2.5 rounded-full text-sm font-semibold bg-danger text-white"
-                  onClick={() => deleteMealEntry(deleteConfirm)}
+                  onClick={() => deleteMealEntry(deleteConfirm!)}
                 >
                   Löschen
                 </button>
@@ -964,17 +1164,17 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
         )}
       </AnimatePresence>
 
-      {/* Move Sheet */}
+      {/* Bearbeiten Sheet (Tag + Mahlzeit + Personen) */}
       <AnimatePresence>
-        {showMoveSheet && moveSourceDate && (
+        {showEditEntrySheet && entryPopover && (
           <motion.div
-            className="fixed inset-0 z-[999]"
+            className="fixed inset-0 z-[1001]"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             transition={DRAWER_SPRING}
           >
-            <div className="absolute inset-0 bg-black/40" onClick={() => { setShowMoveSheet(false); setMoveSourceDate(null); }} />
+            <div className="absolute inset-0 bg-black/40" onClick={() => setShowEditEntrySheet(false)} />
             <motion.div
-              className="absolute left-0 right-0 rounded-t-[20px] pb-[env(safe-area-inset-bottom)]"
+              className="absolute left-0 right-0 rounded-t-[20px] pb-[calc(1rem+env(safe-area-inset-bottom))]"
               style={{ background: 'var(--surface)', boxShadow: 'var(--shadow-elevated)', bottom: bottomOffset, maxHeight: vpHeight - 72 }}
               initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
               transition={DRAWER_SPRING}
@@ -983,42 +1183,112 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
               <div className="flex justify-center pt-3 pb-1">
                 <div className="w-9 h-1 rounded-full" style={{ background: "var(--zu-border)" }} />
               </div>
-              <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-                <h3 className="text-base font-semibold">Verschieben nach</h3>
-                <button onClick={() => { setShowMoveSheet(false); setMoveSourceDate(null); }}>
+              <div className="flex items-center justify-between px-5 py-3">
+                <h3 className="text-base font-semibold text-text-1">Eintrag bearbeiten</h3>
+                <button onClick={() => setShowEditEntrySheet(false)}>
                   <X className="w-5 h-5 text-text-3" />
                 </button>
               </div>
-              <div className="flex gap-3 overflow-x-auto px-4 py-4">
-                {days.map((d) => {
-                  const dateStr = fmtDate(d);
-                  const occupied = mealByDate.has(dateStr);
-                  const isSrc = dateStr === moveSourceDate;
-                  return (
-                    <button
-                      key={dateStr}
-                      disabled={occupied || isSrc}
-                      onClick={() => moveMealEntry(moveSourceDate, dateStr)}
-                      className={`flex-shrink-0 w-16 h-16 rounded-xl flex flex-col items-center justify-center text-xs font-medium transition ${
-                        isSrc
-                          ? "bg-accent-light text-accent border-2 border-accent-mid"
-                          : occupied
-                            ? "bg-surface-2 text-text-3"
-                            : "bg-surface-2 text-text-2 hover:bg-accent-light hover:text-accent"
-                      }`}
-                    >
-                      <span className="font-bold">{dayLabel(d)}</span>
-                      <span>{dateNum(d)}</span>
-                    </button>
-                  );
-                })}
+
+              {/* Tag */}
+              <div className="px-5 pb-3">
+                <p className="text-xs font-semibold text-text-3 mb-2">Tag</p>
+                <div className="flex gap-2 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+                  {generateFutureDays().map((d) => {
+                    const dateStr = fmtDate(d);
+                    const isSelected = dateStr === editEntryDate;
+                    const todayDay = isToday(d);
+                    return (
+                      <button
+                        key={dateStr}
+                        onClick={() => setEditEntryDate(dateStr)}
+                        className="flex-shrink-0 flex flex-col items-center gap-0.5 py-2 rounded-xl transition-all"
+                        style={{
+                          minWidth: 52,
+                          background: isSelected ? "var(--color-accent)" : "var(--color-surface-2)",
+                        }}
+                      >
+                        <span
+                          className="text-[10px] font-medium"
+                          style={{ color: isSelected ? "rgba(255,255,255,0.8)" : todayDay ? "var(--color-accent)" : "var(--color-text-3)" }}
+                        >
+                          {dayLabel(d)}
+                        </span>
+                        <span
+                          className="text-sm font-bold"
+                          style={{ color: isSelected ? "#fff" : "var(--color-text-1)" }}
+                        >
+                          {d.getDate()}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Mahlzeit */}
+              <div className="px-5 pb-3">
+                <p className="text-xs font-semibold text-text-3 mb-2">Mahlzeit</p>
+                <div className="flex gap-2">
+                  {MEAL_TYPES.map((mt) => {
+                    const isActive = editEntryMealType === mt.id;
+                    return (
+                      <button
+                        key={mt.id}
+                        onClick={() => setEditEntryMealType(mt.id)}
+                        className="flex-1 flex flex-col items-center gap-1 py-3 rounded-xl text-sm font-medium transition-all"
+                        style={{
+                          background: isActive ? "var(--color-accent)" : "var(--color-surface-2)",
+                          color: isActive ? "#fff" : "var(--color-text-2)",
+                        }}
+                      >
+                        <span className="text-lg">{mt.emoji}</span>
+                        <span className="text-xs font-semibold">{mt.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Wer isst? */}
+              <div className="px-5 pb-4">
+                <p className="text-xs font-semibold text-text-3 mb-2">Wer isst?</p>
+                <div className="flex gap-4 flex-wrap">
+                  {householdMembers.map((member) => (
+                    <MemberChip
+                      key={member.id}
+                      member={member}
+                      selected={editUserIds.includes(member.id)}
+                      onToggle={() => {
+                        setEditUserIds((prev) => {
+                          if (prev.includes(member.id)) {
+                            if (prev.length === 1) return prev;
+                            return prev.filter((uid) => uid !== member.id);
+                          }
+                          return [...prev, member.id];
+                        });
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Speichern */}
+              <div className="px-5 pb-4">
+                <button
+                  onClick={saveEntryEdits}
+                  className="w-full py-3 rounded-full text-sm font-semibold text-white"
+                  style={{ background: "var(--color-accent)" }}
+                >
+                  Speichern
+                </button>
               </div>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Meal Picker (Rezept auswählen) */}
+      {/* Meal Picker (unified sheet with Rezept/Freitext tabs) */}
       <AnimatePresence>
         {showMealPicker && mealPickerDate && (
           <motion.div
@@ -1026,7 +1296,7 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             transition={DRAWER_SPRING}
           >
-            <div className="absolute inset-0 bg-black/40" onClick={() => { setShowMealPicker(false); setMealPickerDate(null); setMealPickerSearch(""); }} />
+            <div className="absolute inset-0 bg-black/40" onClick={() => { setShowMealPicker(false); setMealPickerDate(null); }} />
             <motion.div
               className="absolute left-0 right-0 rounded-t-[20px] pb-[env(safe-area-inset-bottom)] flex flex-col"
               style={{ background: 'var(--surface)', boxShadow: 'var(--shadow-elevated)', bottom: bottomOffset, maxHeight: vpHeight - 72 }}
@@ -1034,127 +1304,224 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
               transition={DRAWER_SPRING}
               onClick={(e) => e.stopPropagation()}
             >
+              {/* Handle */}
               <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
                 <div className="w-9 h-1 rounded-full" style={{ background: "var(--zu-border)" }} />
               </div>
-              <div className="flex items-center justify-between px-4 py-2 border-b border-border flex-shrink-0">
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 py-2 flex-shrink-0">
                 <h3 className="text-base font-semibold">Was gibt's zu essen?</h3>
-                <button onClick={() => { setShowMealPicker(false); setMealPickerDate(null); setMealPickerSearch(""); }}>
+                <button onClick={() => { setShowMealPicker(false); setMealPickerDate(null); }}>
                   <X className="w-5 h-5 text-text-3" />
                 </button>
               </div>
-            {/* Options */}
-            <div className="flex gap-2 px-4 py-3">
-              <button
-                className="flex-1 py-3 rounded-xl bg-surface-2 text-sm font-medium text-text-2 flex flex-col items-center gap-1"
-                onClick={() => {
-                  // Switch to freetext
-                  setShowMealPicker(false);
-                  setShowFreetextInput(true);
-                }}
-              >
-                <FileText className="w-5 h-5 text-text-3" />
-                Freitext
-              </button>
-            </div>
-            {/* Search */}
-            <div className="px-4 pb-2">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-3" />
-                <input
-                  type="search"
-                  name="meal-picker-search"
-                  inputMode="text"
-                  autoComplete="off"
-                  autoCapitalize="sentences"
-                  data-lpignore="true"
-                  data-1p-ignore="true"
-                  data-form-type="other"
-                  placeholder="Rezept suchen..."
-                  value={mealPickerSearch}
-                  onChange={(e) => setMealPickerSearch(e.target.value)}
-                  className="w-full pl-9 pr-4 py-2 bg-surface-2 rounded-[var(--radius-input)] text-sm border-0 outline-none"
-                />
-              </div>
-            </div>
-            {/* Recipe list */}
-            <div className="flex-1 overflow-y-auto px-4 pb-4" style={{ scrollBehavior: "smooth" }}>
-              {recipes
-                .filter((r) =>
-                  !mealPickerSearch.trim() || r.title.toLowerCase().includes(mealPickerSearch.toLowerCase())
-                )
-                .map((recipe) => (
-                  <button
-                    key={recipe.id}
-                    className="w-full flex items-center gap-3 py-2.5 border-b border-border text-left"
-                    onClick={() => assignRecipeToDate(recipe.id, mealPickerDate)}
-                  >
-                    <div className="w-10 h-10 rounded-lg bg-surface-2 flex-shrink-0 overflow-hidden">
-                      {recipe.image_url ? (
-                        <ImageWithFallback src={recipe.image_url} alt="" className="w-full h-full object-cover" />
-                      ) : (
-                        <span className="w-full h-full flex items-center justify-center text-lg">🍽️</span>
-                      )}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-text-1 truncate">{recipe.title}</p>
-                      {totalTime(recipe) && (
-                        <p className="text-xs text-text-3">{totalTime(recipe)}</p>
-                      )}
-                    </div>
-                  </button>
-                ))}
-              {recipes.length === 0 && (
-                <p className="text-center text-text-3 text-sm py-8">Noch keine Rezepte im Kochbuch</p>
-              )}
-            </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
-      {/* Freetext Input */}
-      <AnimatePresence>
-        {showFreetextInput && mealPickerDate && (
-          <motion.div
-            className="fixed inset-0 z-[999]"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            transition={DRAWER_SPRING}
-          >
-            <div className="absolute inset-0 bg-black/40" onClick={() => { setShowFreetextInput(false); setFreetextValue(""); setMealPickerDate(null); }} />
-            <motion.div
-              className="absolute left-0 right-0 rounded-t-[20px] pb-[env(safe-area-inset-bottom)] p-5"
-              style={{ background: 'var(--surface)', boxShadow: 'var(--shadow-elevated)', bottom: bottomOffset, maxHeight: vpHeight - 72 }}
-              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
-              transition={DRAWER_SPRING}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex justify-center mb-4">
-                <div className="w-9 h-1 rounded-full" style={{ background: "var(--zu-border)" }} />
+              {/* Mahlzeit */}
+              <div className="px-4 pb-2 flex-shrink-0">
+                <p className="text-xs font-semibold text-text-3 mb-2">Mahlzeit</p>
+                <div className="flex gap-2">
+                  {MEAL_TYPES.map((mt) => {
+                    const isActive = mealPickerMealType === mt.id;
+                    return (
+                      <button
+                        key={mt.id}
+                        onPointerDown={(e) => e.preventDefault()}
+                        onClick={() => setMealPickerMealType(mt.id)}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition-all"
+                        style={{
+                          background: isActive ? "var(--color-accent)" : "var(--color-surface-2)",
+                          color: isActive ? "#fff" : "var(--color-text-2)",
+                        }}
+                      >
+                        <span>{mt.emoji}</span>
+                        <span>{mt.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-              <h3 className="text-base font-semibold mb-3">Freitext-Eintrag</h3>
-            <input
-              type="search"
-              name="freetext-entry"
-              inputMode="text"
-              autoComplete="off"
-              autoCapitalize="sentences"
-              data-lpignore="true"
-              data-1p-ignore="true"
-              data-form-type="other"
-              placeholder='z.B. "Restaurant", "Reste"...'
-              value={freetextValue}
-              onChange={(e) => setFreetextValue(e.target.value)}
-              className="w-full px-4 py-2.5 bg-surface-2 rounded-xl text-sm border-0 outline-none mb-3"
-              autoFocus
-            />
-            <button
-              disabled={!freetextValue.trim()}
-              onClick={() => assignFreetextToDate(freetextValue.trim(), mealPickerDate)}
-              className="w-full py-2.5 rounded-xl bg-accent text-white text-sm font-medium disabled:opacity-40"
-            >
-              Speichern
-            </button>
+
+              {/* Wer isst? */}
+              {householdMembers.length > 0 && (
+                <div className="px-4 pb-3 flex-shrink-0">
+                  <p className="text-xs font-semibold text-text-3 mb-2">Wer isst?</p>
+                  <div className="flex gap-3 flex-wrap">
+                    {householdMembers.map((member) => (
+                      <MemberChip
+                        key={member.id}
+                        member={member}
+                        selected={mealPickerUserIds.includes(member.id)}
+                        onToggle={() => {
+                          setMealPickerUserIds((prev) => {
+                            if (prev.includes(member.id)) {
+                              if (prev.length === 1) return prev;
+                              return prev.filter((uid) => uid !== member.id);
+                            }
+                            return [...prev, member.id];
+                          });
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Segmented Control: Rezept / Freitext */}
+              <div className="px-4 pb-3 flex-shrink-0">
+                <div
+                  className="flex items-center"
+                  style={{
+                    padding: 3,
+                    borderRadius: 999,
+                    background: "var(--color-surface-2)",
+                  }}
+                >
+                  {(["rezept", "freitext"] as const).map((tab) => (
+                    <button
+                      key={tab}
+                      onPointerDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setMealPickerTab(tab);
+                        setMealPickerSelectedRecipeId(null);
+                      }}
+                      className="flex-1 text-center text-xs py-1.5 transition-all"
+                      style={{
+                        borderRadius: 999,
+                        fontWeight: mealPickerTab === tab ? 600 : 400,
+                        color: mealPickerTab === tab ? "var(--color-text-1)" : "var(--color-text-3)",
+                        background: mealPickerTab === tab ? "var(--color-surface)" : "transparent",
+                        boxShadow: mealPickerTab === tab ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                      }}
+                    >
+                      {tab === "rezept" ? "Rezept" : "Freitext"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Tab content */}
+              {mealPickerTab === "rezept" ? (
+                <div className="flex flex-col flex-1 min-h-0">
+                  {/* Search */}
+                  <div className="px-4 pb-2 flex-shrink-0">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-3" />
+                      <input
+                        type="search"
+                        name="meal-picker-search"
+                        inputMode="text"
+                        autoComplete="off"
+                        autoCorrect="off"
+                        autoCapitalize="off"
+                        spellCheck={false}
+                        data-lpignore="true"
+                        data-1p-ignore="true"
+                        data-form-type="other"
+                        placeholder="Rezept suchen..."
+                        value={mealPickerSearch}
+                        onChange={(e) => setMealPickerSearch(e.target.value)}
+                        className="w-full pl-9 pr-4 py-2 bg-surface-2 rounded-[var(--radius-input)] text-sm border-0 outline-none"
+                        style={{ caretColor: "var(--color-accent)" }}
+                      />
+                    </div>
+                  </div>
+                  {/* Recipe list */}
+                  <div className="flex-1 overflow-y-auto px-4">
+                    {recipes
+                      .filter((r) =>
+                        !mealPickerSearch.trim() || r.title.toLowerCase().includes(mealPickerSearch.toLowerCase())
+                      )
+                      .map((recipe) => {
+                        const isSelected = mealPickerSelectedRecipeId === recipe.id;
+                        return (
+                          <button
+                            key={recipe.id}
+                            className="w-full flex items-center gap-3 py-2.5 border-b border-border text-left transition-all"
+                            style={{
+                              background: isSelected ? "var(--accent-light)" : "transparent",
+                              borderRadius: isSelected ? 12 : 0,
+                              borderBottom: isSelected ? "none" : undefined,
+                              marginBottom: isSelected ? 2 : 0,
+                              paddingLeft: isSelected ? 8 : 0,
+                              paddingRight: isSelected ? 8 : 0,
+                            }}
+                            onClick={() => setMealPickerSelectedRecipeId(isSelected ? null : recipe.id)}
+                          >
+                            <div className="w-10 h-10 rounded-lg bg-surface-2 flex-shrink-0 overflow-hidden">
+                              {recipe.image_url ? (
+                                <ImageWithFallback src={recipe.image_url} alt="" className="w-full h-full object-cover" />
+                              ) : (
+                                <span className="w-full h-full flex items-center justify-center text-lg">🍽️</span>
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-text-1 truncate">{recipe.title}</p>
+                              {totalTime(recipe) && (
+                                <p className="text-xs text-text-3">{totalTime(recipe)}</p>
+                              )}
+                            </div>
+                            {isSelected && (
+                              <div
+                                className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
+                                style={{ background: "var(--color-accent)" }}
+                              >
+                                <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+                                  <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                              </div>
+                            )}
+                          </button>
+                        );
+                      })}
+                    {recipes.length === 0 && (
+                      <p className="text-center text-text-3 text-sm py-8">Noch keine Rezepte im Kochbuch</p>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="px-4 flex-1 min-h-0">
+                  <input
+                    type="search"
+                    name="freetext-entry"
+                    inputMode="text"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
+                    placeholder='z.B. "Restaurant", "Reste"...'
+                    value={freetextValue}
+                    onChange={(e) => setFreetextValue(e.target.value)}
+                    className="w-full px-4 py-3 bg-surface-2 rounded-xl text-sm border-0 outline-none"
+                    style={{ caretColor: "var(--color-accent)" }}
+                    autoFocus
+                  />
+                </div>
+              )}
+
+              {/* Hinzufügen button — always visible at bottom */}
+              <div className="px-4 pt-3 pb-2 flex-shrink-0">
+                <button
+                  disabled={
+                    mealPickerTab === "rezept"
+                      ? !mealPickerSelectedRecipeId
+                      : !freetextValue.trim()
+                  }
+                  onClick={() => {
+                    if (mealPickerTab === "rezept" && mealPickerSelectedRecipeId) {
+                      assignRecipeToDate(mealPickerSelectedRecipeId, mealPickerDate!);
+                    } else if (mealPickerTab === "freitext" && freetextValue.trim()) {
+                      assignFreetextToDate(freetextValue.trim(), mealPickerDate!);
+                    }
+                  }}
+                  className="w-full py-3 rounded-full text-sm font-semibold text-white transition-all disabled:opacity-40"
+                  style={{ background: "var(--color-accent)" }}
+                >
+                  Hinzufügen
+                </button>
+              </div>
             </motion.div>
           </motion.div>
         )}
@@ -1323,6 +1690,57 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
   );
 }
 
+// ── Member avatar chip for Wochenplaner Drawer ─────────────────────
+function MemberChip({
+  member,
+  selected,
+  onToggle,
+}: {
+  member: HouseholdMember;
+  selected: boolean;
+  onToggle: () => void;
+}) {
+  const initials = member.display_name
+    .split(" ")
+    .map((n) => n[0] || "")
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
+  return (
+    <button
+      onClick={onToggle}
+      className="flex flex-col items-center gap-1"
+      style={{ minWidth: 56 }}
+    >
+      <div className="relative" style={{ width: 48, height: 48 }}>
+        <div
+          className="w-full h-full rounded-full flex items-center justify-center text-white font-semibold text-sm overflow-hidden"
+          style={{ background: member.avatar_url ? undefined : member.initials_color }}
+        >
+          {member.avatar_url ? (
+            <img src={member.avatar_url} alt={member.display_name} className="w-full h-full object-cover" />
+          ) : (
+            <span>{initials}</span>
+          )}
+        </div>
+        {selected && (
+          <div
+            className="absolute bottom-0 right-0 w-4 h-4 rounded-full flex items-center justify-center"
+            style={{ background: "var(--color-accent)", border: "2px solid var(--color-surface)" }}
+          >
+            <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+              <path d="M1.5 4l2 2 3-3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+        )}
+      </div>
+      <span className="text-xs text-center leading-tight" style={{ color: "var(--color-text-2)" }}>
+        {member.display_name.split(" ")[0]}
+      </span>
+    </button>
+  );
+}
+
 // ══════════════════════════════════════════════════════════════════════
 // RECIPE DETAIL VIEW
 // ══════════════════════════════════════════════════════════════════════
@@ -1334,9 +1752,9 @@ function RecipeDetailView({
   onToggleFavorite,
   onSetRating,
   onDelete,
-  onAddToShopping,
   onSaveComment,
   stores,
+  mealPlan,
 }: {
   recipe: Recipe;
   onBack: () => void;
@@ -1344,22 +1762,202 @@ function RecipeDetailView({
   onToggleFavorite: () => void;
   onSetRating: (r: number) => void;
   onDelete: () => void;
-  onAddToShopping: () => void;
   onSaveComment: (c: string) => void;
   stores: any[];
+  mealPlan: MealPlanEntry[];
 }) {
+  const { householdId, householdMembers } = useAuth();
   const [servings, setServings] = useState(recipe.servings || 4);
   const [comment, setComment] = useState(recipe.comment || "");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showShoppingDrawer, setShowShoppingDrawer] = useState(false);
+  const [checkedIngredients, setCheckedIngredients] = useState<boolean[]>([]);
+  const [selectedStore, setSelectedStore] = useState<string>(
+    () => stores[0]?.id || "aldi"
+  );
+  const [addingToShopping, setAddingToShopping] = useState(false);
+
+  // ── Wochenplaner Drawer ────────────────────────────────────────────
+  const [showMealPlanDrawer, setShowMealPlanDrawer] = useState(false);
+  const [selectedMealDate, setSelectedMealDate] = useState<string | null>(null);
+  const [selectedMealType, setSelectedMealType] = useState<"fruehstueck" | "mittag" | "abend">("mittag");
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+  const [addingToMealPlan, setAddingToMealPlan] = useState(false);
+
+  const futureDays = useMemo(() => generateFutureDays(), []);
+  const occupiedDates = useMemo(() => {
+    const s = new Set<string>();
+    mealPlan.forEach((e) => s.add(e.date));
+    return s;
+  }, [mealPlan]);
+
   useBackHandler(showDeleteConfirm, () => setShowDeleteConfirm(false));
+  useBackHandler(showShoppingDrawer, () => setShowShoppingDrawer(false));
+  useBackHandler(showMealPlanDrawer, () => setShowMealPlanDrawer(false));
   const { bottomOffset: detailBottomOffset, vpHeight: detailVpHeight } = useKeyboardOffset();
   const scale = recipe.servings ? servings / recipe.servings : 1;
   const commentTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const openShoppingDrawer = () => {
+    setCheckedIngredients(recipe.ingredients.map(() => true));
+    setSelectedStore(stores[0]?.id || "aldi");
+    setShowShoppingDrawer(true);
+  };
+
+  const openMealPlanDrawer = () => {
+    setSelectedMealDate(null);
+    setSelectedMealType("mittag");
+    setSelectedUserIds(householdMembers.map((m) => m.id));
+    setShowMealPlanDrawer(true);
+  };
+
+  const toggleMealPlanUser = (id: string) => {
+    setSelectedUserIds((prev) => {
+      if (prev.includes(id)) {
+        if (prev.length === 1) return prev; // keep at least one
+        return prev.filter((uid) => uid !== id);
+      }
+      return [...prev, id];
+    });
+  };
+
+  const handleAddToMealPlan = async () => {
+    if (!selectedMealDate || selectedUserIds.length === 0) return;
+    setAddingToMealPlan(true);
+    try {
+      const mealPlanRes = await apiFetch(`/meal-plan?household_id=${householdId}`);
+      const currentEntries: MealPlanEntry[] = mealPlanRes.entries || [];
+
+      const newEntry: MealPlanEntry = {
+        id: genId(),
+        date: selectedMealDate,
+        meal_type: selectedMealType,
+        recipe_id: recipe.id,
+        free_text: null,
+        assigned_to: selectedUserIds,
+        household_id: householdId || "",
+      };
+
+      broadcastChange([`meal_plan:${householdId}`]);
+      await apiFetch("/meal-plan", {
+        method: "PUT",
+        body: JSON.stringify({
+          household_id: householdId,
+          entries: [...currentEntries, newEntry],
+        }),
+      });
+
+      setShowMealPlanDrawer(false);
+      const d = new Date(selectedMealDate + "T12:00:00");
+      toast.success(`Zu ${dayLabel(d)} ${dateNum(d)} hinzugefügt ✅`);
+    } catch (err: any) {
+      console.error("[RecipeDetail] addToMealPlan error:", err);
+      toast.error(err?.message || "Fehler beim Hinzufügen zum Wochenplaner");
+    } finally {
+      setAddingToMealPlan(false);
+    }
+  };
 
   const handleCommentChange = (val: string) => {
     setComment(val);
     if (commentTimer.current) clearTimeout(commentTimer.current);
     commentTimer.current = setTimeout(() => onSaveComment(val), 500);
+  };
+
+  const handleAddToShopping = async () => {
+    const chosen = recipe.ingredients.filter((_, i) => checkedIngredients[i]);
+    if (chosen.length === 0) return;
+    setAddingToShopping(true);
+    try {
+      const shoppingRes = await apiFetch(`/shopping?household_id=${householdId}`);
+      const existingItems: any[] = shoppingRes.items || [];
+
+      // Build a lookup map for existing items (by lowercased name)
+      const existingMap = new Map<string, any>();
+      existingItems.forEach((item) => {
+        existingMap.set(item.name.toLowerCase(), item);
+      });
+
+      // Units where qty/unit have no meaning on a shopping list — only the name matters
+      const UNITS_NAME_ONLY = ["tl", "el", "päckchen", "pck", "pk"];
+
+      const scaledChosen = chosen.map((ing) => {
+        const qty = ing.quantity ? parseFloat(ing.quantity) : NaN;
+        const scaledQty = !isNaN(qty) ? (qty * scale) : null;
+        return { ...ing, scaledQty };
+      });
+
+      let addedCount = 0;
+      const updatedItems = [...existingItems];
+
+      for (const ing of scaledChosen) {
+        // Category lookup: GROCERY_DATABASE first, fallback "Sonstiges"
+        const dbMatch = GROCERY_DATABASE.find(
+          (g) => g.name.toLowerCase() === ing.name.toLowerCase()
+        );
+        const category = dbMatch?.category || "Sonstiges";
+
+        const unitNorm = (ing.unit || "").trim().toLowerCase();
+        const skipQtyUnit = UNITS_NAME_ONLY.includes(unitNorm);
+
+        // Name: always ONLY the ingredient name — never concat qty/unit
+        const itemName = ing.name.trim();
+
+        // Quantity: use the scaled/original qty; set to 1 for TL/EL/Päckchen
+        const rawQty = ing.scaledQty !== null
+          ? parseFloat(
+              Number.isInteger(ing.scaledQty)
+                ? String(ing.scaledQty)
+                : ing.scaledQty.toFixed(2)
+            )
+          : (ing.quantity ? parseFloat(ing.quantity) || 1 : 1);
+        const itemQty = skipQtyUnit ? 1 : rawQty;
+
+        // Unit: pass through the ingredient unit; null for TL/EL/Päckchen
+        const itemUnit = skipQtyUnit ? null : (ing.unit || null);
+
+        // Check if an item with the same name already exists (case-insensitive)
+        const existingKey = itemName.toLowerCase();
+        const existingEntry = existingMap.get(existingKey);
+
+        if (existingEntry) {
+          // Merge: add the actual ingredient quantity instead of a flat +1
+          existingEntry.quantity = (existingEntry.quantity || 1) + itemQty;
+        } else {
+          const storeVal = selectedStore === "alle" ? null : selectedStore;
+          const newItem = {
+            id: genId(),
+            name: itemName,
+            store: storeVal,
+            category,
+            is_checked: false,
+            position: updatedItems.length,
+            quantity: itemQty,
+            unit: itemUnit,
+            household_id: householdId || "",
+          };
+          updatedItems.push(newItem);
+          existingMap.set(existingKey, newItem);
+          addedCount++;
+        }
+      }
+
+      await apiFetch("/shopping", {
+        method: "PUT",
+        body: JSON.stringify({
+          household_id: householdId,
+          items: updatedItems,
+        }),
+      });
+
+      setShowShoppingDrawer(false);
+      toast.success(`${addedCount} Zutaten hinzugefügt ✅`);
+    } catch (err: any) {
+      console.error("[RecipeDetail] addToShopping error:", err);
+      toast.error(err?.message || "Fehler beim Hinzufügen");
+    } finally {
+      setAddingToShopping(false);
+    }
   };
 
   return (
@@ -1452,12 +2050,6 @@ function RecipeDetailView({
           <div className="mt-5">
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-base font-semibold text-text-1">Zutaten</h3>
-              <button
-                onClick={onAddToShopping}
-                className="text-xs text-accent font-medium flex items-center gap-1"
-              >
-                <Plus className="w-3 h-3" /> Zur Einkaufsliste
-              </button>
             </div>
             <div className="space-y-1.5">
               {recipe.ingredients.map((ing, i) => {
@@ -1523,6 +2115,343 @@ function RecipeDetailView({
           <Trash2 className="w-4 h-4" /> Rezept löschen
         </button>
       </div>
+
+      {/* Calendar FAB — add to Wochenplaner */}
+      <button
+        onClick={openMealPlanDrawer}
+        style={{
+          position: "fixed",
+          bottom: recipe.ingredients.length > 0
+            ? "calc(72px + env(safe-area-inset-bottom) + 16px + 52px + 12px)"
+            : "calc(72px + env(safe-area-inset-bottom) + 16px)",
+          right: 16,
+          zIndex: 40,
+          width: 52,
+          height: 52,
+          borderRadius: "50%",
+          background: "var(--color-accent)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          boxShadow: "0 4px 16px rgba(0,0,0,0.18)",
+        }}
+      >
+        <CalendarPlus className="w-5 h-5 text-white" />
+      </button>
+
+      {/* Shopping FAB */}
+      {recipe.ingredients.length > 0 && (
+        <button
+          onClick={openShoppingDrawer}
+          style={{
+            position: "fixed",
+            bottom: "calc(72px + env(safe-area-inset-bottom) + 16px)",
+            right: 16,
+            zIndex: 40,
+            width: 52,
+            height: 52,
+            borderRadius: "50%",
+            background: "var(--color-accent)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            boxShadow: "0 4px 16px rgba(0,0,0,0.18)",
+          }}
+        >
+          <ShoppingCart className="w-5 h-5 text-white" />
+        </button>
+      )}
+
+      {/* Shopping Drawer */}
+      <AnimatePresence>
+        {showShoppingDrawer && (
+          <motion.div
+            className="fixed inset-0 z-[1000]"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            transition={DRAWER_SPRING}
+          >
+            <div
+              className="absolute inset-0 bg-black/40"
+              onClick={() => setShowShoppingDrawer(false)}
+            />
+            <motion.div
+              className="absolute left-0 right-0 bg-surface rounded-t-[20px] flex flex-col"
+              style={{
+                boxShadow: "var(--shadow-elevated)",
+                bottom: detailBottomOffset,
+                maxHeight: detailVpHeight - 72,
+              }}
+              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+              transition={DRAWER_SPRING}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Handle */}
+              <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
+                <div className="w-9 h-1 rounded-full" style={{ background: "var(--zu-border)" }} />
+              </div>
+
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 py-3 flex-shrink-0" style={{ borderBottom: "1px solid var(--zu-border)" }}>
+                <h3 className="text-base font-semibold text-text-1">Zutaten einkaufen</h3>
+                <button
+                  onClick={() => setShowShoppingDrawer(false)}
+                  className="w-8 h-8 flex items-center justify-center rounded-full"
+                  style={{ background: "var(--color-surface-2)" }}
+                >
+                  <X className="w-4 h-4 text-text-2" />
+                </button>
+              </div>
+
+              {/* Ingredient list */}
+              <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+                {recipe.ingredients.map((ing, i) => {
+                  const qty = ing.quantity ? parseFloat(ing.quantity) : NaN;
+                  const scaledQty = !isNaN(qty)
+                    ? (qty * scale % 1 === 0 ? (qty * scale).toString() : (qty * scale).toFixed(1))
+                    : ing.quantity;
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => setCheckedIngredients((prev) => {
+                        const next = [...prev];
+                        next[i] = !next[i];
+                        return next;
+                      })}
+                      className="w-full flex items-center gap-3 py-2 text-left"
+                    >
+                      <div
+                        className="flex-shrink-0 w-5 h-5 rounded flex items-center justify-center"
+                        style={{
+                          background: checkedIngredients[i] ? "var(--color-accent)" : "transparent",
+                          border: checkedIngredients[i] ? "none" : "1.5px solid var(--zu-border)",
+                        }}
+                      >
+                        {checkedIngredients[i] && (
+                          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                            <path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        )}
+                      </div>
+                      <span className="text-sm text-text-2">
+                        {scaledQty && <span className="font-medium">{scaledQty} </span>}
+                        {ing.unit && <span>{ing.unit} </span>}
+                        {ing.name}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Store picker */}
+              <div className="px-4 pt-2 pb-3 flex-shrink-0" style={{ borderTop: "1px solid var(--zu-border)" }}>
+                <p className="text-xs text-text-3 mb-2 font-medium">Zu welchem Laden?</p>
+                <div className="flex gap-3 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+                  {stores
+                    .map((s: any) => {
+                      const isSelected = selectedStore === s.id;
+                      return (
+                        <button
+                          key={s.id}
+                          onPointerDown={(e) => e.preventDefault()}
+                          onClick={() => setSelectedStore(s.id)}
+                          className="flex-shrink-0 flex flex-col items-center gap-1"
+                        >
+                          <StoreLogoKochen store={s} size={48} isSelected={isSelected} />
+                          <span
+                            className="text-[10px] font-medium"
+                            style={{ color: isSelected ? "var(--color-accent)" : "var(--color-text-3)" }}
+                          >
+                            {s.name}
+                          </span>
+                        </button>
+                      );
+                    })}
+                </div>
+              </div>
+
+              {/* Add button */}
+              <div className="px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] flex-shrink-0">
+                <button
+                  onClick={handleAddToShopping}
+                  disabled={addingToShopping || checkedIngredients.every((c) => !c)}
+                  className="w-full py-3 rounded-full text-sm font-semibold text-white flex items-center justify-center gap-2"
+                  style={{
+                    background: "var(--color-accent)",
+                    opacity: (addingToShopping || checkedIngredients.every((c) => !c)) ? 0.5 : 1,
+                  }}
+                >
+                  {addingToShopping ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <ShoppingCart className="w-4 h-4" />
+                  )}
+                  Hinzufügen
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Wochenplaner Drawer */}
+      <AnimatePresence>
+        {showMealPlanDrawer && (
+          <motion.div
+            className="fixed inset-0 z-[1000]"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            transition={DRAWER_SPRING}
+          >
+            <div
+              className="absolute inset-0 bg-black/40"
+              onClick={() => setShowMealPlanDrawer(false)}
+            />
+            <motion.div
+              className="absolute left-0 right-0 bg-surface rounded-t-[20px] flex flex-col"
+              style={{
+                boxShadow: "var(--shadow-elevated)",
+                bottom: detailBottomOffset,
+                maxHeight: detailVpHeight - 72,
+              }}
+              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+              transition={DRAWER_SPRING}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Handle */}
+              <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
+                <div className="w-9 h-1 rounded-full" style={{ background: "var(--zu-border)" }} />
+              </div>
+
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 py-3 flex-shrink-0" style={{ borderBottom: "1px solid var(--zu-border)" }}>
+                <h3 className="text-base font-semibold text-text-1">Zum Wochenplaner</h3>
+                <button
+                  onClick={() => setShowMealPlanDrawer(false)}
+                  className="w-8 h-8 flex items-center justify-center rounded-full"
+                  style={{ background: "var(--color-surface-2)" }}
+                >
+                  <X className="w-4 h-4 text-text-2" />
+                </button>
+              </div>
+
+              {/* Scrollable content */}
+              <div className="flex-1 overflow-y-auto">
+                {/* Tag wählen */}
+                <div className="px-4 pt-4 pb-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--color-text-3)" }}>Tag</p>
+                    {selectedMealDate === null && (
+                      <p className="text-xs" style={{ color: "var(--color-text-3)" }}>Bitte Tag auswählen</p>
+                    )}
+                  </div>
+                  <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
+                    {futureDays.map((d) => {
+                      const dateStr = fmtLocalDate(d);
+                      const isSelected = selectedMealDate === dateStr;
+                      const todayDay = isToday(d);
+                      const occupied = occupiedDates.has(dateStr);
+                      return (
+                        <button
+                          key={dateStr}
+                          onClick={() => setSelectedMealDate(dateStr)}
+                          className="flex-shrink-0 flex flex-col items-center gap-0.5 py-2 rounded-xl transition-all"
+                          style={{
+                            minWidth: 52,
+                            background: isSelected ? "var(--color-accent)" : "var(--color-surface-2)",
+                          }}
+                        >
+                          <span
+                            className="text-[10px] font-medium"
+                            style={{ color: isSelected ? "rgba(255,255,255,0.8)" : todayDay ? "var(--color-accent)" : "var(--color-text-3)" }}
+                          >
+                            {dayLabel(d)}
+                          </span>
+                          <span
+                            className="text-sm font-bold"
+                            style={{ color: isSelected ? "#fff" : "var(--color-text-1)" }}
+                          >
+                            {d.getDate()}
+                          </span>
+                          {/* Occupied indicator dot */}
+                          <div
+                            className="w-1.5 h-1.5 rounded-full"
+                            style={{
+                              background: occupied
+                                ? (isSelected ? "rgba(255,255,255,0.7)" : "var(--color-accent)")
+                                : "transparent",
+                            }}
+                          />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Mahlzeit wählen */}
+                <div className="px-4 pb-4" style={{ borderTop: "1px solid var(--zu-border)" }}>
+                  <p className="text-xs font-semibold text-text-3 mb-2 uppercase tracking-wide pt-4">Mahlzeit</p>
+                  <div className="flex gap-2">
+                    {MEAL_TYPES.map((mt) => {
+                      const isActive = selectedMealType === mt.id;
+                      return (
+                        <button
+                          key={mt.id}
+                          onClick={() => setSelectedMealType(mt.id)}
+                          className="flex-1 flex flex-col items-center gap-1 py-3 rounded-xl text-sm font-medium transition-all"
+                          style={{
+                            background: isActive ? "var(--color-accent)" : "var(--color-surface-2)",
+                            color: isActive ? "#fff" : "var(--color-text-2)",
+                          }}
+                        >
+                          <span className="text-lg">{mt.emoji}</span>
+                          <span className="text-xs font-semibold">{mt.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Wer isst? */}
+                {householdMembers.length > 0 && (
+                  <div className="px-4 pb-4" style={{ borderTop: "1px solid var(--zu-border)" }}>
+                    <p className="text-xs font-semibold text-text-3 mb-3 uppercase tracking-wide pt-4">Wer isst?</p>
+                    <div className="flex gap-4 flex-wrap">
+                      {householdMembers.map((member) => (
+                        <MemberChip
+                          key={member.id}
+                          member={member}
+                          selected={selectedUserIds.includes(member.id)}
+                          onToggle={() => toggleMealPlanUser(member.id)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Hinzufügen button */}
+              <div className="px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3 flex-shrink-0" style={{ borderTop: "1px solid var(--zu-border)" }}>
+                <button
+                  onClick={handleAddToMealPlan}
+                  disabled={addingToMealPlan || selectedMealDate === null}
+                  className="w-full py-3 rounded-full text-sm font-semibold text-white flex items-center justify-center gap-2"
+                  style={{
+                    background: "var(--color-accent)",
+                    opacity: (addingToMealPlan || selectedMealDate === null) ? 0.4 : 1,
+                    transition: "opacity 0.2s",
+                  }}
+                >
+                  {addingToMealPlan ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <CalendarPlus className="w-4 h-4" />
+                  )}
+                  Hinzufügen
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Delete Confirmation */}
       <AnimatePresence>
