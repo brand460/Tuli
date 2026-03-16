@@ -108,6 +108,7 @@ export function MainShell() {
             }),
           });
           console.log("[OneSignal/MainShell] ✅ Registration response:", res);
+          localStorage.setItem("onesignal_last_setup", Date.now().toString());
         } else {
           console.log("[OneSignal/MainShell] ⚠️ No player ID returned — push not registered");
         }
@@ -115,6 +116,51 @@ export function MainShell() {
         console.log("[OneSignal/MainShell] ❌ Registration error:", err);
       }
     })();
+  }, [user?.id, householdId]);
+
+  // ── OneSignal Re-Setup bei Visibility-Wechsel nach langer Inaktivität ──
+  useEffect(() => {
+    if (!user?.id || !householdId) return;
+
+    const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState !== "visible") return;
+
+      const lastSetup = parseInt(localStorage.getItem("onesignal_last_setup") ?? "0", 10);
+      const elapsed = Date.now() - lastSetup;
+
+      if (elapsed < THREE_DAYS_MS) {
+        console.log("[OneSignal/Visibility] Setup noch aktuell — letzte Registrierung vor", Math.round(elapsed / 3600000), "h");
+        return;
+      }
+
+      console.log("[OneSignal/Visibility] Mehr als 3 Tage seit letztem Setup — erneuere Push-Subscription…");
+      try {
+        const playerId = await setupPushForUser(user.id);
+        console.log("[OneSignal/Visibility] setupPushForUser returned:", playerId);
+
+        if (playerId) {
+          const res = await apiFetch("/onesignal/register", {
+            method: "POST",
+            body: JSON.stringify({
+              user_id: user.id,
+              player_id: playerId,
+              household_id: householdId,
+            }),
+          });
+          console.log("[OneSignal/Visibility] ✅ Re-Registration response:", res);
+          localStorage.setItem("onesignal_last_setup", Date.now().toString());
+        } else {
+          console.log("[OneSignal/Visibility] ⚠️ Kein player ID zurückgegeben");
+        }
+      } catch (err) {
+        console.log("[OneSignal/Visibility] ❌ Re-Registration Fehler:", err);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [user?.id, householdId]);
 
   // Deep-link targets from Kalender navigation
