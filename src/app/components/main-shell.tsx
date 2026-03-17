@@ -171,17 +171,24 @@ export function MainShell() {
   // ── Web Share Target — geteilten Text empfangen ─────────────────────
   const [sharedText, setSharedText] = useState<string | null>(null);
 
+  // Ref auf handleTabChange damit der SW-Listener nie eine stale Closure sieht
+  const handleTabChangeRef = useRef<(tab: TabId) => void>(() => {});
+
+  const activateShare = useCallback((text: string) => {
+    setSharedText(text);
+    handleTabChangeRef.current('kochen');
+  }, []);
+
   useEffect(() => {
     // Nachricht vom Service Worker empfangen (App war offen)
     const handleMessage = (event: MessageEvent) => {
       if (event.data?.type === 'SHARE_RECEIVED' && event.data.text) {
-        setSharedText(event.data.text);
-        handleTabChange('kochen');
+        activateShare(event.data.text);
       }
     };
     navigator.serviceWorker?.addEventListener('message', handleMessage);
 
-    // Pending share aus Cache prüfen (App wurde neu geöffnet)
+    // Pending share aus Cache prüfen (App wurde neu geöffnet / war geschlossen)
     (async () => {
       try {
         const cache = await caches.open('share-cache');
@@ -190,8 +197,8 @@ export function MainShell() {
           const text = await pending.text();
           if (text) {
             await cache.delete('/pending-share');
-            setSharedText(text);
-            handleTabChange('kochen');
+            // Kurze Verzögerung damit die App vollständig gemountet ist
+            setTimeout(() => activateShare(text), 300);
           }
         }
       } catch (err) {
@@ -238,6 +245,9 @@ export function MainShell() {
       return next;
     });
   };
+
+  // Ref aktuell halten damit der SW-MessageHandler immer die aktuelle Version nutzt
+  handleTabChangeRef.current = handleTabChange;
 
   const handleNavigate = (tab: string, itemId?: string | null) => {
     handleTabChange(tab as TabId);

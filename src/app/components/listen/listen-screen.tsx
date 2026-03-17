@@ -189,14 +189,26 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
 
   // ── Tab-Reset: zurück zur Seitenliste ─────────────────────────
   const handleReset = useCallback(() => {
-    setActivePageId(null);
+    // Auf Mobile: activePageId auf null → zeigt die Seitenliste inline
+    // Auf Desktop: Seite bleibt; Sidebar immer sichtbar, kein Reset nötig
+    if (activePageId !== null) {
+      setActivePageId(null);
+    }
     setSidebarOpen(false);
     setContextMenu(null);
     setEmojiPickerPageId(null);
     setDeleteConfirmPageId(null);
     setRenamingPageId(null);
-  }, []);
+  }, [activePageId]);
   useEffect(() => { onRegisterReset?.(handleReset); }, [onRegisterReset, handleReset]);
+
+  // ── Desktop: bei null automatisch erste Seite wählen ─────────
+  // Auf Desktop ist die Sidebar immer sichtbar — kein leerer rechter Bereich.
+  useEffect(() => {
+    if (!isMobile && loaded && !activePageId && pages.length > 0) {
+      setActivePageId(pages[0].id);
+    }
+  }, [isMobile, loaded, activePageId, pages]);
 
   // ── Save helpers ───────────────────────────────────────────────
   const saveData = useCallback(async (p: Page[], c: PageContents) => {
@@ -639,8 +651,8 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
         </div>
       )}
 
-      {/* Mobile drawer */}
-      {isMobile && sidebarOpen && (
+      {/* Mobile drawer — nur wenn Seite aktiv ist */}
+      {isMobile && sidebarOpen && activePageId !== null && (
         <>
           <div
             className="fixed inset-0 bg-black/30 z-[999]"
@@ -660,40 +672,55 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
 
       {/* Content area */}
       <div className="flex-1 flex flex-col min-h-0 min-w-0">
-        {/* Mobile header */}
-        {isMobile && (
-          <div className="flex-shrink-0 relative px-4 pt-4 pb-2" style={{ background: "var(--zu-bg)" }}>
-            <h2 className="text-lg font-bold text-text-1">Notizen</h2>
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 rounded-lg active:bg-surface-2"
-            >
-              <Menu className="w-5 h-5 text-text-2" />
-            </button>
-          </div>
-        )}
-
-        {/* Editor */}
-        {activePage ? (
-          <PageEditor
-            key={activePage.id}
-            page={activePage}
-            content={activeContent}
-            focusTitle={focusTitlePageId === activePage.id}
-            onClearFocusTitle={() => setFocusTitlePageId(null)}
-            onUpdatePage={(updates) => {
-              const np = pages.map((p) => (p.id === activePage.id ? { ...p, ...updates } : p));
-              updatePages(np);
-            }}
-            onContentChange={(html) => updatePageContent(activePage.id, html)}
-            onOpenEmojiPicker={() => setEmojiPickerPageId(activePage.id)}
-            hasCheckboxes={activePageHasCheckboxes}
-            onResetCheckboxes={resetCheckboxes}
-          />
+        {/* Mobile ohne aktive Seite → Seitenliste inline anzeigen */}
+        {isMobile && !activePageId ? (
+          <>
+            <div className="flex-shrink-0 px-4 pt-4 pb-2" style={{ background: "var(--zu-bg)" }}>
+              <h2 className="text-lg font-bold text-text-1">Notizen</h2>
+            </div>
+            <div className="flex-1 min-h-0 overflow-hidden">
+              {sidebar}
+            </div>
+          </>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-text-3">
-            <p className="text-sm">Keine Seite ausgew\u00e4hlt</p>
-          </div>
+          <>
+            {/* Mobile header — nur wenn Seite aktiv */}
+            {isMobile && (
+              <div className="flex-shrink-0 relative px-4 pt-4 pb-2" style={{ background: "var(--zu-bg)" }}>
+                <h2 className="text-lg font-bold text-text-1">Notizen</h2>
+                <button
+                  onClick={() => setSidebarOpen(true)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 rounded-lg active:bg-surface-2"
+                >
+                  <Menu className="w-5 h-5 text-text-2" />
+                </button>
+              </div>
+            )}
+
+            {/* Editor */}
+            {activePage ? (
+              <PageEditor
+                key={activePage.id}
+                page={activePage}
+                content={activeContent}
+                focusTitle={focusTitlePageId === activePage.id}
+                onClearFocusTitle={() => setFocusTitlePageId(null)}
+                onUpdatePage={(updates) => {
+                  const np = pages.map((p) => (p.id === activePage.id ? { ...p, ...updates } : p));
+                  updatePages(np);
+                }}
+                onContentChange={(html) => updatePageContent(activePage.id, html)}
+                onOpenEmojiPicker={() => setEmojiPickerPageId(activePage.id)}
+                hasCheckboxes={activePageHasCheckboxes}
+                onResetCheckboxes={resetCheckboxes}
+              />
+            ) : (
+              /* Desktop-Fallback — sollte durch Auto-Select nie erreicht werden */
+              <div className="flex-1 flex items-center justify-center text-text-3">
+                <p className="text-sm">Seite wird geladen\u2026</p>
+              </div>
+            )}
+          </>
         )}
       </div>
 

@@ -85,6 +85,18 @@ export function markLocalWrite() {
 export function broadcastChange(keys: string[]) {
   lastLocalWrite = Date.now();
   const ch = ensureBroadcastChannel();
+
+  // Notify local listeners immediately (same-tab, different components).
+  // The broadcast echo would be suppressed by the echo-check, so we must
+  // fire them directly here instead of relying on the round-trip.
+  const callbacks = new Set<() => void>();
+  for (const key of keys) {
+    const cbs = keyListeners.get(key);
+    if (cbs) cbs.forEach((cb) => callbacks.add(cb));
+  }
+  callbacks.forEach((cb) => cb());
+
+  // Also send over the wire so OTHER devices / tabs are notified.
   if (channelReady) {
     ch.send({
       type: "broadcast",

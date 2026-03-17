@@ -386,15 +386,11 @@ function AboutScreen({ onClose }: { onClose: () => void }) {
       {/* Content – zentriert, etwas Luft nach unten für den Home-Indikator */}
       <div className="flex-1 flex flex-col items-center justify-center px-8 pb-16">
         {/* App-Icon */}
-        <div
-          className="w-20 h-20 rounded-[22px] flex items-center justify-center mb-5"
-          style={{
-            background: "var(--accent)",
-            boxShadow: "0 4px 16px color-mix(in srgb, var(--accent) 30%, transparent)",
-          }}
-        >
-          <span className="text-4xl" style={{ userSelect: "none" }}>🏠</span>
-        </div>
+        <img
+          src="/Tuli-Logo.png"
+          alt="Tuli"
+          style={{ width: 80, height: 80, borderRadius: 18, objectFit: "cover", marginBottom: 20 }}
+        />
 
         {/* Name + Tagline */}
         <p className="text-2xl font-bold mb-1" style={{ color: "var(--text-1)" }}>

@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { CookingPot, Notepad } from "phosphor-react";
 import { apiFetch } from "../supabase-client";
+import { ImageWithFallback } from "../figma/ImageWithFallback";
 import { useKvRealtime, broadcastChange } from "../use-kv-realtime";
 import { useBackHandler } from "../ui/use-back-handler";
 import {
@@ -2170,7 +2171,13 @@ function RecipePickerDrawer({
               className="w-full flex items-center gap-3 px-5 py-3 active:bg-surface-2 transition-colors"
               style={{ borderBottom: "1px solid var(--zu-border)" }}
             >
-              <span className="text-base flex-shrink-0">🍳</span>
+              <div className="w-10 h-10 rounded-lg bg-surface-2 flex-shrink-0 overflow-hidden">
+                {recipe.image_url ? (
+                  <ImageWithFallback src={recipe.image_url} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="w-full h-full flex items-center justify-center text-lg">🍽️</span>
+                )}
+              </div>
               <span className="flex-1 text-sm text-text-1 text-left truncate">{recipe.title}</span>
             </button>
           ))}

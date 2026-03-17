@@ -3,6 +3,7 @@ import { useSessionState } from "../ui/use-session-state";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "motion/react";
 import { FreeCropOverlay } from "./free-crop-overlay";
+import { RecipeExtractionLoader } from "./recipe-extraction-loader";
 import {
   Plus, Search, Heart, Clock, ChevronLeft, Star, Minus, ExternalLink,
   Pencil, X, Loader2, Link2, FileText, Camera, Trash2,
@@ -15,6 +16,8 @@ import { ImageWithFallback } from "../figma/ImageWithFallback";
 import type {
   Recipe, MealPlanEntry, Ingredient, RecipeStep, CategoryFilter,
 } from "./kochen-types";
+import type { CalendarEvent } from "../kalender/calendar-types";
+import { getColorHex } from "../kalender/calendar-types";
 import { RECIPE_CATEGORIES } from "./kochen-types";
 import { useBackHandler, pushBack, popBack } from "../ui/use-back-handler";
 import { useAuth, type HouseholdMember } from "../auth-context";
@@ -95,6 +98,11 @@ function totalTime(r: Recipe) {
 function isToday(d: Date) {
   const now = new Date();
   return fmtLocalDate(d) === fmtLocalDate(now);
+}
+
+function fmtEventTime(iso: string): string {
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
 // Generate 11 days: today −3 .. today +7
@@ -1997,14 +2005,7 @@ Extraktionsregeln:
               onClick={handleUrlImport}
               className="w-full py-2.5 rounded-xl bg-accent text-white text-sm font-medium disabled:opacity-40 flex items-center justify-center gap-2"
             >
-              {importing ? (
-                <div className="contents">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Importiere...
-                </div>
-              ) : (
-                "Importieren"
-              )}
+              Importieren
             </button>
             </motion.div>
           </motion.div>
@@ -2065,16 +2066,9 @@ Extraktionsregeln:
                 disabled={!textInput.trim() || textExtracting}
                 onClick={handleTextImport}
                 className="w-full py-2.5 rounded-xl text-white text-sm font-medium disabled:opacity-40 flex items-center justify-center gap-2"
-                style={{ background: textExtracting || !textInput.trim() ? undefined : "var(--color-accent)" }}
+                style={{ background: "var(--color-accent)" }}
               >
-                {textExtracting ? (
-                  <div className="contents">
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Rezept wird extrahiert...
-                  </div>
-                ) : (
-                  "Extrahieren"
-                )}
+                Extrahieren
               </button>
             </motion.div>
           </motion.div>
@@ -2200,29 +2194,8 @@ Extraktionsregeln:
         )}
       </AnimatePresence>
 
-      {/* ── Photo Extraction Loading Screen ── */}
-      <AnimatePresence>
-        {photoExtracting && (
-          <motion.div
-            className="fixed inset-0 z-[3000] flex flex-col items-center justify-center"
-            style={{ background: "var(--zu-bg)" }}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
-          >
-            <motion.div
-              animate={{ scale: [1, 1.15, 1] }}
-              transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
-              className="text-6xl mb-6 select-none"
-            >
-              🍳
-            </motion.div>
-            <p className="text-base font-semibold text-text-1 mb-1">Rezept wird erkannt...</p>
-            <p className="text-sm text-text-3">Bitte einen Moment Geduld</p>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* ── Extraction Loading Overlay (URL / Foto / Text) ── */}
+      <RecipeExtractionLoader visible={photoExtracting || importing || textExtracting} />
 
       {/* FAB — nur im Rezepte-Tab */}
       {kochenTab === "rezepte" && (
@@ -2334,10 +2307,15 @@ function RecipeDetailView({
 
   // ── Wochenplaner Drawer ────────────────────────────────────────────
   const [showMealPlanDrawer, setShowMealPlanDrawer] = useState(false);
+  const [mealPlanDrawerTab, setMealPlanDrawerTab] = useState<"wochenplaner" | "termin">("wochenplaner");
   const [selectedMealDate, setSelectedMealDate] = useState<string | null>(null);
   const [selectedMealType, setSelectedMealType] = useState<"fruehstueck" | "mittag" | "abend">("mittag");
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [addingToMealPlan, setAddingToMealPlan] = useState(false);
+  // Termin-Tab
+  const [calendarEventsForDrawer, setCalendarEventsForDrawer] = useState<CalendarEvent[]>([]);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [addingToEvent, setAddingToEvent] = useState(false);
 
   const futureDays = useMemo(() => generateFutureDays(), []);
   const occupiedDates = useMemo(() => {
@@ -2359,10 +2337,25 @@ function RecipeDetailView({
     setShowShoppingDrawer(true);
   };
 
+  const loadCalendarEventsForDrawer = useCallback(async () => {
+    try {
+      const data = await apiFetch(`/calendar-events?household_id=${householdId}`);
+      setCalendarEventsForDrawer(data.events || []);
+    } catch (err) {
+      console.error("[RecipeDetail] loadCalendarEventsForDrawer error:", err);
+    }
+  }, [householdId]);
+
+  useEffect(() => {
+    if (showMealPlanDrawer) loadCalendarEventsForDrawer();
+  }, [showMealPlanDrawer, loadCalendarEventsForDrawer]);
+
   const openMealPlanDrawer = () => {
     setSelectedMealDate(null);
     setSelectedMealType("mittag");
     setSelectedUserIds(householdMembers.map((m) => m.id));
+    setMealPlanDrawerTab("wochenplaner");
+    setSelectedEventId(null);
     setShowMealPlanDrawer(true);
   };
 
@@ -2410,6 +2403,34 @@ function RecipeDetailView({
       toast.error(err?.message || "Fehler beim Hinzufügen zum Wochenplaner");
     } finally {
       setAddingToMealPlan(false);
+    }
+  };
+
+  const handleAddToCalendarEvent = async () => {
+    if (!selectedEventId) return;
+    setAddingToEvent(true);
+    try {
+      const data = await apiFetch(`/calendar-events?household_id=${householdId}`);
+      const allEvents: CalendarEvent[] = data.events || [];
+      const targetEvent = allEvents.find((e) => e.id === selectedEventId);
+      if (!targetEvent) throw new Error("Termin nicht gefunden");
+      const existingIds = targetEvent.linked_recipe_ids || [];
+      if (!existingIds.includes(recipe.id)) {
+        const updatedEvent = { ...targetEvent, linked_recipe_ids: [...existingIds, recipe.id] };
+        const updatedEvents = allEvents.map((e) => e.id === selectedEventId ? updatedEvent : e);
+        await apiFetch("/calendar-events", {
+          method: "PUT",
+          body: JSON.stringify({ household_id: householdId, events: updatedEvents }),
+        });
+        broadcastChange([`calendar_events:${householdId}`]);
+      }
+      setShowMealPlanDrawer(false);
+      toast.success(`Rezept zu „${targetEvent.title}" hinzugefügt ✅`);
+    } catch (err: any) {
+      console.error("[RecipeDetail] addToCalendarEvent error:", err);
+      toast.error(err?.message || "Fehler beim Verknüpfen mit dem Termin");
+    } finally {
+      setAddingToEvent(false);
     }
   };
 
@@ -2985,7 +3006,7 @@ function RecipeDetailView({
               style={{
                 boxShadow: "var(--shadow-elevated)",
                 bottom: detailBottomOffset,
-                maxHeight: detailVpHeight - 72,
+                height: Math.min(560, detailVpHeight - 72),
               }}
               initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
               transition={DRAWER_SPRING}
@@ -2998,7 +3019,7 @@ function RecipeDetailView({
 
               {/* Header */}
               <div className="flex items-center justify-between px-4 py-3 flex-shrink-0" style={{ borderBottom: "1px solid var(--zu-border)" }}>
-                <h3 className="text-base font-semibold text-text-1">Zum Wochenplaner</h3>
+                <h3 className="text-base font-semibold text-text-1">Rezept einplanen</h3>
                 <button
                   onClick={() => setShowMealPlanDrawer(false)}
                   className="w-8 h-8 flex items-center justify-center rounded-full"
@@ -3008,10 +3029,36 @@ function RecipeDetailView({
                 </button>
               </div>
 
+              {/* Segmented Control: Wochenplaner / Termin */}
+              <div className="px-4 pt-3 pb-2 flex-shrink-0">
+                <div
+                  className="flex items-center"
+                  style={{ padding: 3, borderRadius: 999, background: "var(--color-surface-2)" }}
+                >
+                  {(["wochenplaner", "termin"] as const).map((tab) => (
+                    <button
+                      key={tab}
+                      onPointerDown={(e) => e.preventDefault()}
+                      onClick={() => { setMealPlanDrawerTab(tab); setSelectedEventId(null); }}
+                      className="flex-1 text-center text-xs py-1.5 transition-all"
+                      style={{
+                        borderRadius: 999,
+                        fontWeight: mealPlanDrawerTab === tab ? 600 : 400,
+                        color: mealPlanDrawerTab === tab ? "var(--color-text-1)" : "var(--color-text-3)",
+                        background: mealPlanDrawerTab === tab ? "var(--color-surface)" : "transparent",
+                        boxShadow: mealPlanDrawerTab === tab ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                      }}
+                    >
+                      {tab === "wochenplaner" ? "Wochenplaner" : "Termin"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Scrollable content */}
               <div className="flex-1 overflow-y-auto">
-                {/* Tag wählen */}
-                <div className="px-4 pt-4 pb-3">
+                {/* Tag wählen — gemeinsam für beide Tabs */}
+                <div className="px-4 pt-2 pb-3">
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--color-text-3)" }}>Tag</p>
                     {selectedMealDate === null && (
@@ -3023,11 +3070,11 @@ function RecipeDetailView({
                       const dateStr = fmtLocalDate(d);
                       const isSelected = selectedMealDate === dateStr;
                       const todayDay = isToday(d);
-                      const occupied = occupiedDates.has(dateStr);
+                      const occupied = mealPlanDrawerTab === "wochenplaner" && occupiedDates.has(dateStr);
                       return (
                         <button
                           key={dateStr}
-                          onClick={() => setSelectedMealDate(dateStr)}
+                          onClick={() => { setSelectedMealDate(dateStr); setSelectedEventId(null); }}
                           className="flex-shrink-0 flex flex-col items-center gap-0.5 py-2 rounded-xl transition-all"
                           style={{
                             minWidth: 52,
@@ -3046,7 +3093,6 @@ function RecipeDetailView({
                           >
                             {d.getDate()}
                           </span>
-                          {/* Occupied indicator dot */}
                           <div
                             className="w-1.5 h-1.5 rounded-full"
                             style={{
@@ -3061,44 +3107,114 @@ function RecipeDetailView({
                   </div>
                 </div>
 
-                {/* Mahlzeit wählen */}
-                <div className="px-4 pb-4" style={{ borderTop: "1px solid var(--zu-border)" }}>
-                  <p className="text-xs font-semibold text-text-3 mb-2 uppercase tracking-wide pt-4">Mahlzeit</p>
-                  <div className="flex gap-2">
-                    {MEAL_TYPES.map((mt) => {
-                      const isActive = selectedMealType === mt.id;
-                      return (
-                        <button
-                          key={mt.id}
-                          onClick={() => setSelectedMealType(mt.id)}
-                          className="flex-1 flex flex-col items-center gap-1 py-3 rounded-xl text-sm font-medium transition-all"
-                          style={{
-                            background: isActive ? "var(--color-accent)" : "var(--color-surface-2)",
-                            color: isActive ? "#fff" : "var(--color-text-2)",
-                          }}
-                        >
-                          <span className="text-lg">{mt.emoji}</span>
-                          <span className="text-xs font-semibold">{mt.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Wer isst? */}
-                {householdMembers.length > 0 && (
-                  <div className="px-4 pb-4" style={{ borderTop: "1px solid var(--zu-border)" }}>
-                    <p className="text-xs font-semibold text-text-3 mb-3 uppercase tracking-wide pt-4">Wer isst?</p>
-                    <div className="flex gap-4 flex-wrap">
-                      {householdMembers.map((member) => (
-                        <MemberChip
-                          key={member.id}
-                          member={member}
-                          selected={selectedUserIds.includes(member.id)}
-                          onToggle={() => toggleMealPlanUser(member.id)}
-                        />
-                      ))}
+                {/* ── WOCHENPLANER TAB ── */}
+                {mealPlanDrawerTab === "wochenplaner" && (
+                  <div>
+                    {/* Mahlzeit wählen */}
+                    <div className="px-4 pb-4" style={{ borderTop: "1px solid var(--zu-border)" }}>
+                      <p className="text-xs font-semibold text-text-3 mb-2 uppercase tracking-wide pt-4">Mahlzeit</p>
+                      <div className="flex gap-2">
+                        {MEAL_TYPES.map((mt) => {
+                          const isActive = selectedMealType === mt.id;
+                          return (
+                            <button
+                              key={mt.id}
+                              onClick={() => setSelectedMealType(mt.id)}
+                              className="flex-1 flex flex-col items-center gap-1 py-3 rounded-xl text-sm font-medium transition-all"
+                              style={{
+                                background: isActive ? "var(--color-accent)" : "var(--color-surface-2)",
+                                color: isActive ? "#fff" : "var(--color-text-2)",
+                              }}
+                            >
+                              <span className="text-lg">{mt.emoji}</span>
+                              <span className="text-xs font-semibold">{mt.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
+
+                    {/* Wer isst? */}
+                    {householdMembers.length > 0 && (
+                      <div className="px-4 pb-4" style={{ borderTop: "1px solid var(--zu-border)" }}>
+                        <p className="text-xs font-semibold text-text-3 mb-3 uppercase tracking-wide pt-4">Wer isst?</p>
+                        <div className="flex gap-4 flex-wrap">
+                          {householdMembers.map((member) => (
+                            <MemberChip
+                              key={member.id}
+                              member={member}
+                              selected={selectedUserIds.includes(member.id)}
+                              onToggle={() => toggleMealPlanUser(member.id)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── TERMIN TAB ── */}
+                {mealPlanDrawerTab === "termin" && (
+                  <div style={{ borderTop: "1px solid var(--zu-border)" }}>
+                    {!selectedMealDate ? (
+                      <div className="px-4 py-8 flex flex-col items-center gap-2">
+                        <span className="text-2xl">📅</span>
+                        <p className="text-sm text-text-3 text-center">Wähle einen Tag, um die<br/>Termine anzuzeigen</p>
+                      </div>
+                    ) : (() => {
+                      const dayEvents = calendarEventsForDrawer.filter((ev) =>
+                        fmtLocalDate(new Date(ev.start_time)) === selectedMealDate
+                      );
+                      if (dayEvents.length === 0) {
+                        return (
+                          <div className="px-4 py-8 flex flex-col items-center gap-2">
+                            <span className="text-2xl">🗓️</span>
+                            <p className="text-sm text-text-3 text-center">Keine Termine an diesem Tag</p>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div className="px-4 py-2 space-y-1.5">
+                          {dayEvents.map((ev) => {
+                            const isEvSelected = selectedEventId === ev.id;
+                            const colorHex = ev.label_hex || getColorHex(ev.color);
+                            return (
+                              <button
+                                key={ev.id}
+                                onClick={() => setSelectedEventId(isEvSelected ? null : ev.id)}
+                                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-left"
+                                style={{
+                                  background: isEvSelected ? "var(--accent-light)" : "var(--color-surface-2)",
+                                  border: isEvSelected ? "1.5px solid var(--color-accent)" : "1.5px solid transparent",
+                                }}
+                              >
+                                <div
+                                  className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                                  style={{ background: colorHex }}
+                                />
+                                <span
+                                  className="text-xs flex-shrink-0"
+                                  style={{ color: "var(--color-text-3)", minWidth: 40 }}
+                                >
+                                  {ev.all_day ? "Ganztäg." : fmtEventTime(ev.start_time)}
+                                </span>
+                                <span className="flex-1 text-sm font-medium text-text-1 truncate">{ev.title}</span>
+                                {isEvSelected && (
+                                  <div
+                                    className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
+                                    style={{ background: "var(--color-accent)" }}
+                                  >
+                                    <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+                                      <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                                    </svg>
+                                  </div>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
@@ -3106,16 +3222,22 @@ function RecipeDetailView({
               {/* Hinzufügen button */}
               <div className="px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3 flex-shrink-0" style={{ borderTop: "1px solid var(--zu-border)" }}>
                 <button
-                  onClick={handleAddToMealPlan}
-                  disabled={addingToMealPlan || selectedMealDate === null}
+                  onClick={mealPlanDrawerTab === "wochenplaner" ? handleAddToMealPlan : handleAddToCalendarEvent}
+                  disabled={
+                    mealPlanDrawerTab === "wochenplaner"
+                      ? (addingToMealPlan || selectedMealDate === null)
+                      : (addingToEvent || selectedEventId === null)
+                  }
                   className="w-full py-3 rounded-full text-sm font-semibold text-white flex items-center justify-center gap-2"
                   style={{
                     background: "var(--color-accent)",
-                    opacity: (addingToMealPlan || selectedMealDate === null) ? 0.4 : 1,
+                    opacity: (mealPlanDrawerTab === "wochenplaner"
+                      ? (addingToMealPlan || selectedMealDate === null)
+                      : (addingToEvent || selectedEventId === null)) ? 0.4 : 1,
                     transition: "opacity 0.2s",
                   }}
                 >
-                  {addingToMealPlan ? (
+                  {(addingToMealPlan || addingToEvent) ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (
                     <CalendarPlus className="w-4 h-4" />
@@ -3631,7 +3753,16 @@ function RecipeEditView({
         >Speichern</button>
       </div>
 
-      <div className="flex-1 overflow-y-auto pb-6">
+      <div
+        className="flex-1 overflow-y-auto pb-6"
+        onFocus={(e) => {
+          const el = e.target as HTMLElement;
+          if (!el.matches('input, textarea, [contenteditable]')) return;
+          setTimeout(() => {
+            el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          }, 300);
+        }}
+      >
         {/* ── Image Area ── */}
         <div
           className="relative w-full flex-shrink-0 cursor-pointer"
@@ -3824,6 +3955,14 @@ function RecipeEditView({
           {/* ── Ingredients ── */}
           <div className="mt-4">
             <label className="text-xs text-text-3 mb-2 block px-[0px] pt-[12px] pb-[0px]">Zutaten</label>
+            {/* Header-Zeile über den Zutaten */}
+            <div className="flex items-center gap-2 px-0 mb-1">
+              <span className="w-2 flex-shrink-0" /> {/* Platz für Category-Dot */}
+              <span className="flex-1 text-xs text-text-3">Zutat</span>
+              <span className="w-14 text-xs text-text-3 text-center">Menge</span>
+              <span className="w-14 text-xs text-text-3 text-center">Einheit</span>
+              <span className="w-7" /> {/* Platz für X-Button */}
+            </div>
             <div className="space-y-2">
               {recipe.ingredients.map((ing, i) => {
                 const ingDotColor = getItemCategoryDot(ing.name, mergedItemsForDot);

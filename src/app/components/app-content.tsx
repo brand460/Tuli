@@ -59,14 +59,11 @@ function AppRouter() {
         className="flex flex-col items-center justify-center font-sans"
         style={{ height: "100dvh", background: "var(--zu-bg)" }}
       >
-        <svg
-          width="56" height="56" viewBox="0 0 72 72"
-          fill="none" xmlns="http://www.w3.org/2000/svg"
-          style={{ marginBottom: 16 }}
-        >
-          <rect width="72" height="72" rx="20" fill="var(--accent)" />
-          <path d="M36 16L56 33H50V56H40V44H32V56H22V33H16L36 16Z" fill="white" fillOpacity="0.95" />
-        </svg>
+        <img
+          src="/Tuli-Logo.png"
+          alt="Tuli"
+          style={{ width: 56, height: 56, borderRadius: 14, marginBottom: 16, objectFit: "cover" }}
+        />
         <Loader2 className="w-5 h-5 animate-spin" style={{ color: "var(--text-3)" }} />
       </div>
     );
