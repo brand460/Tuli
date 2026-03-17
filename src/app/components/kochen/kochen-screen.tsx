@@ -164,11 +164,13 @@ function emptyRecipe(): Recipe {
 // MAIN KOCHEN SCREEN
 // ══════════════════════════════════════════════════════════════════════
 
-export function KochenScreen({ openRecipeId, sharedText, onSharedTextConsumed, onRegisterReset }: {
+export function KochenScreen({ openRecipeId, sharedText, onSharedTextConsumed, onRegisterReset, showTextImport: showTextImportProp = false, onShowTextImportChange }: {
   openRecipeId?: string | null;
   sharedText?: string | null;
   onSharedTextConsumed?: () => void;
   onRegisterReset?: (fn: () => void) => void;
+  showTextImport?: boolean;
+  onShowTextImportChange?: (v: boolean) => void;
 } = {}) {
   const { householdId, householdMembers } = useAuth();
   // ── State ──────────────────────────────────────────────────────────
@@ -228,7 +230,9 @@ export function KochenScreen({ openRecipeId, sharedText, onSharedTextConsumed, o
   const [showUrlImport, setShowUrlImport] = useState(false);
   const [urlInput, setUrlInput] = useState("");
   const [importing, setImporting] = useState(false);
-  const [showTextImport, setShowTextImport] = useState(false);
+  // showTextImport is controlled from MainShell — use prop as source of truth
+  const showTextImport = showTextImportProp;
+  const setShowTextImport = (v: boolean) => onShowTextImportChange?.(v);
   const [textInput, setTextInput] = useState("");
   const [textExtracting, setTextExtracting] = useState(false);
 
@@ -316,10 +320,11 @@ export function KochenScreen({ openRecipeId, sharedText, onSharedTextConsumed, o
   useEffect(() => { onRegisterReset?.(handleReset); }, [onRegisterReset, handleReset]);
 
   // ── Shared text from Web Share Target ─────────────────────────────
+  // showTextImport=true wird bereits von MainShell gesetzt (via onShowTextImportChange);
+  // hier nur noch textInput befüllen und AddSheet schließen.
   useEffect(() => {
     if (sharedText) {
       setTextInput(sharedText);
-      setShowTextImport(true);
       setShowAddSheet(false);
       onSharedTextConsumed?.();
     }
@@ -2022,54 +2027,63 @@ Extraktionsregeln:
           >
             <div className="absolute inset-0 bg-black/40" onClick={() => { if (!textExtracting) { setShowTextImport(false); setTextInput(""); } }} />
             <motion.div
-              className="absolute left-0 right-0 rounded-t-[20px] pb-[calc(env(safe-area-inset-bottom,0px)+16px)] p-5"
+              className="absolute left-0 right-0 rounded-t-[20px] flex flex-col"
               style={{ background: 'var(--surface)', boxShadow: 'var(--shadow-elevated)', bottom: bottomOffset, maxHeight: vpHeight - 72 }}
               initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
               transition={DRAWER_SPRING}
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex justify-center mb-4">
-                <div className="w-9 h-1 rounded-full" style={{ background: 'var(--zu-border)' }} />
+              {/* Header — fix oben */}
+              <div className="flex-shrink-0">
+                <div className="flex justify-center mt-3 mb-2">
+                  <div className="w-9 h-1 rounded-full" style={{ background: 'var(--zu-border)' }} />
+                </div>
+                <div className="flex items-center justify-between px-4 py-2" style={{ borderBottom: '1px solid var(--zu-border)' }}>
+                  <h3 className="text-base font-semibold">Rezepttext einfügen</h3>
+                  <button
+                    disabled={textExtracting}
+                    onClick={() => { setShowTextImport(false); setTextInput(""); }}
+                    className="w-7 h-7 rounded-full bg-surface-2 flex items-center justify-center disabled:opacity-40"
+                  >
+                    <X className="w-4 h-4 text-text-2" />
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-base font-semibold">Rezepttext einfügen</h3>
-                <button
+
+              {/* Textarea — nimmt verfügbaren Platz, intern scrollbar */}
+              <div className="flex-1 min-h-0 px-4 py-3 overflow-y-auto">
+                <textarea
+                  value={textInput}
+                  onChange={(e) => setTextInput(e.target.value)}
+                  placeholder="Füge hier den Rezepttext ein — z.B. aus einer Video-Beschreibung, WhatsApp-Nachricht oder Website..."
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-form-type="other"
                   disabled={textExtracting}
-                  onClick={() => { setShowTextImport(false); setTextInput(""); }}
-                  className="w-7 h-7 rounded-full bg-surface-2 flex items-center justify-center disabled:opacity-40"
+                  className="w-full h-full resize-none border-0 outline-none bg-transparent text-sm disabled:opacity-50"
+                  style={{ caretColor: "var(--color-accent)", minHeight: 160 }}
+                  autoFocus
+                />
+              </div>
+
+              {/* Button — fix unten */}
+              <div
+                className="flex-shrink-0 px-4 pt-3"
+                style={{ borderTop: '1px solid var(--zu-border)', paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)' }}
+              >
+                <button
+                  disabled={!textInput.trim() || textExtracting}
+                  onClick={handleTextImport}
+                  className="w-full py-2.5 rounded-xl text-white text-sm font-medium disabled:opacity-40 flex items-center justify-center gap-2"
+                  style={{ background: "var(--color-accent)" }}
                 >
-                  <X className="w-4 h-4 text-text-2" />
+                  {textExtracting ? "Extrahiere…" : "Extrahieren"}
                 </button>
               </div>
-              <textarea
-                value={textInput}
-                onChange={(e) => {
-                  setTextInput(e.target.value);
-                  // auto-grow
-                  e.target.style.height = "auto";
-                  e.target.style.height = e.target.scrollHeight + "px";
-                }}
-                placeholder="Füge hier den Rezepttext ein — z.B. aus einer Video-Beschreibung, WhatsApp-Nachricht oder Website..."
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="off"
-                spellCheck={false}
-                data-lpignore="true"
-                data-1p-ignore="true"
-                data-form-type="other"
-                disabled={textExtracting}
-                className="w-full px-4 py-3 bg-surface-2 rounded-xl text-sm border-0 outline-none mb-3 resize-none overflow-hidden disabled:opacity-50"
-                style={{ minHeight: 200, caretColor: "var(--color-accent)" }}
-                autoFocus
-              />
-              <button
-                disabled={!textInput.trim() || textExtracting}
-                onClick={handleTextImport}
-                className="w-full py-2.5 rounded-xl text-white text-sm font-medium disabled:opacity-40 flex items-center justify-center gap-2"
-                style={{ background: "var(--color-accent)" }}
-              >
-                Extrahieren
-              </button>
             </motion.div>
           </motion.div>
         )}

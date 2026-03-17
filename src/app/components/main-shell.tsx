@@ -170,26 +170,33 @@ export function MainShell() {
 
   // ── Web Share Target — geteilten Text empfangen ─────────────────────
   const [sharedText, setSharedText] = useState<string | null>(null);
+  const [showTextImport, setShowTextImport] = useState(false);
 
   // Ref auf handleTabChange damit der SW-Listener nie eine stale Closure sieht
   const handleTabChangeRef = useRef<(tab: TabId) => void>(() => {});
 
   const activateShare = useCallback((text: string) => {
     setSharedText(text);
+    setShowTextImport(true);
     handleTabChangeRef.current('kochen');
   }, []);
 
+  // SW-Message-Listener: App war offen, SW sendet SHARE_RECEIVED direkt
   useEffect(() => {
-    // Nachricht vom Service Worker empfangen (App war offen)
     const handleMessage = (event: MessageEvent) => {
       if (event.data?.type === 'SHARE_RECEIVED' && event.data.text) {
         activateShare(event.data.text);
       }
     };
     navigator.serviceWorker?.addEventListener('message', handleMessage);
+    return () => navigator.serviceWorker?.removeEventListener('message', handleMessage);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    // Pending share aus Cache prüfen (App wurde neu geöffnet / war geschlossen)
-    (async () => {
+  // Pending Share aus Cache prüfen — läuft nach dem ersten Render mit 500ms Puffer
+  // damit alle Komponenten vollständig gemountet sind bevor der Drawer geöffnet wird
+  useEffect(() => {
+    const timer = setTimeout(async () => {
       try {
         const cache = await caches.open('share-cache');
         const pending = await cache.match('/pending-share');
@@ -197,16 +204,14 @@ export function MainShell() {
           const text = await pending.text();
           if (text) {
             await cache.delete('/pending-share');
-            // Kurze Verzögerung damit die App vollständig gemountet ist
-            setTimeout(() => activateShare(text), 300);
+            activateShare(text);
           }
         }
       } catch (err) {
         console.error('[Share] Cache-Prüfung fehlgeschlagen:', err);
       }
-    })();
-
-    return () => navigator.serviceWorker?.removeEventListener('message', handleMessage);
+    }, 500);
+    return () => clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -315,6 +320,8 @@ export function MainShell() {
                 openRecipeId={deepLinkRecipeId}
                 sharedText={sharedText}
                 onSharedTextConsumed={() => setSharedText(null)}
+                showTextImport={showTextImport}
+                onShowTextImportChange={setShowTextImport}
                 onRegisterReset={handleRegisterReset}
               />
             </div>
