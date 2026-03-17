@@ -1,5 +1,6 @@
 {
   "rewrites": [
+    { "source": "/share-recipe", "destination": "/index.html" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

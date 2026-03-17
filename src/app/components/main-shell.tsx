@@ -163,6 +163,41 @@ export function MainShell() {
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [user?.id, householdId]);
 
+  // ── Web Share Target — geteilten Text empfangen ─────────────────────
+  const [sharedText, setSharedText] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Nachricht vom Service Worker empfangen (App war offen)
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'SHARE_RECEIVED' && event.data.text) {
+        setSharedText(event.data.text);
+        handleTabChange('kochen');
+      }
+    };
+    navigator.serviceWorker?.addEventListener('message', handleMessage);
+
+    // Pending share aus Cache prüfen (App wurde neu geöffnet)
+    (async () => {
+      try {
+        const cache = await caches.open('share-cache');
+        const pending = await cache.match('/pending-share');
+        if (pending) {
+          const text = await pending.text();
+          if (text) {
+            await cache.delete('/pending-share');
+            setSharedText(text);
+            handleTabChange('kochen');
+          }
+        }
+      } catch (err) {
+        console.error('[Share] Cache-Prüfung fehlgeschlagen:', err);
+      }
+    })();
+
+    return () => navigator.serviceWorker?.removeEventListener('message', handleMessage);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Deep-link targets from Kalender navigation
   const [deepLinkRecipeId, setDeepLinkRecipeId] = useState<string | null>(null);
   const [deepLinkPageId, setDeepLinkPageId] = useState<string | null>(null);
@@ -260,7 +295,11 @@ export function MainShell() {
           )}
           {visitedTabs.has("kochen") && (
             <div className={`absolute inset-0 flex flex-col overflow-hidden ${activeTab === "kochen" ? "" : "hidden"}`}>
-              <KochenScreen openRecipeId={deepLinkRecipeId} />
+              <KochenScreen
+                openRecipeId={deepLinkRecipeId}
+                sharedText={sharedText}
+                onSharedTextConsumed={() => setSharedText(null)}
+              />
             </div>
           )}
           {visitedTabs.has("mehr") && (

@@ -156,7 +156,11 @@ function emptyRecipe(): Recipe {
 // MAIN KOCHEN SCREEN
 // ══════════════════════════════════════════════════════════════════════
 
-export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } = {}) {
+export function KochenScreen({ openRecipeId, sharedText, onSharedTextConsumed }: {
+  openRecipeId?: string | null;
+  sharedText?: string | null;
+  onSharedTextConsumed?: () => void;
+} = {}) {
   const { householdId, householdMembers } = useAuth();
   // ── State ──────────────────────────────────────────────────────────
   const [recipes, setRecipes] = useState<Recipe[]>([]);
@@ -168,6 +172,44 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
   const [selectedRecipeId, setSelectedRecipeId] = useSessionState<string | null>("kochen_selected_recipe_id", null);
   const [editRecipe, setEditRecipe] = useSessionState<Recipe | null>("kochen_edit_recipe", null);
 
+  // ── Recipe navigation back-stack depth tracker ─────────────────────
+  // Tracks how many recipe-nav handlers are currently on the global back stack.
+  // Invariant: 0 = main, 1 = detail only, 2 = detail + edit
+  const recipeNavDepthRef = useRef(0);
+
+  // ── Restore back handlers for session-persisted view state ────────
+  // When the app reloads with a non-main view from sessionStorage, no back
+  // handlers exist yet.  Register them on the first render so swipe-back works.
+  useEffect(() => {
+    if (activeView === "detail" && selectedRecipeId && recipeNavDepthRef.current === 0) {
+      recipeNavDepthRef.current = 1;
+      pushBack(() => {
+        recipeNavDepthRef.current = Math.max(0, recipeNavDepthRef.current - 1);
+        setActiveView("main");
+        setSelectedRecipeId(null);
+      });
+    } else if (activeView === "edit" && recipeNavDepthRef.current === 0) {
+      // If a recipe was open before edit, register detail handler first
+      if (selectedRecipeId) {
+        recipeNavDepthRef.current = 1;
+        pushBack(() => {
+          recipeNavDepthRef.current = Math.max(0, recipeNavDepthRef.current - 1);
+          setActiveView("main");
+          setSelectedRecipeId(null);
+        });
+      }
+      // Register the edit handler
+      recipeNavDepthRef.current++;
+      pushBack(() => {
+        recipeNavDepthRef.current = Math.max(0, recipeNavDepthRef.current - 1);
+        setEditRecipe(null);
+        if (recipeNavDepthRef.current >= 1) setActiveView("detail");
+        else { setActiveView("main"); setSelectedRecipeId(null); }
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only on mount — restores handlers for session-persisted state
+
   // Kochbuch filters
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("Alle");
   const [searchQuery, setSearchQuery] = useState("");
@@ -177,6 +219,9 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
   const [showUrlImport, setShowUrlImport] = useState(false);
   const [urlInput, setUrlInput] = useState("");
   const [importing, setImporting] = useState(false);
+  const [showTextImport, setShowTextImport] = useState(false);
+  const [textInput, setTextInput] = useState("");
+  const [textExtracting, setTextExtracting] = useState(false);
 
   // Photo extraction workflow
   const [photoCropSrc, setPhotoCropSrc] = useState<string | null>(null);
@@ -224,6 +269,8 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
   // ── Back-gesture handlers for drawers/modals ──────────────────────
   useBackHandler(showAddSheet, () => setShowAddSheet(false));
   useBackHandler(showUrlImport, () => { setShowUrlImport(false); setUrlInput(""); });
+  useBackHandler(showTextImport && !textExtracting, () => { setShowTextImport(false); setTextInput(""); });
+  useBackHandler(textExtracting, () => {}); // block back during text extraction
   useBackHandler(!!photoCropSrc && !photoExtracting, () => { setPhotoCropSrc(null); });
   useBackHandler(photoExtracting, () => {}); // block back during extraction
   useBackHandler(showMealPicker, () => { setShowMealPicker(false); setMealPickerDate(null); });
@@ -231,6 +278,17 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
   useBackHandler(showEditEntrySheet, () => setShowEditEntrySheet(false));
   useBackHandler(showIngredientsModal, () => { setShowIngredientsModal(false); setIngredientsRecipe(null); });
   useBackHandler(!!deleteConfirm, () => setDeleteConfirm(null));
+
+  // ── Shared text from Web Share Target ─────────────────────────────
+  useEffect(() => {
+    if (sharedText) {
+      setTextInput(sharedText);
+      setShowTextImport(true);
+      setShowAddSheet(false);
+      onSharedTextConsumed?.();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sharedText]);
 
   // ── Load data ──────────────────────────────────────────────────────
 
@@ -374,9 +432,19 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
   // ── Handlers ───────────────────────────────────────────────────────
 
   const openRecipeDetail = (id: string) => {
+    // Pop any lingering recipe-nav handlers first (handles stale session-restore state)
+    while (recipeNavDepthRef.current > 0) {
+      popBack();
+      recipeNavDepthRef.current--;
+    }
     setSelectedRecipeId(id);
     setActiveView("detail");
-    pushBack(() => { setActiveView("main"); setSelectedRecipeId(null); });
+    recipeNavDepthRef.current = 1;
+    pushBack(() => {
+      recipeNavDepthRef.current = Math.max(0, recipeNavDepthRef.current - 1);
+      setActiveView("main");
+      setSelectedRecipeId(null);
+    });
   };
 
   // Deep-link: open a specific recipe when the prop changes
@@ -393,16 +461,28 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
       : [{ name: "", quantity: "", unit: "" }];
     setEditRecipe({ ...recipe, ingredients: ings, steps: [...recipe.steps], categories: [...recipe.categories] });
     setActiveView("edit");
+    // If we're in a session-restored detail state (depth=0 but a recipe is selected),
+    // register the detail handler first so swipe-back from edit lands at detail, not main.
+    if (recipeNavDepthRef.current === 0 && selectedRecipeId) {
+      recipeNavDepthRef.current = 1;
+      pushBack(() => {
+        recipeNavDepthRef.current = Math.max(0, recipeNavDepthRef.current - 1);
+        setActiveView("main");
+        setSelectedRecipeId(null);
+      });
+    }
+    recipeNavDepthRef.current++;
     pushBack(() => {
+      recipeNavDepthRef.current = Math.max(0, recipeNavDepthRef.current - 1);
       setEditRecipe(null);
-      if (selectedRecipeId) setActiveView("detail");
-      else setActiveView("main");
+      if (recipeNavDepthRef.current >= 1) setActiveView("detail");
+      else { setActiveView("main"); setSelectedRecipeId(null); }
     });
   };
 
   const saveEdit = async () => {
     if (!editRecipe) return;
-    const cameFromDetail = !!selectedRecipeId; // true if editing existing recipe from detail view
+    const cameFromDetail = recipeNavDepthRef.current >= 2; // depth≥2 means detail+edit on stack
     const cleanedRecipe = {
       ...editRecipe,
       ingredients: editRecipe.ingredients.filter((ing) => ing.name.trim() !== ""),
@@ -441,11 +521,18 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
     setSelectedRecipeId(cleanedRecipe.id);
     setActiveView("detail");
     setEditRecipe(null);
-    popBack(); // remove edit history entry
-    // If this was a new recipe (came from main → edit, not detail → edit),
-    // we need to push a detail handler so swipe-back works on the detail view.
+    // Remove edit handler from stack; depth goes from 2→1 (cameFromDetail) or 1→0 (new recipe)
+    popBack();
+    recipeNavDepthRef.current = Math.max(0, recipeNavDepthRef.current - 1);
+    // If this was a new recipe (came from main → edit), push a detail handler so
+    // swipe-back from the newly opened detail view works correctly.
     if (!cameFromDetail) {
-      pushBack(() => { setActiveView("main"); setSelectedRecipeId(null); });
+      recipeNavDepthRef.current = 1;
+      pushBack(() => {
+        recipeNavDepthRef.current = Math.max(0, recipeNavDepthRef.current - 1);
+        setActiveView("main");
+        setSelectedRecipeId(null);
+      });
     }
     toast.success("Rezept gespeichert");
   };
@@ -609,7 +696,12 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
         setShowUrlImport(false);
         setShowAddSheet(false);
         setUrlInput("");
-        pushBack(() => { setEditRecipe(null); setActiveView("main"); });
+        recipeNavDepthRef.current = 1;
+        pushBack(() => {
+          recipeNavDepthRef.current = Math.max(0, recipeNavDepthRef.current - 1);
+          setEditRecipe(null);
+          setActiveView("main");
+        });
         toast.success("Rezept importiert — bitte prüfen");
       }
     } catch (err: any) {
@@ -617,6 +709,104 @@ export function KochenScreen({ openRecipeId }: { openRecipeId?: string | null } 
       toast.error(err?.message || "Import fehlgeschlagen");
     } finally {
       setImporting(false);
+    }
+  };
+
+  // ── Text import ──────────────────────────────────────────────────────
+
+  const handleTextImport = async () => {
+    if (!textInput.trim()) return;
+    const anthropicKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
+    if (!anthropicKey) {
+      toast.error("VITE_ANTHROPIC_API_KEY ist nicht gesetzt. Bitte in Vercel unter Environment Variables hinterlegen.");
+      return;
+    }
+    setTextExtracting(true);
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000);
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": anthropicKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 2000,
+          messages: [{
+            role: "user",
+            content: `Extrahiere das Rezept aus diesem Text. Antworte NUR mit einem JSON-Objekt, kein weiterer Text, keine Markdown-Backticks.
+Format: { "title": "...", "prep_time_minutes": null, "cook_time_minutes": null, "servings": 4, "categories": [], "ingredients": [{"name": "...", "quantity": "...", "unit": "...", "category": "..."}], "steps": [{"position": 1, "description": "..."}] }
+
+SPRACHE & ÜBERSETZUNG (PFLICHT):
+- Erkenne die Sprache des Textes automatisch
+- Ist die Sprache NICHT Deutsch: übersetze ALLE Felder vollständig ins Deutsche — Titel, Zutatennamen, Zubereitungsschritte, Kategorien
+- Zutatennamen auf deutsche Supermarkt-Standardbezeichnungen: "all-purpose flour"→"Mehl (Type 405)", "heavy cream"→"Sahne", "scallions"→"Frühlingszwiebeln", "cilantro"→"Koriander", "eggplant"→"Aubergine", "bell pepper"→"Paprika", "ground beef"→"Rinderhack", "chicken breast"→"Hähnchenbrust", "shrimp"→"Garnelen", "cornstarch"→"Maisstärke", "baking soda"→"Natron", "baking powder"→"Backpulver"
+- Maßeinheiten: "cup"→"ml" (1 cup=240ml), "oz"→"g" (1 oz=28g), "lb"→"g" (1 lb=454g), "tbsp"→"EL", "tsp"→"TL", °F→°C in Schritten
+
+Extraktionsregeln:
+- Mengenangaben wie "nach Geschmack", "etwas", "nach Belieben" → quantity leer lassen
+- ALLE Zutaten extrahieren inkl. Toppings und optionale Zutaten
+- Falls kein Rezept erkennbar: { "error": "Kein Rezept gefunden" }
+
+Text:
+${textInput}`,
+          }],
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      if (!response.ok) throw new Error(`Claude API: ${response.status}`);
+      const result = await response.json();
+      const rawText = result.content?.[0]?.text || "";
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error("Kein JSON in der Antwort");
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed.error) {
+        toast.error("Kein Rezept erkannt — bitte nochmal versuchen");
+        return;
+      }
+      const capitalizeFirst = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+      const newRecipe: Recipe = {
+        ...emptyRecipe(),
+        ...parsed,
+        id: genId(),
+        household_id: householdId || "",
+        created_at: new Date().toISOString(),
+        rating: 0,
+        comment: "",
+        is_favorite: false,
+        image_url: null,
+        source_url: "",
+        description: parsed.description || "",
+        categories: (parsed.categories || []).map(capitalizeFirst),
+        ingredients: (parsed.ingredients?.length > 0) ? parsed.ingredients : [{ name: "", quantity: "", unit: "" }],
+        steps: parsed.steps || [],
+      };
+      setShowTextImport(false);
+      setShowAddSheet(false);
+      setTextInput("");
+      setEditRecipe(newRecipe);
+      setActiveView("edit");
+      recipeNavDepthRef.current = 1;
+      pushBack(() => {
+        recipeNavDepthRef.current = Math.max(0, recipeNavDepthRef.current - 1);
+        setEditRecipe(null);
+        setActiveView("main");
+      });
+      toast.success("Rezept erkannt — bitte prüfen ✅");
+    } catch (err: any) {
+      console.error("Text extraction error:", err);
+      if (err?.name === "AbortError") {
+        toast.error("Zeitüberschreitung — bitte nochmal versuchen");
+      } else {
+        toast.error(err?.message || "Extraktion fehlgeschlagen");
+      }
+    } finally {
+      setTextExtracting(false);
     }
   };
 
@@ -647,7 +837,14 @@ Format:
   "steps": [{"position": 1, "description": "Schritt 1"}]
 }
 Verfügbare Zutaten-Kategorien: Obst & Gemüse, Backwaren, Fleisch & Wurst, Milch & Käse, Eier, Nudeln & Reis, Konserven, Saucen & Gewürze, Kaffee & Tee, Müsli & Frühstück, Tiefkühl, Süßwaren & Snacks, Getränke, Veggie & Bio, Haushalt & Reinigung, Körperpflege, Gesundheit & Medizin, Sonstiges.
-Regeln:
+
+SPRACHE & ÜBERSETZUNG (PFLICHT):
+- Erkenne automatisch in welcher Sprache das Rezept vorliegt.
+- Ist die Sprache NICHT Deutsch: übersetze ALLE Textfelder vollständig ins Deutsche — Titel, Zutatennamen, Zubereitungsschritte, Kategorien.
+- Zutatennamen auf deutsche Supermarkt-Standardbezeichnungen: "all-purpose flour"→"Mehl (Type 405)", "bread flour"→"Mehl (Type 550)", "heavy cream"/"heavy whipping cream"→"Sahne", "half and half"→"Halbfette Milch", "scallions"/"green onions"→"Frühlingszwiebeln", "cilantro"→"Koriander", "eggplant"→"Aubergine", "bell pepper"→"Paprika", "butternut squash"→"Butternusskürbis", "sweet potato"→"Süßkartoffel", "ground beef"→"Rinderhack", "chicken breast"→"Hähnchenbrust", "shrimp"→"Garnelen", "cornstarch"→"Maisstärke", "baking soda"→"Natron", "baking powder"→"Backpulver", "vanilla extract"→"Vanilleextrakt", "powdered sugar"→"Puderzucker", "brown sugar"→"brauner Zucker".
+- Maßeinheiten umrechnen: "cup"→"ml" (1 cup=240ml, ½ cup=120ml, ¼ cup=60ml), "oz"→"g" (1 oz=28g), "lb"/"lbs"→"g" (1 lb=454g), "tbsp"→"EL", "tsp"→"TL", "stick butter"→quantity:"125", unit:"g", name:"Butter". Temperaturen in Schritten: °F→°C ((°F−32)×5/9, auf 5°C runden).
+
+Extraktionsregeln:
 - Mengenangaben wie "nach Geschmack", "etwas", "nach Belieben" → quantity leer lassen
 - ALLE Zutaten extrahieren inkl. Toppings, optionale Zutaten und Untergruppen
 - Bei Untergruppen (z.B. "Für das Topping:") den Gruppennamen als Prefix: "Topping: Kirschtomaten"
@@ -738,7 +935,11 @@ Regeln:
     setSelectedRecipeId(null);
     setEditRecipe(null);
     setDeleteConfirm(null); // prevent Wochenplaner delete drawer from appearing
-    popBack(); // remove detail-view back handler
+    // Pop ALL recipe-nav handlers (could be detail + edit if deleted from edit view)
+    while (recipeNavDepthRef.current > 0) {
+      popBack();
+      recipeNavDepthRef.current--;
+    }
     toast.success("Rezept gelöscht");
   };
 
@@ -759,7 +960,13 @@ Regeln:
     return (
       <RecipeDetailView
         recipe={selectedRecipe}
-        onBack={() => { popBack(); setActiveView("main"); setSelectedRecipeId(null); setDeleteConfirm(null); }}
+        onBack={() => {
+          popBack();
+          recipeNavDepthRef.current = Math.max(0, recipeNavDepthRef.current - 1);
+          setActiveView("main");
+          setSelectedRecipeId(null);
+          setDeleteConfirm(null);
+        }}
         onEdit={() => openEditMode(selectedRecipe)}
         onToggleFavorite={() => toggleFavorite(selectedRecipe.id)}
         onSetRating={(r) => setRating(selectedRecipe.id, r)}
@@ -785,9 +992,10 @@ Regeln:
         onSave={saveEdit}
         onCancel={() => {
           popBack(); // remove edit history entry
+          recipeNavDepthRef.current = Math.max(0, recipeNavDepthRef.current - 1);
           setEditRecipe(null);
-          if (selectedRecipeId) setActiveView("detail");
-          else setActiveView("main");
+          if (recipeNavDepthRef.current >= 1) setActiveView("detail");
+          else { setActiveView("main"); setSelectedRecipeId(null); }
         }}
         householdId={householdId || ""}
         customRecipeCategories={customRecipeCategories}
@@ -1658,7 +1866,12 @@ Regeln:
                   setEditRecipe(r);
                   setActiveView("edit");
                   setShowAddSheet(false);
-                  pushBack(() => { setEditRecipe(null); setActiveView("main"); });
+                  recipeNavDepthRef.current = 1;
+                  pushBack(() => {
+                    recipeNavDepthRef.current = Math.max(0, recipeNavDepthRef.current - 1);
+                    setEditRecipe(null);
+                    setActiveView("main");
+                  });
                 }}
               >
                 <div className="w-10 h-10 rounded-xl bg-accent-light flex items-center justify-center">
@@ -1682,6 +1895,18 @@ Regeln:
                 <div>
                   <p className="text-sm font-medium text-text-1">Foto hochladen</p>
                   <p className="text-xs text-text-3">Rezept aus einem Foto extrahieren</p>
+                </div>
+              </button>
+              <button
+                className="flex items-center gap-3 p-3 rounded-xl bg-surface-2 hover:bg-accent-light transition text-left"
+                onClick={() => { setShowAddSheet(false); setShowTextImport(true); }}
+              >
+                <div className="w-10 h-10 rounded-xl bg-accent-light flex items-center justify-center">
+                  <FileText className="w-5 h-5 text-accent" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-text-1">Text einfügen</p>
+                  <p className="text-xs text-text-3">Aus Beschreibung, WhatsApp oder Website</p>
                 </div>
               </button>
               </div>
@@ -1747,6 +1972,76 @@ Regeln:
                 "Importieren"
               )}
             </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Text Import Sheet */}
+      <AnimatePresence>
+        {showTextImport && (
+          <motion.div
+            className="fixed inset-0 z-[999]"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            transition={DRAWER_SPRING}
+          >
+            <div className="absolute inset-0 bg-black/40" onClick={() => { if (!textExtracting) { setShowTextImport(false); setTextInput(""); } }} />
+            <motion.div
+              className="absolute left-0 right-0 rounded-t-[20px] pb-[env(safe-area-inset-bottom)] p-5"
+              style={{ background: 'var(--surface)', boxShadow: 'var(--shadow-elevated)', bottom: bottomOffset, maxHeight: vpHeight - 72 }}
+              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+              transition={DRAWER_SPRING}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex justify-center mb-4">
+                <div className="w-9 h-1 rounded-full" style={{ background: 'var(--zu-border)' }} />
+              </div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-base font-semibold">Rezepttext einfügen</h3>
+                <button
+                  disabled={textExtracting}
+                  onClick={() => { setShowTextImport(false); setTextInput(""); }}
+                  className="w-7 h-7 rounded-full bg-surface-2 flex items-center justify-center disabled:opacity-40"
+                >
+                  <X className="w-4 h-4 text-text-2" />
+                </button>
+              </div>
+              <textarea
+                value={textInput}
+                onChange={(e) => {
+                  setTextInput(e.target.value);
+                  // auto-grow
+                  e.target.style.height = "auto";
+                  e.target.style.height = e.target.scrollHeight + "px";
+                }}
+                placeholder="Füge hier den Rezepttext ein — z.B. aus einer Video-Beschreibung, WhatsApp-Nachricht oder Website..."
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                data-lpignore="true"
+                data-1p-ignore="true"
+                data-form-type="other"
+                disabled={textExtracting}
+                className="w-full px-4 py-3 bg-surface-2 rounded-xl text-sm border-0 outline-none mb-3 resize-none overflow-hidden disabled:opacity-50"
+                style={{ minHeight: 200, caretColor: "var(--color-accent)" }}
+                autoFocus
+              />
+              <button
+                disabled={!textInput.trim() || textExtracting}
+                onClick={handleTextImport}
+                className="w-full py-2.5 rounded-xl text-white text-sm font-medium disabled:opacity-40 flex items-center justify-center gap-2"
+                style={{ background: textExtracting || !textInput.trim() ? undefined : "var(--color-accent)" }}
+              >
+                {textExtracting ? (
+                  <div className="contents">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Rezept wird extrahiert...
+                  </div>
+                ) : (
+                  "Extrahieren"
+                )}
+              </button>
             </motion.div>
           </motion.div>
         )}
@@ -1853,7 +2148,12 @@ Regeln:
                 };
                 setEditRecipe(newRecipe);
                 setActiveView("edit");
-                pushBack(() => { setEditRecipe(null); setActiveView("main"); });
+                recipeNavDepthRef.current = 1;
+                pushBack(() => {
+                  recipeNavDepthRef.current = Math.max(0, recipeNavDepthRef.current - 1);
+                  setEditRecipe(null);
+                  setActiveView("main");
+                });
                 toast.success("Rezept extrahiert — bitte prüfen");
               } catch (err: any) {
                 console.error("Photo extraction error:", err);
@@ -2206,6 +2506,9 @@ function RecipeDetailView({
               <button onClick={onEdit} className="w-8 h-8 rounded-full bg-surface/80 flex items-center justify-center">
                 <Pencil className="w-4 h-4 text-text-2" />
               </button>
+              <button onClick={() => setShowDeleteConfirm(true)} className="w-8 h-8 rounded-full bg-surface/80 flex items-center justify-center">
+                <Trash2 className="w-4 h-4 text-danger" />
+              </button>
             </div>
           </div>
         </div>
@@ -2305,10 +2608,6 @@ function RecipeDetailView({
             </div>
           )}
 
-          {/* Delete */}
-          <button onClick={() => setShowDeleteConfirm(true)} className="flex items-center gap-2 text-sm text-danger mt-6">
-            <Trash2 className="w-4 h-4" /> Rezept löschen
-          </button>
         </div>
       </div>
 
@@ -2335,13 +2634,16 @@ function RecipeDetailView({
 
           {/* Right: title, categories, stars, time, link */}
           <div className="relative px-6 py-4 flex flex-col justify-center">
-            {/* Favorite + Edit — top right */}
+            {/* Favorite + Edit + Delete — top right */}
             <div className="absolute top-3 right-3 flex gap-2">
               <button onClick={onToggleFavorite} className="w-8 h-8 rounded-full bg-surface-2 flex items-center justify-center">
                 <Heart className={`w-4 h-4 ${recipe.is_favorite ? "fill-accent text-accent" : "text-text-2"}`} />
               </button>
               <button onClick={onEdit} className="w-8 h-8 rounded-full bg-surface-2 flex items-center justify-center">
                 <Pencil className="w-4 h-4 text-text-2" />
+              </button>
+              <button onClick={() => setShowDeleteConfirm(true)} className="w-8 h-8 rounded-full bg-surface-2 flex items-center justify-center">
+                <Trash2 className="w-4 h-4 text-danger" />
               </button>
             </div>
 
@@ -2424,11 +2726,6 @@ function RecipeDetailView({
               })}
             </div>
 
-            {/* Delete */}
-            <button onClick={() => setShowDeleteConfirm(true)}
-              className="flex items-center gap-2 text-sm text-danger mt-6 self-start">
-              <Trash2 className="w-4 h-4" /> Rezept löschen
-            </button>
           </div>
 
           {/* Right: Steps + Comment */}

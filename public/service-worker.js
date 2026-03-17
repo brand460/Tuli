@@ -1,5 +1,6 @@
 // Cache version — bump this string whenever you want to force-clear old caches
 const CACHE_NAME = 'zuhause-assets-v3';
+const SHARE_CACHE = 'share-cache';
 
 // Assets that are safe to cache forever because they have a content-hash in their filename.
 // Matches filenames like: index-BxY3kZ9a.js, vendor-A1b2C3d4.css
@@ -20,7 +21,7 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((keys) =>
       Promise.all(
         keys
-          .filter((key) => key !== CACHE_NAME)
+          .filter((key) => key !== CACHE_NAME && key !== SHARE_CACHE)
           .map((key) => caches.delete(key))
       )
     ).then(() => self.clients.claim())
@@ -34,7 +35,38 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Only handle GET requests
+  // ── Share Target: intercept POST /share-recipe ──────────────────────────
+  if (url.pathname === '/share-recipe' && request.method === 'POST') {
+    event.respondWith((async () => {
+      try {
+        const formData = await request.formData();
+        const text     = formData.get('text')  || '';
+        const shareUrl = formData.get('url')   || '';
+        const title    = formData.get('title') || '';
+
+        // Kombiniere alle Felder zu einem einzigen String
+        const combined = [title, text, shareUrl].filter(Boolean).join('\n');
+
+        // Versuche, an bereits geöffnete App-Fenster zu senden
+        const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+        if (clients.length > 0) {
+          clients[0].postMessage({ type: 'SHARE_RECEIVED', text: combined });
+          clients[0].focus();
+        } else {
+          // App ist geschlossen — in Cache zwischenspeichern
+          const cache = await caches.open(SHARE_CACHE);
+          await cache.put('/pending-share', new Response(combined));
+        }
+      } catch (err) {
+        console.error('[SW] Share target error:', err);
+      }
+      // Zurück zur App umleiten
+      return Response.redirect('/', 303);
+    })());
+    return;
+  }
+
+  // Only handle GET requests below this point
   if (request.method !== 'GET') return;
 
   // 1. Supabase / API calls → pure network, no caching

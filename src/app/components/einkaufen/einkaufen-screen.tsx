@@ -77,6 +77,7 @@ import {
 import { useBackHandler } from "../ui/use-back-handler";
 import { useAuth } from "../auth-context";
 import { useKeyboardOffset } from "../ui/use-keyboard-offset";
+import { useSessionState } from "../ui/use-session-state";
 import { toast } from "sonner";
 const bagEmptyImg = '/images/bag-empty.png';
 const bagFullImg = '/images/bag-full.png';
@@ -3069,7 +3070,7 @@ export function EinkaufenScreen({
     useState(false);
   // Ref mirror so updateListBottom (stable callback) can read the value without re-creating
   const isItemNameEditingRef = useRef(false);
-  const [selectedStore, setSelectedStore] = useState("aldi");
+  const [selectedStore, setSelectedStore] = useSessionState<string>("einkaufen_store", "alle");
   const [showAddStore, setShowAddStore] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [activeDragId, setActiveDragId] = useState<

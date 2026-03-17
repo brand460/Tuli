@@ -19,6 +19,7 @@ import { ProfilScreen } from "./profil-screen";
 import { MeineArtikelScreen } from "./meine-artikel-screen";
 import { registerAfterPermission } from "./onesignal";
 import { apiFetch } from "./supabase-client";
+import { useBackHandler } from "./ui/use-back-handler";
 
 interface MehrScreenProps {
   onSignOut: () => void;
@@ -65,6 +66,12 @@ export function MehrScreen({ onSignOut, user, householdId }: MehrScreenProps) {
   const [showProfilScreen, setShowProfilScreen] = useState(false);
   const [showAboutScreen, setShowAboutScreen] = useState(false);
   const [showMeineArtikel, setShowMeineArtikel] = useState(false);
+
+  // ── Back-gesture handlers for sub-screens ─────────────────────────
+  useBackHandler(showHouseholdSettings, () => setShowHouseholdSettings(false));
+  useBackHandler(showProfilScreen, () => setShowProfilScreen(false));
+  useBackHandler(showAboutScreen, () => setShowAboutScreen(false));
+  useBackHandler(showMeineArtikel, () => setShowMeineArtikel(false));
 
   // ── Notification permission state ────────────────────────────────
   const [notifPermission, setNotifPermission] = useState<NotificationPermission | null>(() => {
@@ -245,39 +252,39 @@ export function MehrScreen({ onSignOut, user, householdId }: MehrScreenProps) {
           })}
         </div>
 
-          {/* ── Benachrichtigungen-Banner (nur PWA + nicht granted) ── */}
-          {showNotifButton && (
-            <button
-              onClick={handleEnableNotifications}
-              disabled={notifLoading}
-              className="mx-4 mt-3 w-[calc(100%-2rem)] flex items-center gap-3 px-4 py-3.5 rounded-[16px] active:opacity-80 transition-opacity text-left"
-              style={{
-                background: "color-mix(in srgb, var(--accent) 12%, transparent)",
-                border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)",
-                boxShadow: "var(--shadow-card)",
-              }}
+        {/* ── Benachrichtigungen-Banner (nur PWA + nicht granted) ── */}
+        {showNotifButton && (
+          <button
+            onClick={handleEnableNotifications}
+            disabled={notifLoading}
+            className="mx-4 mt-3 w-[calc(100%-2rem)] flex items-center gap-3 px-4 py-3.5 rounded-[16px] active:opacity-80 transition-opacity text-left"
+            style={{
+              background: "color-mix(in srgb, var(--accent) 12%, transparent)",
+              border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)",
+              boxShadow: "var(--shadow-card)",
+            }}
+          >
+            <div
+              className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ background: "var(--accent)" }}
             >
-              <div
-                className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                style={{ background: "var(--accent)" }}
-              >
-                {notifLoading ? (
-                  <Loader className="w-[18px] h-[18px] text-white animate-spin" />
-                ) : (
-                  <Bell className="w-[18px] h-[18px] text-white" />
-                )}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold" style={{ color: "var(--accent)" }}>
-                  Benachrichtigungen aktivieren
-                </p>
-                <p className="text-xs mt-0.5 truncate" style={{ color: "var(--text-2)" }}>
-                  Erhalte Erinnerungen für Kalender-Events
-                </p>
-              </div>
-              <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: "var(--accent)" }} />
-            </button>
-          )}
+              {notifLoading ? (
+                <Loader className="w-[18px] h-[18px] text-white animate-spin" />
+              ) : (
+                <Bell className="w-[18px] h-[18px] text-white" />
+              )}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold" style={{ color: "var(--accent)" }}>
+                Benachrichtigungen aktivieren
+              </p>
+              <p className="text-xs mt-0.5 truncate" style={{ color: "var(--text-2)" }}>
+                Erhalte Erinnerungen für Kalender-Events
+              </p>
+            </div>
+            <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: "var(--accent)" }} />
+          </button>
+        )}
         </div>
       </div>
 
