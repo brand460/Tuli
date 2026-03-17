@@ -1441,7 +1441,11 @@ app.post("/make-server-2a26506b/send-notifications", async (c) => {
 
         // Format notification body with event time
         const startDate = new Date(target.startTime);
-        const timeStr = `${startDate.getHours().toString().padStart(2, "0")}:${startDate.getMinutes().toString().padStart(2, "0")} Uhr`;
+        const timeStr = startDate.toLocaleTimeString("de-DE", {
+          hour: "2-digit",
+          minute: "2-digit",
+          timeZone: "Europe/Berlin",
+        }) + " Uhr";
 
         try {
           const osRes = await fetch("https://onesignal.com/api/v1/notifications", {

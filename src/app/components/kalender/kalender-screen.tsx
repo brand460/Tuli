@@ -307,10 +307,15 @@ interface MonthGridProps {
   labels: CalendarLabel[];
   onDayClick: (date: Date) => void;
   holidayMap: Map<string, Holiday[]>;
+  calendarHeight: number;
 }
 
-const MonthGrid = React.memo(function MonthGrid({ data, selectedDate, highlightMonth, today, isDark, labels, onDayClick, holidayMap }: MonthGridProps) {
+const MonthGrid = React.memo(function MonthGrid({ data, selectedDate, highlightMonth, today, isDark, labels, onDayClick, holidayMap, calendarHeight }: MonthGridProps) {
   const { weeks, weekBands, cellSingleEvents, cellAllEvents } = data;
+  // Responsive row height: subtract approx weekday-header (24px) from available height,
+  // then divide equally among weeks. Used to cap visible event slots per day.
+  const WEEKDAY_ROW_H = 24;
+  const rowH = Math.max(32, (calendarHeight - WEEKDAY_ROW_H) / weeks.length);
   return (
     // height: 100% fills the track panel height set by the outer grid container
     <div style={{ flex: "0 0 33.3333%", height: "100%", display: "flex", flexDirection: "column" }}>
@@ -326,8 +331,12 @@ const MonthGrid = React.memo(function MonthGrid({ data, selectedDate, highlightM
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
       {weeks.map((week, weekIdx) => {
         const bands = weekBands[weekIdx];
-        const maxLanes = bands.length > 0 ? Math.max(...bands.map((b) => b.lane)) + 1 : 0;
-        const bandAreaHeight = maxLanes * (BAND_HEIGHT + BAND_GAP);
+        // PILL_H / INDICATOR_H are per-row constants; actual band-area height is
+        // computed PER COLUMN below so that a Mo-Mi band doesn't create phantom
+        // empty space on Do-So (the bug: week-wide maxLanes was used as offset
+        // even for columns where the multi-day event has already ended).
+        const PILL_H = BAND_HEIGHT + BAND_GAP;
+        const INDICATOR_H = 14;
         return (
           <div
               key={weekIdx}
@@ -376,7 +385,28 @@ const MonthGrid = React.memo(function MonthGrid({ data, selectedDate, highlightM
               const singleEvents = cellSingleEvents[key] || [];
               const allEvents = cellAllEvents[key] || [];
               const bandsHere = bandsAtCol(bands, colIdx);
-              const maxSingleSlots = Math.max(0, 3 - bandsHere);
+              // ── Per-column band area ──────────────────────────────
+              // Use only the lanes actually occupied at THIS column —
+              // not the week-wide maximum. A Mo-Mi event that ends on
+              // Wednesday must NOT reserve vertical space on Thursday+.
+              const colBandAreaH = bandsHere * PILL_H;
+              const colSinglesAreaH = Math.max(0, rowH - DAY_NUM_HEIGHT - colBandAreaH);
+              const colPillSlots = Math.floor(colSinglesAreaH / PILL_H);
+              // Determine how many singles to show, reserving 1 slot for "+N" if needed
+              let maxSingleSlots: number;
+              if (singleEvents.length <= colPillSlots) {
+                // All singles fit — no indicator needed
+                maxSingleSlots = colPillSlots;
+              } else if (colSinglesAreaH >= INDICATOR_H + PILL_H) {
+                // Show (colPillSlots - 1) pills + indicator
+                maxSingleSlots = Math.max(0, colPillSlots - 1);
+              } else if (colSinglesAreaH >= INDICATOR_H) {
+                // Only indicator fits, no pills
+                maxSingleSlots = 0;
+              } else {
+                // Not even indicator fits; show whatever fits without indicator
+                maxSingleSlots = colPillSlots;
+              }
               const visibleSingle = singleEvents.slice(0, maxSingleSlots);
               const visibleIds = new Set<string>();
               for (const seg of bands) {
@@ -425,7 +455,7 @@ const MonthGrid = React.memo(function MonthGrid({ data, selectedDate, highlightM
                     </span>
                   )}
                   {visibleSingle.length > 0 && (
-                    <div className="w-full flex flex-col gap-px absolute left-0 right-0" style={{ top: DAY_NUM_HEIGHT + bandAreaHeight }}>
+                    <div className="w-full flex flex-col gap-px absolute left-0 right-0" style={{ top: DAY_NUM_HEIGHT + colBandAreaH }}>
                       {visibleSingle.map((ev) => {
                         const evHex = resolveEventHex(ev, labels);
                         const pillStyle = getEventPillStyleFromHex(evHex, isDark);
@@ -443,12 +473,12 @@ const MonthGrid = React.memo(function MonthGrid({ data, selectedDate, highlightM
                       })}
                     </div>
                   )}
-                  {hiddenCount > 0 && (
+                  {hiddenCount > 0 && colSinglesAreaH >= INDICATOR_H && (
                     <div
                       className="absolute flex items-center justify-center gap-0.5 w-full px-0.5"
                       style={{
-                        top: DAY_NUM_HEIGHT + bandAreaHeight + visibleSingle.length * (BAND_HEIGHT + BAND_GAP),
-                        height: 14,
+                        top: DAY_NUM_HEIGHT + colBandAreaH + visibleSingle.length * PILL_H,
+                        height: INDICATOR_H,
                       }}
                     >
                       <span className="text-[9px] font-semibold leading-none flex-shrink-0" style={{ color: "var(--color-accent)" }}>+{hiddenCount}</span>
@@ -543,6 +573,43 @@ export function KalenderScreen({ onNavigate, openEventId, onDeepLinkHandled, onR
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     return () => obs.disconnect();
   }, []);
+  // ── Drag Handle: variable calendar height ──────────────────────────
+  // Default: ~55% of viewport height (matches original 58dvh but leaves room for event list)
+  const [calendarHeight, setCalendarHeight] = useSessionState<number>(
+    "kalender_calendar_height",
+    Math.min(480, Math.max(260, Math.round(window.innerHeight * 0.52))),
+  );
+  const calendarSectionRef = useRef<HTMLDivElement>(null);
+  const isDraggingHandleRef = useRef(false);
+
+  const startDrag = useCallback((e: React.TouchEvent | React.MouseEvent) => {
+    if (window.innerWidth >= 768) return; // Desktop: kein Drag Handle
+    e.preventDefault();
+    isDraggingHandleRef.current = true;
+
+    const onMove = (moveEvent: TouchEvent | MouseEvent) => {
+      if (!isDraggingHandleRef.current || !calendarSectionRef.current) return;
+      const clientY = "touches" in moveEvent
+        ? (moveEvent as TouchEvent).touches[0].clientY
+        : (moveEvent as MouseEvent).clientY;
+      const sectionTop = calendarSectionRef.current.getBoundingClientRect().top;
+      setCalendarHeight(Math.min(560, Math.max(160, Math.round(clientY - sectionTop))));
+    };
+
+    const onEnd = () => {
+      isDraggingHandleRef.current = false;
+      document.removeEventListener("touchmove", onMove);
+      document.removeEventListener("touchend", onEnd);
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onEnd);
+    };
+
+    document.addEventListener("touchmove", onMove, { passive: false });
+    document.addEventListener("touchend", onEnd);
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onEnd);
+  }, [setCalendarHeight]);
+
   const [editingEvent, setEditingEvent] = useSessionState<CalendarEvent | null>("kalender_editing_event", null);
   const [showEditor, setShowEditor] = useSessionState<boolean>("kalender_show_editor", false);
   const [showRecurringPrompt, setShowRecurringPrompt] = useState(false);
@@ -1024,6 +1091,7 @@ export function KalenderScreen({ onNavigate, openEventId, onDeepLinkHandled, onR
     >
       {/* ── LEFT COLUMN: Calendar header + grid ──────────────────── */}
       <div
+        ref={calendarSectionRef}
         style={isDesktop
           ? { flex: "0 0 75%", display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }
           : { display: "flex", flexDirection: "column", flexShrink: 0 }
@@ -1061,7 +1129,7 @@ export function KalenderScreen({ onNavigate, openEventId, onDeepLinkHandled, onR
             boxShadow: "var(--shadow-card)",
             ...(isDesktop
               ? { flex: 1, minHeight: 0 }
-              : { flexShrink: 0, height: "58dvh" }
+              : { flexShrink: 0, height: calendarHeight }
             ),
           }}
           onTouchStart={handleTouchStart}
@@ -1086,6 +1154,7 @@ export function KalenderScreen({ onNavigate, openEventId, onDeepLinkHandled, onR
               labels={labels}
               onDayClick={handleDayClick}
               holidayMap={holidayMap}
+              calendarHeight={calendarHeight}
             />
             <MonthGrid
               data={curData}
@@ -1096,6 +1165,7 @@ export function KalenderScreen({ onNavigate, openEventId, onDeepLinkHandled, onR
               labels={labels}
               onDayClick={handleDayClick}
               holidayMap={holidayMap}
+              calendarHeight={calendarHeight}
             />
             <MonthGrid
               data={nextData}
@@ -1106,10 +1176,24 @@ export function KalenderScreen({ onNavigate, openEventId, onDeepLinkHandled, onR
               labels={labels}
               onDayClick={handleDayClick}
               holidayMap={holidayMap}
+              calendarHeight={calendarHeight}
             />
           </div>
         </div>
       </div>{/* end left column */}
+
+      {/* ── Drag Handle (Mobile only) ────────────────────────────── */}
+      {!isDesktop && (
+        <div
+          className="flex-shrink-0 flex items-center justify-center cursor-row-resize"
+          style={{ height: 28, touchAction: "none" }}
+          onTouchStart={startDrag}
+          onMouseDown={startDrag}
+          onContextMenu={e => e.preventDefault()}
+        >
+          <div className="w-9 h-1 rounded-full" style={{ background: "var(--zu-border)" }} />
+        </div>
+      )}
 
       {/* ── RIGHT COLUMN / Event Panel ────────────────────────────── */}
       <div
@@ -1132,7 +1216,7 @@ export function KalenderScreen({ onNavigate, openEventId, onDeepLinkHandled, onR
             }
         }
       >
-        <div className="flex-shrink-0 flex items-center justify-between px-[20px] pt-[48px] pb-[12px]">
+        <div className="flex-shrink-0 flex items-center justify-between px-[20px] pt-[12px] pb-[12px]">
           <h3 className="text-sm font-bold text-text-1">{formatDateLong(selectedDate)}</h3>
           <button
             onClick={handleNewEvent}

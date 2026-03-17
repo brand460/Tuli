@@ -31,9 +31,21 @@ export const supabase: ReturnType<typeof createClient> =
 export const API_BASE = `${supabaseUrl}/functions/v1/make-server-2a26506b`;
 
 // ── Single in-flight refresh guard ─────────────────────────────────
-// Prevents concurrent apiFetch calls from calling refreshSession() multiple
-// times simultaneously (would invalidate the refresh token on the 2nd call).
+// Shared by getFreshToken() AND the 401-retry path so that concurrent calls
+// never trigger two simultaneous refreshSession() calls (which would
+// invalidate the refresh token on the second call).
 let _refreshPromise: Promise<string | null> | null = null;
+
+function doRefresh(): Promise<string | null> {
+  if (!_refreshPromise) {
+    _refreshPromise = supabase.auth
+      .refreshSession()
+      .then(({ data }) => data.session?.access_token ?? null)
+      .catch(() => null)
+      .finally(() => { _refreshPromise = null; });
+  }
+  return _refreshPromise;
+}
 
 async function getFreshToken(): Promise<string> {
   try {
@@ -43,23 +55,15 @@ async function getFreshToken(): Promise<string> {
       return publicAnonKey;
     }
 
-    // Check if token is still valid for more than 60 seconds (increased buffer)
+    // Token still valid for more than 60 seconds — use as-is, no refresh needed
     const nowSec = Math.floor(Date.now() / 1000);
     const expiresAt = session.expires_at ?? 0;
     if (expiresAt - nowSec > 60) {
       return session.access_token;
     }
 
-    // Token expiring soon or already expired — refresh exactly once
-    if (!_refreshPromise) {
-      _refreshPromise = supabase.auth
-        .refreshSession()
-        .then(({ data }) => data.session?.access_token ?? null)
-        .catch(() => null)
-        .finally(() => { _refreshPromise = null; });
-    }
-
-    const newToken = await _refreshPromise;
+    // Token expiring within 60 s or already expired — refresh exactly once
+    const newToken = await doRefresh();
     return newToken ?? publicAnonKey;
   } catch (err) {
     console.log("[getFreshToken] Error:", err);
@@ -98,15 +102,12 @@ export async function apiFetch(path: string, options: RequestInit = {}) {
     if (res.status === 401 && attempt <= 2) {
       if (attempt === 1) {
         console.log(`[apiFetch] 401 bei ${path} — erzwinge Token-Refresh und retry...`);
-        try {
-          const { data } = await supabase.auth.refreshSession();
-          token = data.session?.access_token ?? publicAnonKey;
-        } catch {
-          console.log(`[apiFetch] Token-Refresh fehlgeschlagen, nutze publicAnonKey`);
-          token = publicAnonKey;
-        }
+        // Use the shared doRefresh() guard — prevents a second concurrent refresh
+        // if getFreshToken() already kicked one off simultaneously.
+        const newToken = await doRefresh();
+        token = newToken ?? publicAnonKey;
       } else {
-        // Attempt 2 still 401 — session token is broken, use anon key
+        // Attempt 2 still 401 — session is truly broken, fall back to anon key
         console.log(`[apiFetch] 401 bei ${path} auch nach Refresh — Fallback auf publicAnonKey`);
         token = publicAnonKey;
       }

@@ -4333,11 +4333,12 @@ function RecipeEditView({
               <button
                 disabled={!imageUrlDraft.trim()}
                 onClick={() => {
-                  const urlSrc = imageUrlDraft.trim();
-                  if (!urlSrc) return;
+                  // Kein Crop für externe URLs wegen CORS — Canvas wird "tainted"
+                  // und toBlob() würde einen SecurityError werfen.
+                  // URL direkt setzen; <ImageWithFallback> rendert externe URLs problemlos.
+                  update({ image_url: imageUrlDraft.trim() || null });
                   setShowUrlInput(false);
                   setImageUrlDraft("");
-                  setCropImageSrc(urlSrc);
                 }}
                 className="w-full py-2.5 rounded-xl bg-accent text-white text-sm font-medium disabled:opacity-40"
               >

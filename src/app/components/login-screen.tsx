@@ -38,7 +38,7 @@ export function LoginScreen({ onSwitchToRegister }: LoginScreenProps) {
           <p className="text-text-2 mt-1">Willkommen zurück</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4" autoComplete="on">
           {error && (
             <div className="text-sm font-medium" style={{ background: "var(--danger-light)", color: "var(--danger)", borderRadius: "var(--radius-card)", padding: 12 }}>
               {error}
@@ -51,13 +51,8 @@ export function LoginScreen({ onSwitchToRegister }: LoginScreenProps) {
             </label>
             <input
               type="email"
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="off"
-              spellCheck={false}
-              data-lpignore="true"
-              data-1p-ignore="true"
-              data-form-type="other"
+              name="email"
+              autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="name@beispiel.de"
@@ -73,13 +68,8 @@ export function LoginScreen({ onSwitchToRegister }: LoginScreenProps) {
             </label>
             <input
               type="password"
-              autoComplete="new-password"
-              autoCorrect="off"
-              autoCapitalize="off"
-              spellCheck={false}
-              data-lpignore="true"
-              data-1p-ignore="true"
-              data-form-type="other"
+              name="password"
+              autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Passwort eingeben"

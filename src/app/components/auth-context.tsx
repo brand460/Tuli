@@ -109,6 +109,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // overlay from appearing on every subsequent app-resume / token-refresh.
   const isInitialLoad = useRef(true);
 
+  // Tracks whether the current sign-out was initiated by the user (vs. an
+  // unexpected SIGNED_OUT event caused by a token-refresh race or network hiccup).
+  const userInitiatedSignOutRef = useRef(false);
+
   // Ensure profile exists and is up-to-date with auth metadata
   async function ensureProfile(authUser: User) {
     const displayName =
@@ -292,9 +296,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    // Track whether the user explicitly signed out (vs unexpected SIGNED_OUT)
-    let userInitiatedSignOut = false;
-
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, s) => {
       console.log("[Auth] Event:", event, "session:", !!s);
 
@@ -306,33 +307,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (event === "SIGNED_OUT") {
-        if (userInitiatedSignOut) {
-          // User explicitly signed out — clear everything
-          userInitiatedSignOut = false;
-          setSession(null);
-          setUser(null);
-          setIsLoadingHousehold(false);
-          setProfile(null);
-          setHousehold(null);
-          setHouseholdMembers([]);
-          return;
-        }
-        // Unexpected SIGNED_OUT (e.g. token expired while in background)
-        // Try to recover the session before treating as logged out
-        console.log("[Auth] Unexpected SIGNED_OUT — attempting session recovery...");
-        try {
-          const { data, error } = await supabase.auth.refreshSession();
-          if (data?.session) {
-            console.log("[Auth] Session recovered successfully");
+        if (!userInitiatedSignOutRef.current) {
+          // Unexpected SIGNED_OUT (token-refresh race, background expiry, etc.)
+          // Read session directly from storage — no network call, no auth events fired.
+          console.log("[Auth] Unexpected SIGNED_OUT — checking storage for live session...");
+          const { data } = await supabase.auth.getSession();
+          if (data.session) {
+            // Session is still valid — this was a spurious event, ignore it.
+            console.log("[Auth] Session still valid — ignoring spurious SIGNED_OUT");
             setSession(data.session);
             setUser(data.session.user ?? null);
-            return; // recovered — don't clear state
+            return;
           }
-          console.log("[Auth] Session recovery failed:", error?.message);
-        } catch (err) {
-          console.log("[Auth] Session recovery error:", err);
+          console.log("[Auth] Session truly gone — proceeding with sign-out");
         }
-        // Recovery failed — actually sign out
+        // User explicitly signed out OR session truly gone
+        userInitiatedSignOutRef.current = false;
         setSession(null);
         setUser(null);
         setIsLoadingHousehold(false);
@@ -362,10 +352,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    // Expose the flag setter so signOut() can mark it
-    signOutFlagRef.current = () => { userInitiatedSignOut = true; };
+    // Wire signOut() up to flip the ref before supabase.auth.signOut() fires SIGNED_OUT
+    signOutFlagRef.current = () => { userInitiatedSignOutRef.current = true; };
 
     return () => subscription.unsubscribe();
+  }, []);
+
+  // ── Lightweight session health-check on app resume ────────────────
+  // Uses getUser() (validates JWT locally, no network round-trip) instead of
+  // getSession() so we don't trigger unnecessary token fetches on every resume.
+  useEffect(() => {
+    const handleVisibility = async () => {
+      if (document.visibilityState !== "visible") return;
+      const { data: { user: u } } = await supabase.auth.getUser();
+      if (u) setUser(u);
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, []);
 
   const signIn = async (email: string, password: string) => {
