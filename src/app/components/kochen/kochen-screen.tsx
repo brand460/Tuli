@@ -2601,7 +2601,20 @@ function RecipeDetailView({
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto px-4 pb-6">
+        <div
+          className="flex-1 overflow-y-auto px-4"
+          style={{
+            paddingBottom: `calc(72px + env(safe-area-inset-bottom, 0px) + 16px)`,
+            maxHeight: detailVpHeight - 60,
+          }}
+          onFocus={(e) => {
+            const el = e.target as HTMLElement;
+            if (!el.matches('input, textarea, [contenteditable]')) return;
+            setTimeout(() => {
+              el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }, 300);
+          }}
+        >
           <h1 className="text-2xl font-bold text-text-1 mt-4">{recipe.title}</h1>
 
           {/* Rating + Categories */}
@@ -3786,13 +3799,17 @@ function RecipeEditView({
       </div>
 
       <div
-        className="flex-1 overflow-y-auto pb-6"
+        className="flex-1 overflow-y-auto"
+        style={{
+          paddingBottom: `calc(72px + env(safe-area-inset-bottom, 0px) + 16px)`,
+          maxHeight: editVpHeight - 60,
+        }}
         onFocus={(e) => {
           const el = e.target as HTMLElement;
           if (!el.matches('input, textarea, [contenteditable]')) return;
           setTimeout(() => {
             el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-          }, 300);
+          }, 400);
         }}
       >
         {/* ── Image Area ── */}
