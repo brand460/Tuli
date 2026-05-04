@@ -353,11 +353,19 @@
   min-height: 1.625em;
   padding: 1px 0;
   padding-left: 28px;
+  /* Bug 1 fix: prevent cursor placement in the checkbox zone & gap area.
+     Children that should receive events restore pointer-events individually. */
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .editor-content .editor-todo-check {
+  /* Restore pointer-events so the checkbox is still tappable/clickable */
+  pointer-events: auto;
   cursor: pointer;
   user-select: none;
+  -webkit-user-select: none;
   flex-shrink: 0;
   width: 16px;
   height: 16px;
@@ -368,6 +376,13 @@
   border: 2px solid #d1d5db;
   font-size: 0;
   transition: all 0.15s;
+}
+
+/* Restore text selection & pointer-events on the text portion only */
+.editor-content .editor-todo > .editor-todo-text {
+  pointer-events: auto;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .editor-content .editor-todo-check:hover {

@@ -3549,9 +3549,18 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
         e.stopPropagation();
         const todoDiv = target.closest(".editor-todo");
         if (todoDiv) {
+          // Bug 2 fix: capture scroll position before the state update that
+          // triggers re-render, then restore it in the next animation frame.
+          const scrollEl = containerRef.current;
+          const scrollTop = scrollEl?.scrollTop ?? 0;
+
           const isChecked = todoDiv.getAttribute("data-checked") === "true";
           todoDiv.setAttribute("data-checked", String(!isChecked));
           syncContent();
+
+          requestAnimationFrame(() => {
+            if (scrollEl) scrollEl.scrollTop = scrollTop;
+          });
         }
       }
     },
