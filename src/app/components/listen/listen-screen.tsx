@@ -3287,11 +3287,12 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
           return;
         }
 
-        // Enter on empty to-do → convert to paragraph
+        // Enter on to-do
         if (blockEl?.classList.contains("editor-todo")) {
-          const textSpan = blockEl.querySelector(".editor-todo-text");
+          const textSpan = blockEl.querySelector(".editor-todo-text") as HTMLElement | null;
           const todoText = (textSpan?.textContent || "").trim();
           if (!todoText) {
+            // Empty to-do → convert to paragraph
             e.preventDefault();
             const newP = document.createElement("p");
             newP.innerHTML = "<br>";
@@ -3301,7 +3302,8 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
             syncContent();
             return;
           }
-          // Non-empty to-do: create a new to-do after, preserving indentation
+          // Non-empty to-do: split at cursor position.
+          // Content after the cursor moves to a new to-do below.
           e.preventDefault();
           const newTodo = document.createElement("div");
           newTodo.className = "editor-todo";
@@ -3314,7 +3316,23 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
           newTodo.appendChild(newCheck);
           const newText = document.createElement("span");
           newText.className = "editor-todo-text";
-          newText.innerHTML = "<br>";
+          // Extract the fragment that sits after the cursor inside textSpan
+          if (textSpan) {
+            const afterRange = document.createRange();
+            afterRange.setStart(range.startContainer, range.startOffset);
+            afterRange.setEnd(textSpan, textSpan.childNodes.length);
+            const afterFragment = afterRange.extractContents();
+            const tmp = document.createElement("span");
+            tmp.appendChild(afterFragment);
+            const afterHtml = tmp.innerHTML;
+            newText.innerHTML = (afterHtml && afterHtml.trim() && afterHtml !== "<br>") ? afterHtml : "<br>";
+            // Ensure the current textSpan is never completely empty
+            if (!textSpan.innerHTML.trim() || textSpan.innerHTML === "") {
+              textSpan.innerHTML = "<br>";
+            }
+          } else {
+            newText.innerHTML = "<br>";
+          }
           newTodo.appendChild(newText);
           blockEl.after(newTodo);
           placeCursorAtStart(newText);
@@ -3422,16 +3440,15 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
           }
         }
 
-        // Backspace at start of to-do → convert to <p>
+        // Backspace at start of to-do → merge with previous block (or convert to <p>)
         if (blockEl?.classList.contains("editor-todo")) {
-          const textSpan = blockEl.querySelector(".editor-todo-text");
+          const textSpan = blockEl.querySelector(".editor-todo-text") as HTMLElement | null;
           if (textSpan) {
             // Check if cursor is at start of the text span
             let atStart = false;
             if (range.startContainer === textSpan && range.startOffset === 0) {
               atStart = true;
             } else if (range.startContainer.parentNode === textSpan && range.startOffset === 0) {
-              // Cursor in a child text node at offset 0
               let node: Node | null = range.startContainer;
               while (node && node !== textSpan) {
                 if (node.previousSibling) { atStart = false; break; }
@@ -3441,10 +3458,75 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
             }
             if (atStart) {
               e.preventDefault();
-              const newP = document.createElement("p");
-              newP.innerHTML = textSpan.innerHTML || "<br>";
-              blockEl.replaceWith(newP);
-              placeCursorAtStart(newP);
+              const prevBlock = blockEl.previousElementSibling as HTMLElement | null;
+
+              if (!prevBlock) {
+                // No previous block → fall back to converting to <p>
+                const newP = document.createElement("p");
+                newP.innerHTML = textSpan.innerHTML || "<br>";
+                blockEl.replaceWith(newP);
+                placeCursorAtStart(newP);
+                syncContent();
+                return;
+              }
+
+              // Determine the text container in the previous block
+              const prevIsTodo = prevBlock.classList.contains("editor-todo");
+              const prevTextContainer = (
+                prevIsTodo
+                  ? prevBlock.querySelector(".editor-todo-text") as HTMLElement | null
+                  : prevBlock
+              ) ?? prevBlock;
+
+              // Walk to the last text node in prevTextContainer so we can
+              // place the cursor exactly at the join point after the merge.
+              const findLastTextNode = (node: Node): Text | null => {
+                if (node.nodeType === Node.TEXT_NODE) return node as Text;
+                for (let i = node.childNodes.length - 1; i >= 0; i--) {
+                  const r = findLastTextNode(node.childNodes[i]);
+                  if (r) return r;
+                }
+                return null;
+              };
+              const joinNode = findLastTextNode(prevTextContainer);
+              const joinOffset = joinNode?.length ?? 0;
+
+              // Append current todo's text to the previous text container
+              const curHtml = textSpan.innerHTML;
+              if (curHtml && curHtml !== "<br>") {
+                if (prevTextContainer.innerHTML === "<br>" || prevTextContainer.innerHTML.trim() === "") {
+                  prevTextContainer.innerHTML = "";
+                }
+                const tmp = document.createElement("span");
+                tmp.innerHTML = curHtml;
+                while (tmp.firstChild) prevTextContainer.appendChild(tmp.firstChild);
+              }
+              if (!prevTextContainer.innerHTML) prevTextContainer.innerHTML = "<br>";
+
+              // Remove the current todo block
+              blockEl.remove();
+
+              // Place cursor at the join point
+              try {
+                const r = document.createRange();
+                if (joinNode && joinNode.isConnected) {
+                  r.setStart(joinNode, joinOffset);
+                } else {
+                  // joinNode was the only child and got replaced — fall back to end of container
+                  const lastChild = prevTextContainer.lastChild;
+                  if (lastChild?.nodeType === Node.TEXT_NODE) {
+                    r.setStart(lastChild, (lastChild as Text).length);
+                  } else {
+                    r.setStart(prevTextContainer, prevTextContainer.childNodes.length);
+                  }
+                }
+                r.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(r);
+              } catch {
+                placeCursorAtStart(prevTextContainer);
+              }
+              scrollCursorIntoView();
               syncContent();
               return;
             }
@@ -3752,6 +3834,41 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
       vv.removeEventListener("resize", handleViewportResize);
       if (containerRef.current) containerRef.current.style.maxHeight = "";
     };
+  }, []);
+
+  // ── Fix 1: prevent cursor from landing before the checkbox span ──
+  // The .editor-todo-check span has contentEditable="false" but the browser
+  // can still place the caret at offset 0 of the parent .editor-todo div
+  // (i.e. before the span). This selectionchange listener detects that and
+  // immediately moves the cursor to the start of the .editor-todo-text span.
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      const sel = window.getSelection();
+      if (!sel?.rangeCount) return;
+      // Only act when this editor is in the DOM
+      if (!editorRef.current) return;
+      const range = sel.getRangeAt(0);
+      const startContainer = range.startContainer;
+      // Locate the nearest .editor-todo ancestor
+      const todoDiv =
+        startContainer instanceof Element
+          ? startContainer.closest(".editor-todo")
+          : startContainer.parentElement?.closest(".editor-todo");
+      if (!todoDiv) return;
+      // Only correct if the caret is NOT already inside the text span
+      const textSpan = todoDiv.querySelector(".editor-todo-text");
+      if (!textSpan) return;
+      if (!textSpan.contains(startContainer)) {
+        const newRange = document.createRange();
+        const firstChild = textSpan.firstChild;
+        newRange.setStart(firstChild || textSpan, 0);
+        newRange.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(newRange);
+      }
+    };
+    document.addEventListener("selectionchange", handleSelectionChange);
+    return () => document.removeEventListener("selectionchange", handleSelectionChange);
   }, []);
 
   return (
