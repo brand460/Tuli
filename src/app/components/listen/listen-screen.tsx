@@ -211,36 +211,105 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
   }, [isMobile, loaded, activePageId, pages]);
 
   // ── Save helpers ───────────────────────────────────────────────
-  const saveData = useCallback(async (p: Page[], c: PageContents) => {
+  const lastLocalListenWrite = useRef(0);
+  // Holds the most recent unsaved snapshot. Lets us flush a still-pending
+  // debounced save immediately when the app is backgrounded/closed — otherwise
+  // the 500 ms timer never fires (iOS freezes the JS context) and the last edits
+  // are lost. This is the core data-loss fix for the notes editor.
+  const pendingSaveRef = useRef<{ p: Page[]; c: PageContents } | null>(null);
+
+  // ── Local backup (survives crash / logout / failed network / JS freeze) ──
+  // Every edit is mirrored synchronously to localStorage. The backup is only
+  // cleared once the server CONFIRMS the write. On the next load we detect a
+  // leftover backup (= edits that never reached the server) and restore them.
+  // This is the ultimate safety net regardless of WHY a save failed
+  // (expired token → logout, network drop, app killed mid-save, …).
+  const backupKey = householdId ? `tuli_listen_backup:${householdId}` : null;
+
+  const writeLocalBackup = useCallback((p: Page[], c: PageContents) => {
+    if (!backupKey) return;
+    try {
+      localStorage.setItem(backupKey, JSON.stringify({ ts: Date.now(), pages: p, contents: c }));
+    } catch (_) { /* quota / private mode — ignore */ }
+  }, [backupKey]);
+
+  const clearLocalBackup = useCallback(() => {
+    if (!backupKey) return;
+    try { localStorage.removeItem(backupKey); } catch (_) { /* ignore */ }
+  }, [backupKey]);
+
+  const saveData = useCallback(async (p: Page[], c: PageContents, keepalive = false) => {
     try {
       broadcastChange([`custom_pages:${householdId}`, `custom_blocks:${householdId}`]);
       await Promise.all([
         apiFetch("/custom-pages", {
           method: "PUT",
           body: JSON.stringify({ household_id: householdId, pages: p }),
+          keepalive,
         }),
         apiFetch("/custom-blocks", {
           method: "PUT",
           body: JSON.stringify({ household_id: householdId, blocks: c }),
+          keepalive,
         }),
       ]);
+      // Server confirmed → this snapshot is safe, drop the pending state + backup.
+      pendingSaveRef.current = null;
+      clearLocalBackup();
     } catch (err) {
+      // Keep pendingSaveRef + localStorage backup intact so the data can be
+      // retried (on next edit / visibility change) or recovered on next load.
       console.error("Fehler beim Speichern:", err);
     }
-  }, [householdId]);
-
-  const lastLocalListenWrite = useRef(0);
+  }, [householdId, clearLocalBackup]);
 
   const scheduleSave = useCallback(
     (p: Page[], c: PageContents) => {
+      // Mark the local-write time *immediately* (not inside the timer) so a
+      // reload triggered by realtime/visibility within the debounce window can't
+      // overwrite freshly-typed content that hasn't reached the server yet.
+      lastLocalListenWrite.current = Date.now();
+      pendingSaveRef.current = { p, c };
+      // Mirror to localStorage synchronously — this line alone guarantees the
+      // edit survives even if the tab is killed in the very next millisecond.
+      writeLocalBackup(p, c);
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
+        saveTimerRef.current = null;
         lastLocalListenWrite.current = Date.now();
         saveData(p, c);
       }, 500);
     },
-    [saveData]
+    [saveData, writeLocalBackup]
   );
+
+  // ── Flush: persist any pending debounced save right now ──────────
+  // Called when the app is hidden or about to close. `keepalive` lets the
+  // request outlive the page lifecycle (used on pagehide / true app-close).
+  const flushSave = useCallback((keepalive = false) => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const pending = pendingSaveRef.current;
+    if (pending) {
+      lastLocalListenWrite.current = Date.now();
+      saveData(pending.p, pending.c, keepalive);
+    }
+  }, [saveData]);
+
+  // ── Retry: re-attempt a save that previously failed ──────────────
+  // Triggered when the app regains focus/visibility — by then a broken token
+  // has usually been refreshed, so the retry succeeds and clears the backup.
+  const retryPendingSave = useCallback(() => {
+    const pending = pendingSaveRef.current;
+    if (pending) {
+      lastLocalListenWrite.current = Date.now();
+      saveData(pending.p, pending.c);
+      return true;
+    }
+    return false;
+  }, [saveData]);
 
   // ── Load data ──────────────────────────────────────────────────
 
@@ -252,6 +321,43 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
       ]);
       // Skip remote updates if we just wrote locally
       if (!isInitial && Date.now() - lastLocalListenWrite.current < 2000) return;
+
+      // ── Recover unsaved edits from a previous session ──────────────
+      // A leftover local backup means a save was scheduled but never confirmed
+      // by the server (failed token/network, app killed mid-save, …). On the
+      // initial load we trust this local copy over the (older) server state and
+      // re-push it so the user's work is never silently lost.
+      if (isInitial && backupKey) {
+        try {
+          const raw = localStorage.getItem(backupKey);
+          if (raw) {
+            const backup = JSON.parse(raw) as { ts: number; pages: Page[]; contents: PageContents };
+            if (backup?.pages?.length) {
+              setPages(backup.pages);
+              setPageContents(backup.contents || {});
+              const savedId = sessionStorage.getItem("listen_active_page");
+              const restoredId = (savedId && backup.pages.some(p => p.id === savedId)) ? savedId : backup.pages[0]?.id || null;
+              setActivePageId(restoredId);
+              const parentIds = new Set<string>(
+                backup.pages
+                  .filter(p => p.parent_id !== null && p.parent_id !== undefined)
+                  .map(p => p.parent_id as string)
+              );
+              setExpandedPages(parentIds);
+              setLoaded(true);
+              // Re-push the recovered snapshot to the server.
+              pendingSaveRef.current = { p: backup.pages, c: backup.contents || {} };
+              lastLocalListenWrite.current = Date.now();
+              saveData(backup.pages, backup.contents || {});
+              console.log("[Listen] Ungespeicherte Änderungen aus lokalem Backup wiederhergestellt");
+              return;
+            }
+          }
+        } catch (err) {
+          console.error("[Listen] Backup-Wiederherstellung fehlgeschlagen:", err);
+        }
+      }
+
       const loadedPages: Page[] = pRes.pages || [];
       const rawBlocks = bRes.blocks;
 
@@ -298,7 +404,7 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
         setLoaded(true);
       }
     }
-  }, [saveData, householdId]);
+  }, [saveData, householdId, backupKey]);
 
   useEffect(() => {
     loadListenData(true);
@@ -320,22 +426,41 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
   // ── Visibility / focus handlers for reconnection ──
   useEffect(() => {
     const handleVisibility = () => {
-      if (document.visibilityState === "visible") {
-        console.log("[Listen] App visible again, reloading data...");
-        loadListenData(false);
+      if (document.visibilityState === "hidden") {
+        // App is being backgrounded/closed — persist any pending edits NOW,
+        // before iOS freezes the JS context and the debounce timer can no
+        // longer fire. The page is still alive here, so a normal fetch works
+        // (no keepalive 64 KB body limit).
+        flushSave(false);
+      } else if (document.visibilityState === "visible") {
+        // If a previous save failed (e.g. token had expired), the token is
+        // usually refreshed by now — retry it first. Only reload from the
+        // server when there is nothing pending, so an unsaved in-memory edit
+        // is never clobbered by older server data.
+        if (!retryPendingSave()) {
+          console.log("[Listen] App visible again, reloading data...");
+          loadListenData(false);
+        }
       }
     };
     const handleFocus = () => {
+      if (retryPendingSave()) return;
       console.log("[Listen] Window focused, reloading data...");
       loadListenData(false);
     };
+    // pagehide fires on real page teardown (tab close / PWA close / navigation)
+    // where the JS context will be discarded — use keepalive so the request
+    // can outlive the page.
+    const handlePageHide = () => flushSave(true);
     document.addEventListener("visibilitychange", handleVisibility);
     window.addEventListener("focus", handleFocus);
+    window.addEventListener("pagehide", handlePageHide);
     return () => {
       document.removeEventListener("visibilitychange", handleVisibility);
       window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("pagehide", handlePageHide);
     };
-  }, [loadListenData]);
+  }, [loadListenData, flushSave, retryPendingSave]);
 
   // ── Page operations ────────────────────────────────────────────
   const updatePages = useCallback(
