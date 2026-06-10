@@ -1987,8 +1987,7 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
   const HANDLE_LINE_H = 44;
   const isTouch = useIsTouch();
 
-  // ── Touch long-press drag (Notion-style: long-press the item itself) ──
-  const liLongPressRef = useRef<{ startX: number; startY: number; timer: ReturnType<typeof setTimeout> } | null>(null);
+  // ── Touch drag: floating ghost (Notion-style highlight, triggered from handle) ──
   const [liGhost, setLiGhost] = useState<{ x: number; y: number; width: number; label: string } | null>(null);
 
   // Own text of a list item, excluding any nested sub-lists.
@@ -2297,7 +2296,7 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
     return true;
   }, [getLiIndentLevel]);
 
-  // Activate a drag from a long-press: set up state + show floating ghost.
+  // Activate a drag: set up state + show floating ghost.
   const activateLiDrag = useCallback((el: HTMLElement, elType: "li" | "todo", x: number, y: number) => {
     if (!setupLiDrag(el, elType, x, y)) return;
     try { navigator.vibrate?.(30); } catch (_) { /* ignored */ }
@@ -2307,28 +2306,6 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
     setLiGhost({ x, y, width, label: getLiOwnText(el) || "Element" });
   }, [setupLiDrag, getLiOwnText]);
 
-  // Touchstart on the editor: start a long-press timer over a list item / todo.
-  const handleEditorTouchStart = useCallback((e: React.TouchEvent) => {
-    if (liDragRef.current || liLongPressRef.current) return;
-    if (e.touches.length !== 1) return;
-    const touch = e.touches[0];
-    const target = e.target as HTMLElement;
-    // Let checkbox taps toggle the todo instead of starting a drag.
-    if (target.classList.contains("editor-todo-check")) return;
-    const todo = target.closest(".editor-todo") as HTMLElement | null;
-    const li = todo ? null : (target.closest("li") as HTMLElement | null);
-    const el = todo || li;
-    if (!el || !editorRef.current?.contains(el)) return;
-    const elType: "li" | "todo" = todo ? "todo" : "li";
-    const startX = touch.clientX;
-    const startY = touch.clientY;
-    const timer = setTimeout(() => {
-      liLongPressRef.current = null;
-      activateLiDrag(el, elType, startX, startY);
-    }, 400);
-    liLongPressRef.current = { startX, startY, timer };
-  }, [activateLiDrag]);
-
   const handleLiTouchStart = useCallback((e: React.TouchEvent, idx: number) => {
     const touch = e.touches[0];
     e.preventDefault();
@@ -2337,23 +2314,10 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
     if (!el) return;
     const pos = liPositions[idx];
     const elType = pos?.type || "li";
-    setupLiDrag(el, elType, touch.clientX, touch.clientY);
-  }, [setupLiDrag, liPositions]);
+    activateLiDrag(el, elType, touch.clientX, touch.clientY);
+  }, [activateLiDrag, liPositions]);
 
   const handleLiTouchMove = useCallback((e: TouchEvent) => {
-    // Pending long-press: cancel drag intent if the finger moves before it activates
-    // (so the gesture falls through to normal scrolling / editing).
-    const lp = liLongPressRef.current;
-    if (lp && !liDragRef.current) {
-      const t = e.touches[0];
-      const dx = t.clientX - lp.startX;
-      const dy = t.clientY - lp.startY;
-      if (Math.sqrt(dx * dx + dy * dy) > 10) {
-        clearTimeout(lp.timer);
-        liLongPressRef.current = null;
-      }
-      return;
-    }
     const state = liDragRef.current;
     if (!state) return;
     e.preventDefault();
@@ -2419,12 +2383,6 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
   }, [indentLi, outdentLi, getLiIndentLevel, getOwnMidpoint]);
 
   const handleLiTouchEnd = useCallback((e?: Event) => {
-    // Pending long-press that never activated → it was a tap; let normal handling run.
-    if (liLongPressRef.current) {
-      clearTimeout(liLongPressRef.current.timer);
-      liLongPressRef.current = null;
-      return;
-    }
     const state = liDragRef.current;
     if (!state) return;
     // A drag was active → suppress the synthesized click so the editor doesn't
@@ -2658,13 +2616,6 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
       document.removeEventListener("mouseup", handleLiMouseUp);
     };
   }, [liDragging, handleLiMouseMove, handleLiMouseUp]);
-
-  // Clear a pending long-press timer if the editor unmounts mid-press
-  useEffect(() => {
-    return () => {
-      if (liLongPressRef.current) clearTimeout(liLongPressRef.current.timer);
-    };
-  }, []);
 
   // ── Slash-command: filtered items ──
   const slashFiltered = useMemo(() => {
@@ -4178,7 +4129,6 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
             data-form-type="other"
             className="editor-content outline-none min-h-[200px]"
             style={{ caretColor: "var(--text-1)" }}
-            onTouchStart={handleEditorTouchStart}
             onInput={handleInput}
             onKeyDown={handleKeyDown}
             onClick={(e) => {
