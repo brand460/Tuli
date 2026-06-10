@@ -437,6 +437,14 @@
   opacity: 1;
 }
 
+/* Suppress text selection / callout while a list item is being long-press dragged */
+.li-drag-noselect,
+.li-drag-noselect * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -webkit-touch-callout: none !important;
+}
+
 /* Flash animation when indent level changes */
 @keyframes li-indent-flash {
   0% { background-color: var(--accent-light); }

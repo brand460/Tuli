@@ -861,7 +861,7 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
       {contextMenu && (() => {
         return (
           <>
-            <div className="fixed inset-0 z-[60]" onClick={() => setContextMenu(null)} />
+            <div className="fixed inset-0 z-[1010]" onClick={() => setContextMenu(null)} />
             <div
               ref={(el) => {
                 if (!el) return;
@@ -880,7 +880,7 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
                 el.style.left = `${newLeft}px`;
                 el.style.top = `${newTop}px`;
               }}
-              className="fixed z-[70] bg-surface rounded-xl p-1.5 min-w-[192px]"
+              className="fixed z-[1020] bg-surface rounded-xl p-1.5 min-w-[192px]"
               style={{ left: contextMenu.x + 4, top: contextMenu.y, boxShadow: "var(--shadow-elevated)", border: "1px solid var(--zu-border)" }}
             >
               <button
@@ -917,7 +917,7 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
         const targetPage = pages.find((p) => p.id === deleteConfirmPageId);
         const hasSubpages = pages.some((p) => p.parent_id === deleteConfirmPageId);
         return (
-          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40" onClick={() => setDeleteConfirmPageId(null)}>
+          <div className="fixed inset-0 z-[1030] flex items-center justify-center bg-black/40" onClick={() => setDeleteConfirmPageId(null)}>
             <div className="bg-surface w-[320px] mx-4 p-6" style={{ borderRadius: "var(--radius-card)", boxShadow: "var(--shadow-elevated)" }} onClick={(e) => e.stopPropagation()}>
               <h3 className="text-base font-bold text-text-1 text-center">Seite l&ouml;schen?</h3>
               <p className="text-sm text-text-2 text-center mt-2">
@@ -1286,9 +1286,12 @@ function SidebarContent(props: SidebarContentProps) {
     };
 
     // touchend: execute the drop normally, then clean up history
-    const endHandler = () => {
+    const endHandler = (e: TouchEvent) => {
       const state = touchDragRef.current;
       if (!state || !state.activated) return;
+      // Suppress the synthesized click after a drag (would otherwise close the
+      // mobile drawer if the finger is released over its backdrop).
+      e.preventDefault();
       executeTouchDrop(state.pageId, dropPreviewRef.current, dragOverTrashRef.current);
       setDragActiveId(null);
       setDragActiveWidth(0);
@@ -1328,7 +1331,7 @@ function SidebarContent(props: SidebarContentProps) {
     };
 
     document.addEventListener("touchmove", handler, { passive: false });
-    document.addEventListener("touchend", endHandler);
+    document.addEventListener("touchend", endHandler, { passive: false });
     document.addEventListener("touchcancel", cancelHandler);
     return () => {
       document.removeEventListener("touchmove", handler);
@@ -1982,6 +1985,18 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
   const [liDragging, setLiDragging] = useState(false);
   const [liDropIndicator, setLiDropIndicator] = useState<number | null>(null);
   const HANDLE_LINE_H = 44;
+  const isTouch = useIsTouch();
+
+  // ── Touch long-press drag (Notion-style: long-press the item itself) ──
+  const liLongPressRef = useRef<{ startX: number; startY: number; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const [liGhost, setLiGhost] = useState<{ x: number; y: number; width: number; label: string } | null>(null);
+
+  // Own text of a list item, excluding any nested sub-lists.
+  const getLiOwnText = useCallback((el: HTMLElement): string => {
+    const clone = el.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll("ul, ol").forEach((n) => n.remove());
+    return (clone.textContent || "").trim();
+  }, []);
 
   // Helper: get the "own-line" midpoint of a <li>, excluding nested sublists.
   // Parent <li> elements have very tall bounding rects (they contain nested <ul>/<ol>),
@@ -2249,24 +2264,16 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
   }, [syncContent]);
 
   // ── Li drag touch handlers ──
-  const handleLiTouchStart = useCallback((e: React.TouchEvent, idx: number) => {
-    const touch = e.touches[0];
-    e.preventDefault();
-    e.stopPropagation();
-    const el = liElsRef.current[idx];
-    if (!el) return;
-    const pos = liPositions[idx];
-    const elType = pos?.type || "li";
-
+  // Shared setup: prepare drag state for an item (used by long-press + legacy handle).
+  const setupLiDrag = useCallback((el: HTMLElement, elType: "li" | "todo", startX: number, startY: number): boolean => {
     let parentList: HTMLElement;
     let siblings: HTMLElement[];
     if (elType === "todo") {
-      // Todos are siblings at editor top level — gather consecutive .editor-todo elements around this one
       parentList = el.parentElement!;
       siblings = Array.from(parentList.children).filter((c) => c.classList.contains("editor-todo")) as HTMLElement[];
     } else {
       const pl = el.parentElement;
-      if (!pl || (pl.tagName !== "UL" && pl.tagName !== "OL")) return;
+      if (!pl || (pl.tagName !== "UL" && pl.tagName !== "OL")) return false;
       parentList = pl;
       siblings = Array.from(pl.children).filter((c) => c.tagName === "LI") as HTMLElement[];
     }
@@ -2281,21 +2288,81 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
       : [];
     const allSrcIdx = allItems.indexOf(el);
     liDragRef.current = {
-      el, elType, intent: "none", startX: touch.clientX, startY: touch.clientY,
+      el, elType, intent: "none", startX, startY,
       parentList, siblings, srcIdx,
       indentLevel: level, lastFlashedLevel: level, dropIdx: allSrcIdx,
       allItems, allSrcIdx,
     };
     setLiDragging(true);
-  }, [getLiIndentLevel, liPositions]);
+    return true;
+  }, [getLiIndentLevel]);
+
+  // Activate a drag from a long-press: set up state + show floating ghost.
+  const activateLiDrag = useCallback((el: HTMLElement, elType: "li" | "todo", x: number, y: number) => {
+    if (!setupLiDrag(el, elType, x, y)) return;
+    try { navigator.vibrate?.(30); } catch (_) { /* ignored */ }
+    window.getSelection()?.removeAllRanges();
+    editorRef.current?.classList.add("li-drag-noselect");
+    const width = Math.min(el.getBoundingClientRect().width || 220, 280);
+    setLiGhost({ x, y, width, label: getLiOwnText(el) || "Element" });
+  }, [setupLiDrag, getLiOwnText]);
+
+  // Touchstart on the editor: start a long-press timer over a list item / todo.
+  const handleEditorTouchStart = useCallback((e: React.TouchEvent) => {
+    if (liDragRef.current || liLongPressRef.current) return;
+    if (e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    const target = e.target as HTMLElement;
+    // Let checkbox taps toggle the todo instead of starting a drag.
+    if (target.classList.contains("editor-todo-check")) return;
+    const todo = target.closest(".editor-todo") as HTMLElement | null;
+    const li = todo ? null : (target.closest("li") as HTMLElement | null);
+    const el = todo || li;
+    if (!el || !editorRef.current?.contains(el)) return;
+    const elType: "li" | "todo" = todo ? "todo" : "li";
+    const startX = touch.clientX;
+    const startY = touch.clientY;
+    const timer = setTimeout(() => {
+      liLongPressRef.current = null;
+      activateLiDrag(el, elType, startX, startY);
+    }, 400);
+    liLongPressRef.current = { startX, startY, timer };
+  }, [activateLiDrag]);
+
+  const handleLiTouchStart = useCallback((e: React.TouchEvent, idx: number) => {
+    const touch = e.touches[0];
+    e.preventDefault();
+    e.stopPropagation();
+    const el = liElsRef.current[idx];
+    if (!el) return;
+    const pos = liPositions[idx];
+    const elType = pos?.type || "li";
+    setupLiDrag(el, elType, touch.clientX, touch.clientY);
+  }, [setupLiDrag, liPositions]);
 
   const handleLiTouchMove = useCallback((e: TouchEvent) => {
+    // Pending long-press: cancel drag intent if the finger moves before it activates
+    // (so the gesture falls through to normal scrolling / editing).
+    const lp = liLongPressRef.current;
+    if (lp && !liDragRef.current) {
+      const t = e.touches[0];
+      const dx = t.clientX - lp.startX;
+      const dy = t.clientY - lp.startY;
+      if (Math.sqrt(dx * dx + dy * dy) > 10) {
+        clearTimeout(lp.timer);
+        liLongPressRef.current = null;
+      }
+      return;
+    }
     const state = liDragRef.current;
     if (!state) return;
     e.preventDefault();
     const touch = e.touches[0];
     const dx = touch.clientX - state.startX;
     const dy = touch.clientY - state.startY;
+
+    // Floating ghost follows the finger
+    setLiGhost((g) => (g ? { ...g, x: touch.clientX, y: touch.clientY } : g));
 
     if (state.intent === "none") {
       if (Math.sqrt(dx * dx + dy * dy) >= 10) {
@@ -2351,9 +2418,20 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
     }
   }, [indentLi, outdentLi, getLiIndentLevel, getOwnMidpoint]);
 
-  const handleLiTouchEnd = useCallback(() => {
+  const handleLiTouchEnd = useCallback((e?: Event) => {
+    // Pending long-press that never activated → it was a tap; let normal handling run.
+    if (liLongPressRef.current) {
+      clearTimeout(liLongPressRef.current.timer);
+      liLongPressRef.current = null;
+      return;
+    }
     const state = liDragRef.current;
     if (!state) return;
+    // A drag was active → suppress the synthesized click so the editor doesn't
+    // place the caret / pop up the keyboard where the finger was released.
+    e?.preventDefault?.();
+    editorRef.current?.classList.remove("li-drag-noselect");
+    setLiGhost(null);
     state.el.style.opacity = "";
     state.el.classList.remove("li-indent-flash");
     if (state.intent === "vertical" && state.dropIdx !== state.allSrcIdx) {
@@ -2561,7 +2639,7 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
   // Each handler checks liDragRef.current and returns early if null.
   useEffect(() => {
     document.addEventListener("touchmove", handleLiTouchMove, { passive: false });
-    document.addEventListener("touchend", handleLiTouchEnd);
+    document.addEventListener("touchend", handleLiTouchEnd, { passive: false });
     document.addEventListener("touchcancel", handleLiTouchEnd);
     return () => {
       document.removeEventListener("touchmove", handleLiTouchMove);
@@ -2580,6 +2658,13 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
       document.removeEventListener("mouseup", handleLiMouseUp);
     };
   }, [liDragging, handleLiMouseMove, handleLiMouseUp]);
+
+  // Clear a pending long-press timer if the editor unmounts mid-press
+  useEffect(() => {
+    return () => {
+      if (liLongPressRef.current) clearTimeout(liLongPressRef.current.timer);
+    };
+  }, []);
 
   // ── Slash-command: filtered items ──
   const slashFiltered = useMemo(() => {
@@ -4093,6 +4178,7 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
             data-form-type="other"
             className="editor-content outline-none min-h-[200px]"
             style={{ caretColor: "var(--text-1)" }}
+            onTouchStart={handleEditorTouchStart}
             onInput={handleInput}
             onKeyDown={handleKeyDown}
             onClick={(e) => {
@@ -4232,8 +4318,8 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
             </>
           )}
 
-          {/* Drag handles for li and todo items */}
-          {!liDragging && liPositions.map((pos, i) => (
+          {/* Drag handles for li and todo items — desktop only (touch uses long-press) */}
+          {!isTouch && !liDragging && liPositions.map((pos, i) => (
             <div
               key={i}
               className="li-drag-handle"
@@ -4247,6 +4333,23 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
               <GripVertical className="w-3 h-3" />
             </div>
           ))}
+
+          {/* Floating ghost — follows the finger during a touch long-press drag */}
+          {isTouch && liGhost && (
+            <div
+              className="fixed z-[60] flex items-center gap-1 px-2 py-1 rounded-lg bg-surface border border-accent-mid text-sm text-text-1 shadow-lg pointer-events-none"
+              style={{
+                left: liGhost.x - liGhost.width / 2,
+                top: liGhost.y - 20,
+                width: liGhost.width,
+                opacity: 0.95,
+                transform: "scale(1.02)",
+              }}
+            >
+              <GripVertical className="w-3 h-3 text-text-3 flex-shrink-0" />
+              <span className="flex-1 min-w-0 truncate">{liGhost.label}</span>
+            </div>
+          )}
 
           {/* Li vertical drag drop indicator */}
           {liDropIndicator !== null && (
