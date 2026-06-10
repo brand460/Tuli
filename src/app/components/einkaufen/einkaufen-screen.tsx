@@ -2025,11 +2025,19 @@ function AddItemBar({
       .map((s) => renameMap.get(s.toLowerCase()) ?? s)
       // After remapping, deduplicate and filter out already-existing items
       .filter((s, idx, arr) => arr.indexOf(s) === idx && !existingNames.has(s))
+      // Only suggest items that actually have a known category — uncategorized
+      // items shouldn't appear as chips (they'd show a meaningless dot).
+      .filter((s) => {
+        const cat =
+          findGroceryTemplate(s, customTemplates)?.category ||
+          globalItems.find((g) => !g.deleted && g.name.toLowerCase() === s.toLowerCase())?.category;
+        return !!cat;
+      })
       // Keep the chip row to a sensible length (usage-ranked items first)
       .slice(0, 8);
 
     setQuickChips(suggestions);
-  }, [storeId, existingNames, globalItems, suggestionPool]);
+  }, [storeId, existingNames, globalItems, suggestionPool, customTemplates]);
 
   // Build exclusion set for searchGroceries: covers deleted items AND renamed items'
   // original names so GROCERY_DATABASE entries are suppressed when a global_item
