@@ -38,9 +38,15 @@ export const DEFAULT_STORES: StoreInfo[] = [
   { id: "alle", name: "Alle", abbr: "🏠", color: "#D97706", bgColor: "#FEF3C7", type: "sonstige" },
 ];
 
+// ── Lokale Logo-Overrides (eigene Bilder statt Favicon) ────────────
+const LOCAL_LOGO_OVERRIDES: Record<string, string> = {
+  "postenboerse.de": "/images/stores/posten-boerse.png",
+};
+
 // ── Google Favicon URL helper ──────────────────────────────────────
 export function getLogoUrl(domain?: string): string | null {
   if (!domain) return null;
+  if (LOCAL_LOGO_OVERRIDES[domain]) return LOCAL_LOGO_OVERRIDES[domain];
   return `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
 }
 
@@ -987,6 +993,7 @@ export interface StoreSuggestion {
 export const STORE_SUGGESTIONS: StoreSuggestion[] = [
   { name: "Rewe", domain: "rewe.de", type: "supermarkt", bgColor: "#CC071E" },
   { name: "Penny", domain: "penny.de", type: "supermarkt", bgColor: "#CD1719" },
+  { name: "Postenbörse", domain: "postenboerse.de", type: "supermarkt", bgColor: "#E2001A" },
   { name: "Norma", domain: "norma-online.de", type: "supermarkt", bgColor: "#E30613" },
   { name: "Globus", domain: "globus.de", type: "supermarkt", bgColor: "#004B93" },
   { name: "Hit", domain: "hit.de", type: "supermarkt", bgColor: "#E2001A" },

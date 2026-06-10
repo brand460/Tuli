@@ -857,8 +857,8 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
         />
       )}
 
-      {/* Context menu popover — desktop only */}
-      {!isTouch && contextMenu && (() => {
+      {/* Context menu popover */}
+      {contextMenu && (() => {
         return (
           <>
             <div className="fixed inset-0 z-[60]" onClick={() => setContextMenu(null)} />
@@ -1626,20 +1626,6 @@ function SidebarContent(props: SidebarContentProps) {
         </div>
       )}
 
-      {/* Trash zone — visible during drag on touch devices */}
-      {isTouch && dragActiveId && (
-        <div
-          ref={trashZoneRef}
-          className={`flex-shrink-0 mx-2 mb-2 flex items-center justify-center gap-2 rounded-xl border-2 border-dashed transition-colors py-3 ${
-            dragOverTrash
-              ? "border-danger bg-danger-light text-danger"
-              : "border-border text-text-3"
-          }`}
-        >
-          <Trash2 className="w-4 h-4" />
-          <span className="text-sm font-medium">Seite entfernen</span>
-        </div>
-      )}
     </div>
   );
 }
@@ -1826,18 +1812,22 @@ function PageTreeItem(props: PageTreeItemProps) {
           <span className="flex-1 min-w-0 truncate">{page.title}</span>
         )}
 
-        {/* Context menu button — desktop only */}
-        {!isTouch && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onContextMenu(page.id, e.clientX, e.clientY);
-            }}
-            className="w-5 h-5 flex items-center justify-center flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity rounded hover:bg-surface-2"
-          >
-            <MoreHorizontal className="w-3.5 h-3.5 text-text-3" />
-          </button>
-        )}
+        {/* Context menu button — always visible on touch, hover on desktop */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            onContextMenu(page.id, rect.left, rect.bottom);
+          }}
+          onTouchStart={(e) => e.stopPropagation()}
+          className={`flex items-center justify-center flex-shrink-0 rounded hover:bg-surface-2 transition-opacity ${
+            isTouch
+              ? "w-7 h-7 opacity-100"
+              : "w-5 h-5 opacity-0 group-hover:opacity-100"
+          }`}
+        >
+          <MoreHorizontal className={`${isTouch ? "w-4 h-4" : "w-3.5 h-3.5"} text-text-3`} />
+        </button>
       </div>
 
       {/* Bottom drop indicator line */}

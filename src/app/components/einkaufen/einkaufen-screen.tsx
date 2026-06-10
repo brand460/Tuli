@@ -75,7 +75,7 @@ import {
 import { useBackHandler } from "../ui/use-back-handler";
 import { useAuth } from "../auth-context";
 import { useKeyboardOffset } from "../ui/use-keyboard-offset";
-import { useSessionState } from "../ui/use-session-state";
+import { useSessionState, useLocalState } from "../ui/use-session-state";
 import { toast } from "sonner";
 const bagEmptyImg = '/images/bag-empty.png';
 const bagFullImg = '/images/bag-full.png';
@@ -1898,13 +1898,15 @@ function CheckedSection({
   items,
   onToggle,
   onClearAll,
+  expanded,
+  onExpandedChange,
 }: {
   items: ShoppingItem[];
   onToggle: (id: string) => void;
   onClearAll: () => void;
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
-
   if (items.length === 0) return null;
 
   return (
@@ -1960,7 +1962,7 @@ function CheckedSection({
       </AnimatePresence>
       {/* Header always at the bottom */}
       <button
-        onClick={() => setExpanded(!expanded)}
+        onClick={() => onExpandedChange(!expanded)}
         className="w-full flex items-center justify-between px-4 py-2.5"
       >
         <span className="text-xs font-medium text-text-2">
@@ -2765,7 +2767,7 @@ export function EinkaufenScreen({
     useState(false);
   // Ref mirror so updateListBottom (stable callback) can read the value without re-creating
   const isItemNameEditingRef = useRef(false);
-  const [selectedStore, setSelectedStore] = useSessionState<string>("einkaufen_store", "alle");
+  const [selectedStore, setSelectedStore] = useLocalState<string>("einkaufen_store", "alle");
   const [showAddStore, setShowAddStore] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [activeDragId, setActiveDragId] = useState<
@@ -2811,6 +2813,7 @@ export function EinkaufenScreen({
     useRef<ReturnType<typeof setTimeout>>();
   const storeSelectorRef = useRef<HTMLDivElement>(null);
   const checkedSectionRef = useRef<HTMLDivElement>(null);
+  const [checkedExpanded, setCheckedExpanded] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const lastLocalChangeRef = useRef<number>(0);
   const bottomBarRef = useRef<HTMLDivElement>(null);
@@ -3189,6 +3192,20 @@ export function EinkaufenScreen({
       }, 700);
     },
     [items, updateItems],
+  );
+
+  // When the checked-items accordion is open, the first tap on an
+  // open (unchecked) item should just close the accordion instead
+  // of checking the item off.
+  const handleUncheckedToggle = useCallback(
+    (id: string) => {
+      if (checkedExpanded) {
+        setCheckedExpanded(false);
+        return;
+      }
+      handleToggle(id);
+    },
+    [checkedExpanded, handleToggle],
   );
 
   const handleQuantityChange = useCallback(
@@ -4312,7 +4329,7 @@ export function EinkaufenScreen({
                   <SortableShoppingItem
                     key={item.id}
                     item={item}
-                    onToggle={() => handleToggle(item.id)}
+                    onToggle={() => handleUncheckedToggle(item.id)}
                     onQuantityChange={(d) =>
                       handleQuantityChange(item.id, d)
                     }
@@ -4356,6 +4373,8 @@ export function EinkaufenScreen({
             items={checkedItems}
             onToggle={handleToggle}
             onClearAll={handleClearChecked}
+            expanded={checkedExpanded}
+            onExpandedChange={setCheckedExpanded}
           />
         </div>
       </div>
