@@ -1103,6 +1103,6 @@ export function buildMergedItems(
  */
 export function getItemCategoryDot(name: string, mergedItems: GroceryTemplate[]): string | null {
   const match = mergedItems.find(i => i.name.toLowerCase() === name.toLowerCase());
-  if (!match) return null;
+  if (!match || !match.category) return null;
   return getCategoryChipColor(match.category).dot;
 }

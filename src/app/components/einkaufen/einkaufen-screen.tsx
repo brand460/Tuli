@@ -86,6 +86,12 @@ interface StoreSettingEntry {
   position: number;
   is_visible: boolean;
   category_order: string[];
+  /** Full metadata for user-created stores so they survive reloads
+   *  (default stores are reconstructed from DEFAULT_STORES instead). */
+  custom_store?: StoreInfo;
+  /** Per-store usage counter: item name → times added. Drives the
+   *  usage-based quick-suggestion chips. */
+  item_frequency?: Record<string, number>;
 }
 
 // ── API helpers ────────────────────────────────────────────────────
@@ -1285,15 +1291,16 @@ function SortableShoppingItem({
             <Check className="w-3.5 h-3.5 text-white" />
           )}
         </button>
-        {/* Category dot — only for known items */}
+        {/* Category dot — only for known items; unknown items keep an
+            invisible spacer of the same width so the name stays aligned. */}
         {(() => {
           const dotColor = getItemCategoryDot(item.name, mergedItems);
-          return dotColor ? (
+          return (
             <span
               className="flex-shrink-0 w-2 h-2 rounded-full"
-              style={{ backgroundColor: dotColor }}
+              style={dotColor ? { backgroundColor: dotColor } : { visibility: "hidden" }}
             />
-          ) : null;
+          );
         })()}
         <div className="flex-1 min-w-0">
           {isEditingName && !item.is_checked ? (
@@ -1979,6 +1986,7 @@ function AddItemBar({
   categoryOrder,
   itemEditing,
   globalItems,
+  suggestionPool,
 }: {
   storeId: string;
   stores: StoreInfo[];
@@ -1988,6 +1996,7 @@ function AddItemBar({
   categoryOrder: string[];
   itemEditing?: boolean;
   globalItems: GlobalItem[];
+  suggestionPool: string[];
 }) {
   const [query, setQuery] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -2011,14 +2020,16 @@ function AddItemBar({
       }
     }
 
-    const suggestions = getQuickSuggestions(storeId)
+    const suggestions = (suggestionPool.length > 0 ? suggestionPool : getQuickSuggestions(storeId))
       .filter((s) => !deletedSet.has(s.toLowerCase()))
       .map((s) => renameMap.get(s.toLowerCase()) ?? s)
       // After remapping, deduplicate and filter out already-existing items
-      .filter((s, idx, arr) => arr.indexOf(s) === idx && !existingNames.has(s));
+      .filter((s, idx, arr) => arr.indexOf(s) === idx && !existingNames.has(s))
+      // Keep the chip row to a sensible length (usage-ranked items first)
+      .slice(0, 8);
 
     setQuickChips(suggestions);
-  }, [storeId, existingNames, globalItems]);
+  }, [storeId, existingNames, globalItems, suggestionPool]);
 
   // Build exclusion set for searchGroceries: covers deleted items AND renamed items'
   // original names so GROCERY_DATABASE entries are suppressed when a global_item
@@ -2077,9 +2088,10 @@ function AddItemBar({
         searchResults[0].category,
       );
     } else {
-      // No match → add directly as "Sonstiges" (quick add without category picker)
+      // No match → add WITHOUT a category. Unknown items stay uncategorized
+      // (no colored dot) instead of being forced into "Sonstiges".
       const name = query.trim();
-      onAdd(name, "Sonstiges");
+      onAdd(name, "");
       setQuickChips((prev) => prev.filter((c) => c !== name));
       setQuery("");
       setShowSuggestions(false);
@@ -2895,16 +2907,28 @@ export function EinkaufenScreen({
     const settingsMap = new Map(
       settings.map((s) => [s.store_id, s]),
     );
-    const visible = baseStores.filter((s) => {
+    // Reconstruct user-created stores from their persisted metadata so they
+    // survive reloads (they are not part of DEFAULT_STORES).
+    const baseIds = new Set(baseStores.map((s) => s.id));
+    const customStores = settings
+      .filter((s) => s.custom_store && !baseIds.has(s.store_id))
+      .map((s) => s.custom_store as StoreInfo);
+    const allStores = [...baseStores, ...customStores];
+
+    const visible = allStores.filter((s) => {
       if (s.id === "alle") return true; // always visible, cannot be removed
       const setting = settingsMap.get(s.id);
       return setting ? setting.is_visible : true;
     });
-    visible.sort((a, b) => {
-      const pa = settingsMap.get(a.id)?.position ?? 999;
-      const pb = settingsMap.get(b.id)?.position ?? 999;
-      return pa - pb;
-    });
+    // Order by persisted position; for stores without an explicit position
+    // fall back to their natural index so the bar keeps a sensible order.
+    // "alle" is always pinned last.
+    const positionOf = (s: StoreInfo) => {
+      if (s.id === "alle") return Number.MAX_SAFE_INTEGER;
+      const p = settingsMap.get(s.id)?.position;
+      return typeof p === "number" ? p : allStores.indexOf(s);
+    };
+    visible.sort((a, b) => positionOf(a) - positionOf(b));
     setStores(visible);
     if (
       !visible.find((s) => s.id === selectedStore) &&
@@ -3000,6 +3024,9 @@ export function EinkaufenScreen({
         prev: StoreSettingEntry[],
       ) => StoreSettingEntry[],
     ) => {
+      // Mark a local change so a concurrent reload (poll / realtime / focus)
+      // doesn't clobber the freshly-changed store config before it's saved.
+      lastLocalChangeRef.current = Date.now();
       setStoreSettings((prev) => {
         const next = updater(prev);
         debouncedSaveSettings(next);
@@ -3239,6 +3266,38 @@ export function EinkaufenScreen({
   }, []);
   useEffect(() => { onRegisterReset?.(handleReset); }, [onRegisterReset, handleReset]);
 
+  // ── Per-store usage tracking for the quick-suggestion chips ──────
+  // Increments a counter for (store, item) on every add so the chips can
+  // surface the items this household actually buys most at each store.
+  const recordItemUsage = useCallback(
+    (storeId: string, name: string) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      updateStoreSettings((prev) => {
+        const idx = prev.findIndex((s) => s.store_id === storeId);
+        if (idx >= 0) {
+          const copy = [...prev];
+          const freq = { ...(copy[idx].item_frequency || {}) };
+          freq[trimmed] = (freq[trimmed] || 0) + 1;
+          copy[idx] = { ...copy[idx], item_frequency: freq };
+          return copy;
+        }
+        // No settings entry yet for this store → create one (keeps natural order).
+        return [
+          ...prev,
+          {
+            store_id: storeId,
+            position: stores.findIndex((s) => s.id === storeId),
+            is_visible: true,
+            category_order: getCategoriesForStore(storeId, stores),
+            item_frequency: { [trimmed]: 1 },
+          },
+        ];
+      });
+    },
+    [updateStoreSettings, stores],
+  );
+
   const handleAddItem = useCallback(
     (name: string, category: string) => {
       const catIdx = getCustomCategoryIndex(
@@ -3290,11 +3349,13 @@ export function EinkaufenScreen({
         return [...shifted, newItem];
       });
 
-      // If this is a custom article (not in built-in DB), save/upsert to global items
+      // If this is a custom article (not in built-in DB) WITH a category,
+      // save/upsert to global items. Uncategorized items are not learned —
+      // they'd otherwise reappear with a (wrong) category dot.
       const isBuiltIn = GROCERY_DATABASE.some(
         (g) => g.name.toLowerCase() === name.toLowerCase(),
       );
-      if (!isBuiltIn) {
+      if (!isBuiltIn && category) {
         // Update local state immediately for instant search visibility
         setGlobalItems((prev) => {
           const idx = prev.findIndex(
@@ -3322,8 +3383,10 @@ export function EinkaufenScreen({
         // Persist to server (fire and forget)
         if (householdId) upsertGlobalItem(householdId, name, category);
       }
+      // Track usage for the per-store quick-suggestion chips
+      recordItemUsage(selectedStore, name);
     },
-    [items, selectedStore, getCustomCategoryIndex, updateItems],
+    [items, selectedStore, getCustomCategoryIndex, updateItems, recordItemUsage],
   );
 
   const handleClearChecked = useCallback(() => {
@@ -3334,11 +3397,15 @@ export function EinkaufenScreen({
     );
   }, [selectedStore, updateItems]);
 
-  // ── "Liste leeren" — löscht ALLE Items haushaltsweit und persistiert sofort ──
+  // ── "Liste leeren" — löscht NUR die Items des aktuell gewählten Ladens ──
   const handleClearAll = useCallback(async () => {
-    // 1. Lokalen State sofort leeren
+    // 1. Lokalen State sofort aktualisieren — nur Items des aktiven Ladens entfernen
     lastLocalChangeRef.current = Date.now();
-    setItems([]);
+    let remaining: ShoppingItem[] = [];
+    setItems((prev) => {
+      remaining = prev.filter((i) => i.store !== selectedStore);
+      return remaining;
+    });
     // Laufenden Debounce-Save abbrechen, damit er keine veralteten Daten schickt
     if (saveTimeout.current) {
       clearTimeout(saveTimeout.current);
@@ -3351,15 +3418,15 @@ export function EinkaufenScreen({
         method: "PUT",
         body: JSON.stringify({
           household_id: householdId,
-          items: [],
+          items: remaining,
         }),
       });
       broadcastChange([`shopping:${householdId}`]);
-      console.log("[Einkaufen] Liste erfolgreich geleert (KV-Store).");
+      console.log("[Einkaufen] Liste des Ladens erfolgreich geleert (KV-Store).");
     } catch (err) {
       console.log("[Einkaufen] Fehler beim Leeren der Liste:", err);
     }
-  }, [householdId]);
+  }, [householdId, selectedStore]);
 
   const handleDeleteItem = useCallback(
     (itemId: string) => {
@@ -3441,6 +3508,8 @@ export function EinkaufenScreen({
             ...stores,
             newStore,
           ]),
+          // Persist full metadata so the store survives reloads.
+          custom_store: newStore,
         },
       ]);
       setSelectedStore(id);
@@ -3507,7 +3576,7 @@ export function EinkaufenScreen({
             const existing = settings.find(
               (s) => s.store_id === store.id,
             );
-            return {
+            const entry: StoreSettingEntry = {
               store_id: store.id,
               position: idx,
               is_visible: true,
@@ -3515,6 +3584,11 @@ export function EinkaufenScreen({
                 existing?.category_order ||
                 getCategoriesForStore(store.id, moved),
             };
+            // Preserve metadata that isn't represented in the store list.
+            if (existing?.custom_store) entry.custom_store = existing.custom_store;
+            else if (!DEFAULT_STORES.some((d) => d.id === store.id)) entry.custom_store = store;
+            if (existing?.item_frequency) entry.item_frequency = existing.item_frequency;
+            return entry;
           });
           const hiddenSettings = settings.filter(
             (s) =>
@@ -3906,6 +3980,27 @@ export function EinkaufenScreen({
     [selectedStore, getCategoryOrderForStore],
   );
 
+  // ── Usage-based quick suggestions for the AddItemBar chips ──────
+  // Items the household added most often at the current store come first;
+  // the hardcoded defaults pad the rest so there's always a full set.
+  const quickSuggestionPool = useMemo(() => {
+    const freq =
+      storeSettings.find((s) => s.store_id === selectedStore)
+        ?.item_frequency || {};
+    const usedByFrequency = Object.keys(freq).sort(
+      (a, b) => freq[b] - freq[a],
+    );
+    const seen = new Set(usedByFrequency.map((n) => n.toLowerCase()));
+    const merged = [...usedByFrequency];
+    for (const name of getQuickSuggestions(selectedStore)) {
+      if (!seen.has(name.toLowerCase())) {
+        merged.push(name);
+        seen.add(name.toLowerCase());
+      }
+    }
+    return merged;
+  }, [storeSettings, selectedStore]);
+
   const categorySortStoreName = useMemo(() => {
     if (!categorySortStore) return "";
     return (
@@ -4286,6 +4381,7 @@ export function EinkaufenScreen({
           categoryOrder={currentCategoryOrder}
           itemEditing={isItemNameEditing}
           globalItems={globalItems}
+          suggestionPool={quickSuggestionPool}
         />
       </div>
 

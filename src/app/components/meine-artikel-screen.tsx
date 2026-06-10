@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { ChevronLeft, Search, Plus, X, Pencil, Trash2, Type } from "lucide-react";
+import { ChevronLeft, Search, Plus, X, Pencil, Trash2, Type, Check } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { useAuth } from "./auth-context";
 import { API_BASE } from "./supabase-client";
@@ -195,6 +195,10 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
   const [articles, setArticles] = useState<MergedArticle[]>([]);
   const [loading, setLoading] = useState(true);
   const [reloadTick, setReloadTick] = useState(0);
+  // Only show the full-screen spinner on the very first load. Subsequent
+  // reloads (after delete/rename/etc.) keep the existing list mounted so the
+  // scroll position is preserved instead of collapsing to the spinner.
+  const initialLoadDone = useRef(false);
 
   // ── Custom categories ────────────────────────────────────────
   const [customCategories, setCustomCategories] = useState<string[]>([]);
@@ -219,13 +223,36 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
   // ── Rename article ────────────────────────────────────────────
   const [renameArticle, setRenameArticle] = useState<MergedArticle | null>(null);
 
+  // ── Multi-select mode ─────────────────────────────────────────
+  const [multiSelectMode, setMultiSelectMode] = useState(false);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkCatOpen, setBulkCatOpen] = useState(false);
+
+  const exitMultiSelect = useCallback(() => {
+    setMultiSelectMode(false);
+    setSelectedKeys(new Set());
+    setBulkDeleteOpen(false);
+    setBulkCatOpen(false);
+  }, []);
+
+  const toggleSelect = useCallback((name: string) => {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      const key = name.toLowerCase();
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
   // ── Load & merge data ──────────────────────────────────────────
   useEffect(() => {
     if (!householdId) return;
     let cancelled = false;
 
     (async () => {
-      setLoading(true);
+      if (!initialLoadDone.current) setLoading(true);
       const [globalItems, shoppingItems, customCats] = await Promise.all([
         fetchGlobalItems(householdId),
         fetchShoppingItems(householdId),
@@ -327,6 +354,7 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
       if (!cancelled) {
         setArticles(Array.from(map.values()));
         setLoading(false);
+        initialLoadDone.current = true;
       }
     })();
 
@@ -541,18 +569,24 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
   // ── Delete ─────────────────────────────────────────────────────
   const handleDelete = useCallback(async () => {
     if (!householdId || !deleteArticle) return;
-    if (deleteArticle.source === "grocery") {
+    const target = deleteArticle;
+    // Optimistic local removal so the row disappears instantly and the
+    // scroll position is kept (no spinner flash from a full reload).
+    setArticles((prev) =>
+      prev.filter((a) => a.name.toLowerCase() !== target.name.toLowerCase()),
+    );
+    setDeleteArticle(null);
+    if (target.source === "grocery") {
       // Soft-delete: create a global_items entry with deleted: true
       // so the GROCERY_DATABASE item gets filtered out in the merge
-      await upsertGlobalItem(householdId, deleteArticle.name, deleteArticle.category, true, {
+      await upsertGlobalItem(householdId, target.name, target.category, true, {
         deleted: true,
-        original_name: deleteArticle.name,
+        original_name: target.name,
       });
     } else {
       // Hard-delete existing global_items entry (source === "global" or "shopping")
-      await deleteGlobalItem(householdId, deleteArticle.name);
+      await deleteGlobalItem(householdId, target.name);
     }
-    setDeleteArticle(null);
     reload();
   }, [householdId, deleteArticle, reload]);
 
@@ -589,6 +623,57 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
     },
     [householdId, renameArticle, reload],
   );
+
+  // ── Bulk delete (multi-select) ─────────────────────────────────
+  const handleBulkDelete = useCallback(async () => {
+    if (!householdId) return;
+    const targets = articles.filter((a) =>
+      selectedKeys.has(a.name.toLowerCase()),
+    );
+    // Optimistic local removal so rows disappear instantly, scroll kept.
+    setArticles((prev) =>
+      prev.filter((a) => !selectedKeys.has(a.name.toLowerCase())),
+    );
+    exitMultiSelect();
+    for (const t of targets) {
+      if (t.source === "grocery") {
+        await upsertGlobalItem(householdId, t.name, t.category, true, {
+          deleted: true,
+          original_name: t.name,
+        });
+      } else {
+        await deleteGlobalItem(householdId, t.name);
+      }
+    }
+    reload();
+  }, [householdId, articles, selectedKeys, exitMultiSelect, reload]);
+
+  // ── Bulk category change (multi-select) ────────────────────────
+  const handleBulkCategoryChange = useCallback(
+    async (category: string) => {
+      if (!householdId) return;
+      const targets = articles.filter((a) =>
+        selectedKeys.has(a.name.toLowerCase()),
+      );
+      // Optimistic local update
+      setArticles((prev) =>
+        prev.map((a) =>
+          selectedKeys.has(a.name.toLowerCase())
+            ? { ...a, category }
+            : a,
+        ),
+      );
+      exitMultiSelect();
+      for (const t of targets) {
+        // category_only = true → don't increment times_used
+        await upsertGlobalItem(householdId, t.name, category, true);
+      }
+      reload();
+    },
+    [householdId, articles, selectedKeys, exitMultiSelect, reload],
+  );
+
+  const selectedCount = selectedKeys.size;
 
   const sortOptions: { key: SortMode; label: string }[] = [
     { key: "az", label: "A–Z" },
@@ -671,12 +756,34 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
           ))}
         </div>
 
-        {/* ── Article count + New Category button ── */}
+        {/* ── Article count + Select / New Category buttons ── */}
         <div className="flex items-center justify-between pt-1 pb-2">
-          <span className="text-xs font-medium" style={{ color: "var(--text-3)" }}>
-            {sorted.length} Artikel
-          </span>
-          {sortMode === "kategorie" && (
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-medium" style={{ color: "var(--text-3)" }}>
+              {multiSelectMode && selectedCount > 0
+                ? `${selectedCount} ausgewählt`
+                : `${sorted.length} Artikel`}
+            </span>
+            {!multiSelectMode && sorted.length > 0 && (
+              <button
+                onClick={() => setMultiSelectMode(true)}
+                className="text-xs font-semibold active:opacity-70 transition"
+                style={{ color: "var(--accent)" }}
+              >
+                Auswählen
+              </button>
+            )}
+            {multiSelectMode && (
+              <button
+                onClick={exitMultiSelect}
+                className="text-xs font-semibold active:opacity-70 transition"
+                style={{ color: "var(--text-2)" }}
+              >
+                Abbrechen
+              </button>
+            )}
+          </div>
+          {!multiSelectMode && sortMode === "kategorie" && (
             <button
               onClick={() => setShowNewCategoryDrawer(true)}
               className="text-xs font-semibold active:opacity-70 transition"
@@ -734,13 +841,15 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
                   >
                     {group.category}
                   </span>
-                  <button
-                    onClick={() => setRenamingCategory(group.category)}
-                    className="w-6 h-6 flex items-center justify-center rounded-md active:bg-surface-2 transition"
-                  >
-                    <Pencil className="w-3 h-3" style={{ color: "var(--text-3)" }} />
-                  </button>
-                  {isEmpty && isCustom && (
+                  {!multiSelectMode && (
+                    <button
+                      onClick={() => setRenamingCategory(group.category)}
+                      className="w-6 h-6 flex items-center justify-center rounded-md active:bg-surface-2 transition"
+                    >
+                      <Pencil className="w-3 h-3" style={{ color: "var(--text-3)" }} />
+                    </button>
+                  )}
+                  {!multiSelectMode && isEmpty && isCustom && (
                     <button
                       onClick={() => handleDeleteCategory(group.category)}
                       className="w-6 h-6 flex items-center justify-center rounded-md active:bg-surface-2 transition"
@@ -762,6 +871,9 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
                       article={article}
                       showBorder={idx < group.items.length - 1}
                       showCategory={false}
+                      selectMode={multiSelectMode}
+                      selected={selectedKeys.has(article.name.toLowerCase())}
+                      onToggleSelect={() => toggleSelect(article.name)}
                       onPointerDown={(e) => handlePointerDown(article, e)}
                       onPointerMove={handlePointerMove}
                       onPointerUp={handlePointerUp}
@@ -785,6 +897,9 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
                   article={article}
                   showBorder={idx < sorted.length - 1}
                   showCategory
+                  selectMode={multiSelectMode}
+                  selected={selectedKeys.has(article.name.toLowerCase())}
+                  onToggleSelect={() => toggleSelect(article.name)}
                   onPointerDown={(e) => handlePointerDown(article, e)}
                   onPointerMove={handlePointerMove}
                   onPointerUp={handlePointerUp}
@@ -795,26 +910,106 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
         </div>
       </div>
 
-      {/* ── FAB ── */}
-      <button
-        onClick={() => {
-          setAddName("");
-          setAddStep("name");
-          setShowAddDrawer(true);
-        }}
-        className="absolute flex items-center justify-center rounded-full shadow-lg active:scale-95 transition-transform"
-        style={{
-          width: 56,
-          height: 56,
-          bottom: 24,
-          right: 20,
-          background: "var(--accent)",
-          boxShadow: "0 4px 16px color-mix(in srgb, var(--accent) 40%, transparent)",
-          zIndex: 20,
-        }}
-      >
-        <Plus className="w-6 h-6 text-white" />
-      </button>
+      {/* ── FAB: Add article (hidden during multi-select) ── */}
+      {!multiSelectMode && (
+        <button
+          onClick={() => {
+            setAddName("");
+            setAddStep("name");
+            setShowAddDrawer(true);
+          }}
+          className="absolute flex items-center justify-center rounded-full shadow-lg active:scale-95 transition-transform"
+          style={{
+            width: 56,
+            height: 56,
+            bottom: 24,
+            right: 20,
+            background: "var(--accent)",
+            boxShadow: "0 4px 16px color-mix(in srgb, var(--accent) 40%, transparent)",
+            zIndex: 20,
+          }}
+        >
+          <Plus className="w-6 h-6 text-white" />
+        </button>
+      )}
+
+      {/* ── Multi-select action FABs (appear once ≥1 article is selected) ── */}
+      <AnimatePresence>
+        {multiSelectMode && selectedCount > 0 && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9, y: 8 }}
+            transition={{ duration: 0.15 }}
+            className="absolute flex flex-col items-end gap-3"
+            style={{ bottom: 24, right: 20, zIndex: 20 }}
+          >
+            {/* Kategorie wechseln */}
+            <div className="flex items-center gap-2.5">
+              <span
+                className="text-xs font-semibold px-2.5 py-1 rounded-md"
+                style={{ background: "var(--surface)", color: "var(--text-1)", boxShadow: "var(--shadow-elevated)" }}
+              >
+                Kategorie wechseln
+              </span>
+              <button
+                onClick={() => setBulkCatOpen(true)}
+                className="flex items-center justify-center rounded-full active:scale-95 transition-transform"
+                style={{
+                  width: 48,
+                  height: 48,
+                  background: "var(--accent)",
+                  boxShadow: "0 4px 16px color-mix(in srgb, var(--accent) 40%, transparent)",
+                }}
+              >
+                <Pencil className="w-5 h-5 text-white" />
+              </button>
+            </div>
+            {/* Löschen */}
+            <div className="flex items-center gap-2.5">
+              <span
+                className="text-xs font-semibold px-2.5 py-1 rounded-md"
+                style={{ background: "var(--surface)", color: "var(--text-1)", boxShadow: "var(--shadow-elevated)" }}
+              >
+                Löschen
+              </span>
+              <button
+                onClick={() => setBulkDeleteOpen(true)}
+                className="flex items-center justify-center rounded-full active:scale-95 transition-transform"
+                style={{
+                  width: 48,
+                  height: 48,
+                  background: "var(--danger)",
+                  boxShadow: "0 4px 16px color-mix(in srgb, var(--danger) 40%, transparent)",
+                }}
+              >
+                <Trash2 className="w-5 h-5 text-white" />
+              </button>
+            </div>
+            {/* Abbrechen */}
+            <div className="flex items-center gap-2.5">
+              <span
+                className="text-xs font-semibold px-2.5 py-1 rounded-md"
+                style={{ background: "var(--surface)", color: "var(--text-2)", boxShadow: "var(--shadow-elevated)" }}
+              >
+                Abbrechen
+              </span>
+              <button
+                onClick={exitMultiSelect}
+                className="flex items-center justify-center rounded-full active:scale-95 transition-transform"
+                style={{
+                  width: 48,
+                  height: 48,
+                  background: "var(--surface-2)",
+                  border: "1px solid var(--zu-border)",
+                }}
+              >
+                <X className="w-5 h-5" style={{ color: "var(--text-2)" }} />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── Add Article Drawer ── */}
       <AnimatePresence>
@@ -902,6 +1097,36 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
         )}
       </AnimatePresence>
 
+      {/* ── Bulk Category Change Drawer ── */}
+      <AnimatePresence>
+        {bulkCatOpen && (
+          <CategoryPickerDrawer
+            subtitle={`Für ${selectedCount} ausgewählte Artikel`}
+            categories={mergedCategories}
+            onSelect={handleBulkCategoryChange}
+            onClose={() => setBulkCatOpen(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── Bulk Delete Confirmation ── */}
+      <AnimatePresence>
+        {bulkDeleteOpen && (
+          <DeleteConfirmModal
+            count={selectedCount}
+            articleName={
+              selectedCount === 1
+                ? articles.find((a) =>
+                    selectedKeys.has(a.name.toLowerCase()),
+                  )?.name
+                : undefined
+            }
+            onConfirm={handleBulkDelete}
+            onCancel={() => setBulkDeleteOpen(false)}
+          />
+        )}
+      </AnimatePresence>
+
       {/* ── New Category Drawer ── */}
       <AnimatePresence>
         {showNewCategoryDrawer && (
@@ -942,6 +1167,9 @@ function ArticleRow({
   article,
   showBorder,
   showCategory,
+  selectMode,
+  selected,
+  onToggleSelect,
   onPointerDown,
   onPointerMove,
   onPointerUp,
@@ -949,6 +1177,9 @@ function ArticleRow({
   article: MergedArticle;
   showBorder: boolean;
   showCategory: boolean;
+  selectMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
   onPointerDown: (e: React.PointerEvent) => void;
   onPointerMove: (e: React.PointerEvent) => void;
   onPointerUp: () => void;
@@ -963,13 +1194,28 @@ function ArticleRow({
         WebkitTouchCallout: "none",
         WebkitUserSelect: "none",
         userSelect: "none",
+        cursor: selectMode ? "pointer" : undefined,
       }}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
+      onClick={selectMode ? onToggleSelect : undefined}
+      onPointerDown={selectMode ? undefined : onPointerDown}
+      onPointerMove={selectMode ? undefined : onPointerMove}
+      onPointerUp={selectMode ? undefined : onPointerUp}
+      onPointerCancel={selectMode ? undefined : onPointerUp}
       onContextMenu={(e) => e.preventDefault()}
     >
+      {selectMode && (
+        <span
+          className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center transition"
+          style={{
+            border: selected
+              ? "2px solid var(--accent)"
+              : "2px solid var(--zu-border)",
+            background: selected ? "var(--accent)" : "transparent",
+          }}
+        >
+          {selected && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
+        </span>
+      )}
       <span
         className="flex-1 text-sm font-medium truncate"
         style={{ color: "var(--text-1)" }}
@@ -1281,11 +1527,13 @@ function AddArticleDrawer({
 // ── Category Picker Drawer (for changing category) ─────────────────
 function CategoryPickerDrawer({
   itemName,
+  subtitle,
   categories,
   onSelect,
   onClose,
 }: {
-  itemName: string;
+  itemName?: string;
+  subtitle?: string;
   categories: string[];
   onSelect: (cat: string) => void;
   onClose: () => void;
@@ -1336,7 +1584,7 @@ function CategoryPickerDrawer({
         <div className="px-5 pb-2 flex-shrink-0">
           <h3 className="text-base font-bold text-text-1">Kategorie wechseln</h3>
           <p className="text-sm text-text-2 mt-0.5">
-            Für &bdquo;{itemName}&ldquo;
+            {subtitle ?? <>Für &bdquo;{itemName}&ldquo;</>}
           </p>
         </div>
         {/* Search */}
@@ -1413,13 +1661,16 @@ function CategoryPickerDrawer({
 // ── Delete Confirmation Modal ──────────────────────────────────────
 function DeleteConfirmModal({
   articleName,
+  count,
   onConfirm,
   onCancel,
 }: {
-  articleName: string;
+  articleName?: string;
+  count?: number;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const isBulk = typeof count === "number" && count > 1;
   const { bottomOffset: delBottomOffset, vpHeight: delVpHeight } = useKeyboardOffset();
   return createPortal(
     <motion.div
@@ -1446,10 +1697,17 @@ function DeleteConfirmModal({
           <div className="w-9 h-1 rounded-full" style={{ background: "var(--zu-border)" }} />
         </div>
         <h3 className="text-base font-bold text-text-1 text-center">
-          Artikel löschen?
+          {isBulk ? `${count} Artikel löschen?` : "Artikel löschen?"}
         </h3>
         <p className="text-sm text-text-3 text-center mt-2 mb-5">
-          &bdquo;{articleName}&ldquo; wird aus deiner Artikeldatenbank entfernt.
+          {isBulk ? (
+            <>
+              {count} ausgewählte Artikel werden unwiderruflich aus deiner
+              Artikeldatenbank entfernt.
+            </>
+          ) : (
+            <>&bdquo;{articleName}&ldquo; wird aus deiner Artikeldatenbank entfernt.</>
+          )}
         </p>
         <div className="flex gap-3 justify-center">
           <button
