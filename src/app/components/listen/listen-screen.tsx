@@ -4239,12 +4239,19 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
             </>
           )}
 
-          {/* Drag handles for li and todo items (touch + desktop) */}
-          {!liDragging && liPositions.map((pos, i) => (
+          {/* Drag handles for li and todo items (touch + desktop).
+              Kept mounted during drag — only hidden via styles — so the active
+              touch sequence isn't interrupted by the handle being unmounted. */}
+          {liPositions.map((pos, i) => (
             <div
               key={i}
               className="li-drag-handle"
-              style={{ top: pos.top, left: pos.left, height: HANDLE_LINE_H }}
+              style={{
+                top: pos.top,
+                left: pos.left,
+                height: HANDLE_LINE_H,
+                ...(liDragging ? { opacity: 0, pointerEvents: "none" as const } : {}),
+              }}
               onTouchStart={(e) => handleLiTouchStart(e, i)}
               onMouseDown={(e) => handleLiMouseDown(e, i)}
               onContextMenu={(e) => e.preventDefault()}
@@ -4255,20 +4262,30 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
             </div>
           ))}
 
-          {/* Floating ghost — follows the finger during a touch drag */}
+          {/* Floating ghost — follows the finger during a touch drag.
+              Sized to its text (not the full row) and clamped into the viewport. */}
           {isTouch && liGhost && (
             <div
-              className="fixed z-[60] flex items-center gap-1 px-2 py-1 rounded-lg bg-surface border border-accent-mid text-sm text-text-1 shadow-lg pointer-events-none"
+              ref={(el) => {
+                if (!el) return;
+                const w = el.offsetWidth;
+                const vw = window.innerWidth;
+                let left = liGhost.x - w / 2;
+                if (left < 8) left = 8;
+                if (left + w > vw - 8) left = vw - 8 - w;
+                el.style.left = `${left}px`;
+              }}
+              className="fixed z-[60] flex items-center gap-1 px-2 py-1 rounded-lg bg-surface border border-accent-mid text-sm text-text-1 shadow-lg pointer-events-none whitespace-nowrap"
               style={{
-                left: liGhost.x - liGhost.width / 2,
+                left: liGhost.x,
                 top: liGhost.y - 20,
-                width: liGhost.width,
+                maxWidth: "min(70vw, 280px)",
                 opacity: 0.95,
                 transform: "scale(1.02)",
               }}
             >
               <GripVertical className="w-3 h-3 text-text-3 flex-shrink-0" />
-              <span className="flex-1 min-w-0 truncate">{liGhost.label}</span>
+              <span className="min-w-0 truncate">{liGhost.label}</span>
             </div>
           )}
 

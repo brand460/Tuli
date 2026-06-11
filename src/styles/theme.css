@@ -438,11 +438,11 @@
 }
 
 /* On touch devices the handles must be clearly visible & easy to grab
-   (no hover, smaller screen). Make them solid, accent-coloured and larger. */
+   (no hover, smaller screen). Make them solid and larger (grey like elsewhere). */
 @media (pointer: coarse) {
   .li-drag-handle {
     opacity: 1;
-    color: var(--accent);
+    color: var(--text-3);
   }
   .li-drag-handle svg {
     width: 18px;
