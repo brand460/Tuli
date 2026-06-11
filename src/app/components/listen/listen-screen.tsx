@@ -21,7 +21,7 @@ import { ArrowCounterClockwise } from "phosphor-react";
 import { toast } from "sonner";
 import { apiFetch } from "../supabase-client";
 import { useKvRealtime, broadcastChange } from "../use-kv-realtime";
-import { useBackHandler } from "../ui/use-back-handler";
+import { useBackHandler, pushBack, removeBack } from "../ui/use-back-handler";
 import { useAuth } from "../auth-context";
 import {
   DndContext,
@@ -1063,9 +1063,10 @@ function SidebarContent(props: SidebarContentProps) {
   } | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-  // ── History-state refs for Android swipe-back cancellation ──
-  const dragHistoryPushedRef = useRef(false);
-  const ignoringPopstateRef = useRef(false);
+  // ── Back-gesture cancellation: id of the back-handler registered while
+  //    a drag is active (integrates with the centralized history guard so
+  //    finishing a drag never collides with open drawers' back handlers). ──
+  const dragBackIdRef = useRef<number | null>(null);
 
   // Flat list of all visible page IDs (tree order)
   const flatVisibleIds = useMemo(() => {
@@ -1102,6 +1103,8 @@ function SidebarContent(props: SidebarContentProps) {
     const state = touchDragRef.current;
     if (state?.timerId) clearTimeout(state.timerId);
     touchDragRef.current = null;
+    // The back-handler that triggered this cancel has already been popped.
+    dragBackIdRef.current = null;
     setDragActiveId(null);
     setDragActiveWidth(0);
     setDropPreview(null);
@@ -1110,32 +1113,13 @@ function SidebarContent(props: SidebarContentProps) {
     touchDragEndTimeRef.current = Date.now();
   }, []);
 
-  /** Clean up the history entry we pushed when drag activated. */
+  /** Remove the back-handler registered on drag activation (without firing it). */
   const cleanupDragHistory = useCallback(() => {
-    if (dragHistoryPushedRef.current) {
-      dragHistoryPushedRef.current = false;
-      ignoringPopstateRef.current = true;
-      history.back();
+    if (dragBackIdRef.current !== null) {
+      removeBack(dragBackIdRef.current);
+      dragBackIdRef.current = null;
     }
   }, []);
-
-  // popstate listener — fires when user presses Android back / swipe-back
-  useEffect(() => {
-    const onPopState = () => {
-      if (ignoringPopstateRef.current) {
-        // This popstate was triggered by our own cleanupDragHistory — ignore it
-        ignoringPopstateRef.current = false;
-        return;
-      }
-      if (dragHistoryPushedRef.current) {
-        // User navigated back while drag was active → cancel drag
-        dragHistoryPushedRef.current = false;
-        cancelTouchDrag();
-      }
-    };
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, [cancelTouchDrag]);
 
   const computeTouchDropPreview = useCallback((cursorY: number, cursorX: number, dragPageId: string): { preview: DropPreview | null; overTrash: boolean } => {
     // Check trash zone
@@ -1207,9 +1191,10 @@ function SidebarContent(props: SidebarContentProps) {
       touchDragRef.current.activated = true;
       try { navigator.vibrate?.(30); } catch (_) {}
 
-      // Push a dummy history entry so Android swipe-back cancels drag instead of closing the app/tab
-      history.pushState({ drag: true }, "");
-      dragHistoryPushedRef.current = true;
+      // Register a back-handler (via the centralized history guard) so Android
+      // swipe-back / back cancels the drag instead of closing the app. Using the
+      // shared API avoids colliding with an open drawer's own back handler.
+      dragBackIdRef.current = pushBack(() => cancelTouchDrag());
 
       setDragActiveId(pageId);
       setTouchDragGhost({
@@ -1294,12 +1279,8 @@ function SidebarContent(props: SidebarContentProps) {
       setTouchDragGhost(null);
       touchDragEndTimeRef.current = Date.now();
       touchDragRef.current = null;
-      // Remove the dummy history entry we pushed on drag activation
-      if (dragHistoryPushedRef.current) {
-        dragHistoryPushedRef.current = false;
-        ignoringPopstateRef.current = true;
-        history.back();
-      }
+      // Remove the back-handler registered on drag activation
+      cleanupDragHistory();
     };
 
     // touchcancel (e.g. Android system gesture): cancel drag without executing drop
@@ -1314,12 +1295,8 @@ function SidebarContent(props: SidebarContentProps) {
         setDragOverTrash(false);
         setTouchDragGhost(null);
         touchDragEndTimeRef.current = Date.now();
-        // Remove the dummy history entry if we pushed one
-        if (dragHistoryPushedRef.current) {
-          dragHistoryPushedRef.current = false;
-          ignoringPopstateRef.current = true;
-          history.back();
-        }
+        // Remove the back-handler registered on drag activation
+        cleanupDragHistory();
       }
       touchDragRef.current = null;
     };
@@ -1332,7 +1309,7 @@ function SidebarContent(props: SidebarContentProps) {
       document.removeEventListener("touchend", endHandler);
       document.removeEventListener("touchcancel", cancelHandler);
     };
-  }, [computeTouchDropPreview, executeTouchDrop]);
+  }, [computeTouchDropPreview, executeTouchDrop, cleanupDragHistory]);
 
   // Clean up on unmount
   useEffect(() => {
