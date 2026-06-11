@@ -437,6 +437,19 @@
   opacity: 1;
 }
 
+/* On touch devices the handles must be clearly visible & easy to grab
+   (no hover, smaller screen). Make them solid, accent-coloured and larger. */
+@media (pointer: coarse) {
+  .li-drag-handle {
+    opacity: 1;
+    color: var(--accent);
+  }
+  .li-drag-handle svg {
+    width: 18px;
+    height: 18px;
+  }
+}
+
 /* Suppress text selection / callout while a list item is being long-press dragged */
 .li-drag-noselect,
 .li-drag-noselect * {

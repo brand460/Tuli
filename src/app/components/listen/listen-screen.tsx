@@ -884,8 +884,7 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
               style={{ left: contextMenu.x + 4, top: contextMenu.y, boxShadow: "var(--shadow-elevated)", border: "1px solid var(--zu-border)" }}
             >
               <button
-                onPointerDown={(e) => {
-                  e.preventDefault();
+                onClick={(e) => {
                   e.stopPropagation();
                   createPage(contextMenu.pageId);
                   setContextMenu(null);
@@ -897,8 +896,7 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
 
               <div className="my-1" style={{ borderTop: "1px solid var(--zu-border)" }} />
               <button
-                onPointerDown={(e) => {
-                  e.preventDefault();
+                onClick={(e) => {
                   e.stopPropagation();
                   setDeleteConfirmPageId(contextMenu.pageId);
                   setContextMenu(null);
@@ -1236,22 +1234,18 @@ function SidebarContent(props: SidebarContentProps) {
     const state = touchDragRef.current;
     if (!state) return;
 
-    if (state.timerId) clearTimeout(state.timerId);
-
-    if (state.activated) {
-      // Execute the drop — use refs for latest values
-      executeTouchDrop(state.pageId, dropPreviewRef.current, dragOverTrashRef.current);
-      setDragActiveId(null);
-      setDragActiveWidth(0);
-      setDropPreview(null);
-      setDragOverTrash(false);
-      setTouchDragGhost(null);
-      touchDragEndTimeRef.current = Date.now();
-      cleanupDragHistory();
+    if (!state.activated) {
+      // Plain tap (long-press never completed) — cancel the pending timer and
+      // let the row's onClick run to open the page.
+      if (state.timerId) clearTimeout(state.timerId);
+      touchDragRef.current = null;
+      return;
     }
-
-    touchDragRef.current = null;
-  }, [executeTouchDrop, cleanupDragHistory]);
+    // An activated drag is finalised by the document-level touchend listener
+    // (`endHandler`), which also calls preventDefault() to suppress the
+    // synthesized click that would otherwise close the drawer. We must NOT
+    // null touchDragRef here or that handler would bail out early.
+  }, []);
 
   // Native touchmove listener with { passive: false } to allow preventDefault during drag
   useEffect(() => {
@@ -4268,8 +4262,8 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
             </>
           )}
 
-          {/* Drag handles for li and todo items — desktop only (touch uses long-press) */}
-          {!isTouch && !liDragging && liPositions.map((pos, i) => (
+          {/* Drag handles for li and todo items (touch + desktop) */}
+          {!liDragging && liPositions.map((pos, i) => (
             <div
               key={i}
               className="li-drag-handle"
@@ -4284,7 +4278,7 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
             </div>
           ))}
 
-          {/* Floating ghost — follows the finger during a touch long-press drag */}
+          {/* Floating ghost — follows the finger during a touch drag */}
           {isTouch && liGhost && (
             <div
               className="fixed z-[60] flex items-center gap-1 px-2 py-1 rounded-lg bg-surface border border-accent-mid text-sm text-text-1 shadow-lg pointer-events-none"
