@@ -246,7 +246,41 @@ async function upsertGlobalItem(
   }
 }
 
-// ── Store Logo Avatar ──────────────────────────────────────────────
+// ── Local cache (instant hydration after the OS discards the page) ───
+// Android/iOS may kill the PWA's page when the screen locks. On unlock the
+// app remounts with empty state and would otherwise show empty lists for
+// 10+ seconds on slow mobile data while the network re-fetches everything.
+// We mirror the loaded data into localStorage and hydrate from it instantly.
+const EINKAUF_CACHE_PREFIX = "tuli_einkauf_cache:";
+
+interface EinkaufCache {
+  items: ShoppingItem[];
+  settings: StoreSettingEntry[];
+  customCats: string[];
+  gItems: GlobalItem[];
+}
+
+function readEinkaufCache(hhId: string): EinkaufCache | null {
+  try {
+    const raw = localStorage.getItem(EINKAUF_CACHE_PREFIX + hhId);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.items)) return null;
+    return parsed as EinkaufCache;
+  } catch {
+    return null;
+  }
+}
+
+function writeEinkaufCache(hhId: string, data: EinkaufCache): void {
+  try {
+    localStorage.setItem(EINKAUF_CACHE_PREFIX + hhId, JSON.stringify(data));
+  } catch {
+    /* quota exceeded / unavailable — ignore */
+  }
+}
+
+
 function StoreLogo({
   store,
   size = 48,
@@ -1897,24 +1931,39 @@ function CategorySortModal({
 function CheckedSection({
   items,
   onToggle,
-  onClearAll,
   expanded,
   onExpandedChange,
+  mergedItems,
 }: {
   items: ShoppingItem[];
   onToggle: (id: string) => void;
-  onClearAll: () => void;
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
+  mergedItems: GroceryTemplate[];
 }) {
   if (items.length === 0) return null;
 
   return (
     <div
-      className="bg-surface-2"
+      className="mt-2"
       style={{ borderTop: "1px solid var(--zu-border)" }}
     >
-      {/* Content ABOVE the header — expands upward */}
+      {/* Header at the top */}
+      <button
+        onClick={() => onExpandedChange(!expanded)}
+        className="w-full flex items-center justify-between px-4 py-2.5"
+      >
+        <span className="text-xs font-medium text-text-2">
+          Erledigt ({items.length})
+        </span>
+        {expanded ? (
+          <ChevronUp className="w-3.5 h-3.5 text-text-3" />
+        ) : (
+          <ChevronDown className="w-3.5 h-3.5 text-text-3" />
+        )}
+      </button>
+
+      {/* Content BELOW the header — expands downward */}
       <AnimatePresence>
         {expanded && (
           <motion.div
@@ -1928,52 +1977,51 @@ function CheckedSection({
               {items.map((item) => (
                 <div
                   key={item.id}
-                  className="flex items-center gap-3 px-4 py-1.5 opacity-60"
+                  className="flex items-center gap-2 px-4 py-2.5"
                 >
                   <button
                     onClick={() => onToggle(item.id)}
-                    className="flex-shrink-0 w-5 h-5 rounded-full bg-accent border-2 border-accent flex items-center justify-center"
+                    className="flex-shrink-0 w-6 h-6 rounded-full border-2 bg-accent border-accent flex items-center justify-center"
                   >
-                    <Check className="w-3 h-3 text-white" />
+                    <Check className="w-3.5 h-3.5 text-white" />
                   </button>
-                  <span className="text-xs line-through text-text-3 flex-1 truncate">
-                    {item.name}
-                  </span>
-                  <span className="text-[10px] text-text-3">
-                    {formatQuantity(item.quantity, item.unit)}
-                    {item.unit && item.unit !== "Stk."
-                      ? item.unit
-                      : "x"}
-                  </span>
+                  {(() => {
+                    const dotColor = getItemCategoryDot(
+                      item.name,
+                      mergedItems,
+                    );
+                    return (
+                      <span
+                        className="flex-shrink-0 w-2 h-2 rounded-full"
+                        style={
+                          dotColor
+                            ? { backgroundColor: dotColor }
+                            : { visibility: "hidden" }
+                        }
+                      />
+                    );
+                  })()}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm leading-tight truncate line-through text-text-3">
+                      {item.name}
+                    </p>
+                  </div>
+                  <div className="flex items-baseline gap-0.5 flex-shrink-0 min-w-[28px] justify-center">
+                    <span className="text-sm font-semibold text-text-3">
+                      {formatQuantity(item.quantity, item.unit)}
+                    </span>
+                    {item.unit && item.unit !== "Stk." && (
+                      <span className="text-xs text-text-3">
+                        {item.unit}
+                      </span>
+                    )}
+                  </div>
                 </div>
               ))}
-            </div>
-            <div className="px-4 pb-3 pt-1">
-              <button
-                onClick={onClearAll}
-                className="flex items-center gap-1.5 text-xs text-danger hover:text-danger transition"
-              >
-                <Trash2 className="w-3 h-3" />
-                Erledigte löschen
-              </button>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
-      {/* Header always at the bottom */}
-      <button
-        onClick={() => onExpandedChange(!expanded)}
-        className="w-full flex items-center justify-between px-4 py-2.5"
-      >
-        <span className="text-xs font-medium text-text-2">
-          Erledigt ({items.length})
-        </span>
-        {expanded ? (
-          <ChevronDown className="w-3.5 h-3.5 text-text-3" />
-        ) : (
-          <ChevronUp className="w-3.5 h-3.5 text-text-3" />
-        )}
-      </button>
     </div>
   );
 }
@@ -2770,6 +2818,7 @@ export function EinkaufenScreen({
   const [selectedStore, setSelectedStore] = useLocalState<string>("einkaufen_store", "alle");
   const [showAddStore, setShowAddStore] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const loadedRef = useRef(false);
   const [activeDragId, setActiveDragId] = useState<
     string | null
   >(null);
@@ -2824,15 +2873,10 @@ export function EinkaufenScreen({
   const [storeSelectorH, setStoreSelectorH] = useState(82);
   // addItemBarH: pixel height of the AddItemBar (bottom anchor for list)
   const addItemBarHRef = useRef(60);
-  // checkedSectionH: pixel height of the CheckedSection sticky bar
-  const checkedSectionHRef = useRef(0);
   // listBottomFixed: dynamic CSS `bottom` for the scroll container
-  //   keyboard closed → addItemBarH + checkedSectionH
-  //   keyboard open   → keyboardHeight + addItemBarH + checkedSectionH
+  //   keyboard closed → addItemBarH
+  //   keyboard open   → keyboardHeight + addItemBarH
   const [listBottomFixed, setListBottomFixed] = useState(60);
-  // checkedSectionBottom: CSS `bottom` for the CheckedSection absolute element
-  //   = kbOffset + addItemBarH  (no checkedSectionH, it sits on top of AddItemBar)
-  const [checkedSectionBottom, setCheckedSectionBottom] = useState(60);
   // kbOffset: keyboard height relative to the container (not the screen).
   // Used to position the AddItemBar above the keyboard so the browser
   // doesn't auto-scroll the fixed layout to reveal the focused input.
@@ -2841,6 +2885,26 @@ export function EinkaufenScreen({
   // ── Load items + store settings ────────────────────────────────
   const reloadAllData = useCallback(async () => {
     if (!householdId) return;
+
+    // Instant hydration from local cache on the first load (fresh mount).
+    // Android discards the page on screen-lock; on unlock we remount with
+    // empty state — show the cached list immediately while the network
+    // refresh runs in the background, instead of an empty list for 10+ s.
+    if (!loadedRef.current) {
+      const cached = readEinkaufCache(householdId);
+      if (cached) {
+        setItems(cached.items);
+        if (cached.settings.length > 0) {
+          setStoreSettings(cached.settings);
+          applyStoreSettings(DEFAULT_STORES, cached.settings);
+        }
+        setGlobalCustomCategories(cached.customCats);
+        setGlobalItems(cached.gItems);
+        loadedRef.current = true;
+        setLoaded(true);
+      }
+    }
+
     try {
       const [serverItems, settings, customCats, gItems] =
         await Promise.all([
@@ -2859,6 +2923,13 @@ export function EinkaufenScreen({
       }
       setGlobalCustomCategories(customCats);
       setGlobalItems(gItems);
+      writeEinkaufCache(householdId, {
+        items: serverItems,
+        settings,
+        customCats,
+        gItems,
+      });
+      loadedRef.current = true;
       setLoaded(true);
     } catch (err) {
       console.log("reloadAllData error:", err);
@@ -2898,6 +2969,18 @@ export function EinkaufenScreen({
       window.removeEventListener("focus", handleFocus);
     };
   }, [reloadAllData]);
+
+  // ── Keep the local cache fresh on every change (so the next unlock shows
+  //    the latest checked/added items instantly, even offline). ──
+  useEffect(() => {
+    if (!householdId || !loaded) return;
+    writeEinkaufCache(householdId, {
+      items,
+      settings: storeSettings,
+      customCats: globalCustomCategories,
+      gItems: globalItems,
+    });
+  }, [householdId, loaded, items, storeSettings, globalCustomCategories, globalItems]);
 
   // ── Supabase Realtime subscription for live sync ──
   useKvRealtime(
@@ -3194,20 +3277,6 @@ export function EinkaufenScreen({
     [items, updateItems],
   );
 
-  // When the checked-items accordion is open, the first tap on an
-  // open (unchecked) item should just close the accordion instead
-  // of checking the item off.
-  const handleUncheckedToggle = useCallback(
-    (id: string) => {
-      if (checkedExpanded) {
-        setCheckedExpanded(false);
-        return;
-      }
-      handleToggle(id);
-    },
-    [checkedExpanded, handleToggle],
-  );
-
   const handleQuantityChange = useCallback(
     (id: string, delta: number) => {
       updateItems((prev) =>
@@ -3413,14 +3482,6 @@ export function EinkaufenScreen({
     },
     [items, selectedStore, getCustomCategoryIndex, updateItems, recordItemUsage],
   );
-
-  const handleClearChecked = useCallback(() => {
-    updateItems((prev) =>
-      prev.filter(
-        (i) => !(i.store === selectedStore && i.is_checked),
-      ),
-    );
-  }, [selectedStore, updateItems]);
 
   // ── "Liste leeren" — löscht NUR die Items des aktuell gewählten Ladens ──
   const handleClearAll = useCallback(async () => {
@@ -4085,10 +4146,10 @@ export function EinkaufenScreen({
     const barH = isItemNameEditingRef.current
       ? 0
       : addItemBarHRef.current;
-    const checkedH = checkedSectionHRef.current;
     const base = isKbOpen ? kbH + barH : barH;
-    setCheckedSectionBottom(base);
-    setListBottomFixed(base + checkedH);
+    // CheckedSection is now part of the scrollable list (no longer a fixed
+    // bar above the AddItemBar), so the list only needs to clear the bar.
+    setListBottomFixed(base);
   }, []);
 
   // ── Measure store-selector height ─────────────────────────────
@@ -4113,19 +4174,6 @@ export function EinkaufenScreen({
       updateListBottom();
     });
     ro.observe(bottomBarRef.current);
-    return () => ro.disconnect();
-  }, [updateListBottom]);
-
-  // ── Measure checked-section height; update listBottom on change ──
-  useEffect(() => {
-    if (!checkedSectionRef.current) return;
-    const ro = new ResizeObserver(() => {
-      const h =
-        checkedSectionRef.current?.getBoundingClientRect().height ?? 0;
-      checkedSectionHRef.current = h;
-      updateListBottom();
-    });
-    ro.observe(checkedSectionRef.current);
     return () => ro.disconnect();
   }, [updateListBottom]);
 
@@ -4329,7 +4377,7 @@ export function EinkaufenScreen({
                   <SortableShoppingItem
                     key={item.id}
                     item={item}
-                    onToggle={() => handleUncheckedToggle(item.id)}
+                    onToggle={() => handleToggle(item.id)}
                     onQuantityChange={(d) =>
                       handleQuantityChange(item.id, d)
                     }
@@ -4353,30 +4401,22 @@ export function EinkaufenScreen({
             )}
           </SortableContext>
         </StableDndContext>
-        </div>{/* end max-width wrapper */}
 
-      </div>
-
-      {/* ── CheckedSection — absolute, sits directly above AddItemBar ── */}
-      <div
-        ref={checkedSectionRef}
-        style={{
-          position: "absolute",
-          bottom: checkedSectionBottom,
-          left: 0,
-          right: 0,
-          zIndex: 90,
-        }}
-      >
-        <div style={isDesktop ? { maxWidth: 680, margin: "0 auto", width: "100%" } : undefined}>
+        {/* ── Erledigt-Sektion — Teil der scrollbaren Liste, am Ende ──
+             Default geschlossen, expandiert nach unten. */}
+        {loaded && (
           <CheckedSection
             items={checkedItems}
             onToggle={handleToggle}
-            onClearAll={handleClearChecked}
             expanded={checkedExpanded}
             onExpandedChange={setCheckedExpanded}
+            mergedItems={mergedItemsForDot}
           />
-        </div>
+        )}
+        {/* Bottom spacer so the last row isn't flush against the AddItemBar */}
+        <div style={{ height: 8 }} />
+        </div>{/* end max-width wrapper */}
+
       </div>
 
       {/* ── AddItemBar ──────────────────────────────────────────────────
