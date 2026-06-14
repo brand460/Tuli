@@ -59,7 +59,6 @@ import {
   StoreSuggestion,
   GroceryTemplate,
   GROCERY_DATABASE,
-  getAllCategories,
   buildMergedItems,
   buildExcludeSet,
   CATEGORY_COLORS,
@@ -1934,24 +1933,84 @@ function CheckedSection({
   expanded,
   onExpandedChange,
   mergedItems,
+  selfScroll = false,
 }: {
   items: ShoppingItem[];
   onToggle: (id: string) => void;
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
   mergedItems: GroceryTemplate[];
+  selfScroll?: boolean;
 }) {
   if (items.length === 0) return null;
 
+  const rows = (
+    <div>
+      {items.map((item) => (
+        <div
+          key={item.id}
+          className="flex items-center gap-2 px-4 py-2.5"
+        >
+          <button
+            onClick={() => onToggle(item.id)}
+            className="flex-shrink-0 w-6 h-6 rounded-full border-2 bg-accent border-accent flex items-center justify-center"
+          >
+            <Check className="w-3.5 h-3.5 text-white" />
+          </button>
+          {(() => {
+            const dotColor = getItemCategoryDot(
+              item.name,
+              mergedItems,
+            );
+            return (
+              <span
+                className="flex-shrink-0 w-2 h-2 rounded-full"
+                style={
+                  dotColor
+                    ? { backgroundColor: dotColor }
+                    : { visibility: "hidden" }
+                }
+              />
+            );
+          })()}
+          <div className="flex-1 min-w-0">
+            <p className="text-sm leading-tight truncate line-through text-text-3">
+              {item.name}
+            </p>
+          </div>
+          <div className="flex items-baseline gap-0.5 flex-shrink-0 min-w-[28px] justify-center">
+            <span className="text-sm font-semibold text-text-3">
+              {formatQuantity(item.quantity, item.unit)}
+            </span>
+            {item.unit && item.unit !== "Stk." && (
+              <span className="text-xs text-text-3">
+                {item.unit}
+              </span>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
+  // When `selfScroll` is true (end screen — no active items above), the
+  // accordion fills the remaining height and its content scrolls on its
+  // own. Otherwise it's a normal block that scrolls together with the list.
+  const rootClass = selfScroll
+    ? expanded
+      ? "flex flex-col min-h-0 flex-1"
+      : "flex flex-col flex-shrink-0"
+    : "mt-2";
+
   return (
     <div
-      className="mt-2"
+      className={rootClass}
       style={{ borderTop: "1px solid var(--zu-border)" }}
     >
       {/* Header at the top */}
       <button
         onClick={() => onExpandedChange(!expanded)}
-        className="w-full flex items-center justify-between px-4 py-2.5"
+        className="flex-shrink-0 w-full flex items-center justify-between px-4 py-2.5"
       >
         <span className="text-xs font-medium text-text-2">
           Erledigt ({items.length})
@@ -1963,65 +2022,35 @@ function CheckedSection({
         )}
       </button>
 
-      {/* Content BELOW the header — expands downward */}
-      <AnimatePresence>
-        {expanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.22, ease: [0.25, 1, 0.5, 1] }}
-            className="overflow-hidden"
+      {selfScroll ? (
+        // End-screen mode — own scroll region, no height animation.
+        expanded && (
+          <div
+            className="flex-1 min-h-0 overflow-y-auto"
+            style={{
+              WebkitOverflowScrolling: "touch",
+              overscrollBehavior: "contain",
+            }}
           >
-            <div>
-              {items.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex items-center gap-2 px-4 py-2.5"
-                >
-                  <button
-                    onClick={() => onToggle(item.id)}
-                    className="flex-shrink-0 w-6 h-6 rounded-full border-2 bg-accent border-accent flex items-center justify-center"
-                  >
-                    <Check className="w-3.5 h-3.5 text-white" />
-                  </button>
-                  {(() => {
-                    const dotColor = getItemCategoryDot(
-                      item.name,
-                      mergedItems,
-                    );
-                    return (
-                      <span
-                        className="flex-shrink-0 w-2 h-2 rounded-full"
-                        style={
-                          dotColor
-                            ? { backgroundColor: dotColor }
-                            : { visibility: "hidden" }
-                        }
-                      />
-                    );
-                  })()}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm leading-tight truncate line-through text-text-3">
-                      {item.name}
-                    </p>
-                  </div>
-                  <div className="flex items-baseline gap-0.5 flex-shrink-0 min-w-[28px] justify-center">
-                    <span className="text-sm font-semibold text-text-3">
-                      {formatQuantity(item.quantity, item.unit)}
-                    </span>
-                    {item.unit && item.unit !== "Stk." && (
-                      <span className="text-xs text-text-3">
-                        {item.unit}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            {rows}
+          </div>
+        )
+      ) : (
+        // Inline mode — expands downward, scrolls together with the list.
+        <AnimatePresence>
+          {expanded && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.22, ease: [0.25, 1, 0.5, 1] }}
+              className="overflow-hidden"
+            >
+              {rows}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      )}
     </div>
   );
 }
@@ -2037,6 +2066,7 @@ function AddItemBar({
   itemEditing,
   globalItems,
   suggestionPool,
+  validCategories,
 }: {
   storeId: string;
   stores: StoreInfo[];
@@ -2047,6 +2077,7 @@ function AddItemBar({
   itemEditing?: boolean;
   globalItems: GlobalItem[];
   suggestionPool: string[];
+  validCategories: string[];
 }) {
   const [query, setQuery] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -2166,10 +2197,16 @@ function AddItemBar({
     }
   };
 
-  const pickerCategories =
-    categoryOrder.length > 0
-      ? categoryOrder
-      : getCategoriesForStore(storeId, stores);
+  const pickerCategories = useMemo(() => {
+    const base =
+      categoryOrder.length > 0
+        ? categoryOrder
+        : getCategoriesForStore(storeId, stores);
+    // Only offer categories that actually have articles (or are custom).
+    // Removed/empty categories are filtered out everywhere.
+    const validSet = new Set(validCategories);
+    return base.filter((c) => validSet.has(c));
+  }, [categoryOrder, storeId, stores, validCategories]);
 
   return (
     <>
@@ -3249,6 +3286,25 @@ export function EinkaufenScreen({
     return [...merged, ...extra];
   }, [items, globalItems]);
 
+  // ── Valid categories ───────────────────────────────────────────
+  // A category is only "valid" (selectable / displayable) when it has at
+  // least one known article OR is an explicitly-kept custom category.
+  // Empty built-in categories and manually-removed categories disappear
+  // from every picker (add item, store "Anpassen", category change).
+  const validCategories = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of customTemplates) {
+      if (t.category) set.add(t.category);
+    }
+    for (const c of globalCustomCategories) set.add(c);
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "de"));
+  }, [customTemplates, globalCustomCategories]);
+
+  const validCategorySet = useMemo(
+    () => new Set(validCategories),
+    [validCategories],
+  );
+
   // ── Handlers ───────────────────────────────────────────────────
   const handleToggle = useCallback(
     (id: string) => {
@@ -4096,25 +4152,18 @@ export function EinkaufenScreen({
 
   const categorySortInitial = useMemo(() => {
     if (!categorySortStore) return [];
-    return getCategoryOrderForStore(categorySortStore);
-  }, [categorySortStore, getCategoryOrderForStore]);
+    // Filter out removed/empty categories so they no longer appear as
+    // active chips in the store "Anpassen" menu.
+    return getCategoryOrderForStore(categorySortStore).filter((c) =>
+      validCategorySet.has(c),
+    );
+  }, [categorySortStore, getCategoryOrderForStore, validCategorySet]);
 
   const allKnownCategories = useMemo(() => {
-    const base = getAllCategories();
-    const fromSettings = new Set<string>();
-    for (const setting of storeSettings) {
-      if (setting.category_order) {
-        for (const c of setting.category_order) {
-          fromSettings.add(c);
-        }
-      }
-    }
-    const result = [...base];
-    for (const c of fromSettings) {
-      if (!result.includes(c)) result.push(c);
-    }
-    return result;
-  }, [storeSettings]);
+    // Pool of categories offered in the store "Anpassen" menu: only those
+    // that have articles or are custom (already deduped + sorted).
+    return validCategories;
+  }, [validCategories]);
 
   // ── updateListBottom: recalculates list container's bottom offset ──
   // Called whenever keyboard state OR addItemBar height changes.
@@ -4307,7 +4356,22 @@ export function EinkaufenScreen({
           overscrollBehavior: "contain",
         }}
       >
-        <div style={isDesktop ? { maxWidth: 680, margin: "0 auto", width: "100%" } : undefined}>
+        <div
+          style={{
+            ...(isDesktop
+              ? { maxWidth: 680, margin: "0 auto", width: "100%" }
+              : {}),
+            ...(loaded &&
+            sortedStoreItems.length === 0 &&
+            checkedItems.length > 0
+              ? {
+                  height: "100%",
+                  display: "flex",
+                  flexDirection: "column" as const,
+                }
+              : {}),
+          }}
+        >
         {!loaded ? (
           <div className="flex items-center justify-center py-20">
             <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
@@ -4332,10 +4396,7 @@ export function EinkaufenScreen({
           </div>
         ) : sortedStoreItems.length === 0 &&
           checkedItems.length > 0 ? (
-          <div
-            className="flex flex-col items-center px-6 pt-20 pb-20"
-            style={{ minHeight: "100%" }}
-          >
+          <div className="flex flex-col items-center px-6 pt-12 pb-6 flex-shrink-0">
             <img
               src={bagFullImg}
               alt="Einkaufstasche"
@@ -4411,10 +4472,13 @@ export function EinkaufenScreen({
             expanded={checkedExpanded}
             onExpandedChange={setCheckedExpanded}
             mergedItems={mergedItemsForDot}
+            selfScroll={
+              sortedStoreItems.length === 0 && checkedItems.length > 0
+            }
           />
         )}
         {/* Bottom spacer so the last row isn't flush against the AddItemBar */}
-        <div style={{ height: 8 }} />
+        <div style={{ height: 8, flexShrink: 0 }} />
         </div>{/* end max-width wrapper */}
 
       </div>
@@ -4449,6 +4513,7 @@ export function EinkaufenScreen({
           itemEditing={isItemNameEditing}
           globalItems={globalItems}
           suggestionPool={quickSuggestionPool}
+          validCategories={validCategories}
         />
       </div>
 

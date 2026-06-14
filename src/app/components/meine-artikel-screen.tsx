@@ -363,12 +363,17 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
 
   const reload = useCallback(() => setReloadTick((t) => t + 1), []);
 
-  // ── Merged categories (built-in + custom) ──────────────────────
+  // ── Merged categories (only categories that have articles + custom) ──
+  // Empty built-in categories and manually-removed categories are excluded,
+  // so they no longer appear in the category-change / add-article pickers.
   const mergedCategories = useMemo(() => {
-    const set = new Set(getAllCategories());
+    const set = new Set<string>();
+    for (const a of articles) {
+      if (a.category) set.add(a.category);
+    }
     for (const c of customCategories) set.add(c);
     return Array.from(set).sort((a, b) => a.localeCompare(b, "de"));
-  }, [customCategories]);
+  }, [articles, customCategories]);
 
   // ── Create new category ────────────────────────────────────────
   const handleCreateCategory = useCallback(
