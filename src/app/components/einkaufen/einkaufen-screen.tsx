@@ -65,8 +65,7 @@ import {
   getCategoryChipColor,
   getItemCategoryDot,
 } from "./shopping-data";
-import { API_BASE, apiFetch } from "../supabase-client";
-import { publicAnonKey } from "/utils/supabase/info";
+import { apiFetch } from "../supabase-client";
 import {
   useKvRealtime,
   broadcastChange,
@@ -94,108 +93,54 @@ interface StoreSettingEntry {
 }
 
 // ── API helpers ────────────────────────────────────────────────────
+// All helpers use `apiFetch`, which (unlike a raw fetch with publicAnonKey)
+// provides: real auth-token refresh, 5× retry with backoff on network/5xx/401,
+// and proper error propagation. The fetch helpers intentionally THROW on
+// failure instead of returning an empty array — otherwise a failed network
+// request would be indistinguishable from "the list is genuinely empty" and
+// would overwrite good local/cached data with [].
 async function fetchItems(hhId: string): Promise<ShoppingItem[]> {
-  try {
-    const res = await fetch(
-      `${API_BASE}/shopping?household_id=${hhId}`,
-      { headers: { Authorization: `Bearer ${publicAnonKey}` } },
-    );
-    const json = await res.json();
-    return json.items || [];
-  } catch (err) {
-    console.log("fetchItems error:", err);
-    return [];
-  }
+  const json = await apiFetch(`/shopping?household_id=${hhId}`);
+  return json.items || [];
 }
 
 async function saveItems(hhId: string, items: ShoppingItem[]): Promise<void> {
-  try {
-    await fetch(`${API_BASE}/shopping`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${publicAnonKey}`,
-      },
-      body: JSON.stringify({
-        household_id: hhId,
-        items,
-      }),
-    });
-  } catch (err) {
-    console.log("saveItems error:", err);
-  }
+  await apiFetch("/shopping", {
+    method: "PUT",
+    body: JSON.stringify({ household_id: hhId, items }),
+  });
 }
 
 async function fetchStoreSettings(hhId: string): Promise<
   StoreSettingEntry[]
 > {
-  try {
-    const res = await fetch(
-      `${API_BASE}/store-settings?household_id=${hhId}`,
-      { headers: { Authorization: `Bearer ${publicAnonKey}` } },
-    );
-    const json = await res.json();
-    return json.settings || [];
-  } catch (err) {
-    console.log("fetchStoreSettings error:", err);
-    return [];
-  }
+  const json = await apiFetch(`/store-settings?household_id=${hhId}`);
+  return json.settings || [];
 }
 
 async function saveStoreSettings(
   hhId: string,
   settings: StoreSettingEntry[],
 ): Promise<void> {
-  try {
-    await fetch(`${API_BASE}/store-settings`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${publicAnonKey}`,
-      },
-      body: JSON.stringify({
-        household_id: hhId,
-        settings,
-      }),
-    });
-  } catch (err) {
-    console.log("saveStoreSettings error:", err);
-  }
+  await apiFetch("/store-settings", {
+    method: "PUT",
+    body: JSON.stringify({ household_id: hhId, settings }),
+  });
 }
 
 async function fetchCustomCategories(hhId: string): Promise<string[]> {
-  try {
-    const res = await fetch(
-      `${API_BASE}/custom-categories?household_id=${hhId}`,
-      { headers: { Authorization: `Bearer ${publicAnonKey}` } },
-    );
-    const json = await res.json();
-    return json.categories || [];
-  } catch (err) {
-    console.log("fetchCustomCategories error:", err);
-    return [];
-  }
+  const json = await apiFetch(`/custom-categories?household_id=${hhId}`);
+  return json.categories || [];
 }
 
 async function saveCustomCategories(
   hhId: string,
   categories: string[],
 ): Promise<void> {
-  try {
-    await fetch(`${API_BASE}/custom-categories`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${publicAnonKey}`,
-      },
-      body: JSON.stringify({
-        household_id: hhId,
-        categories,
-      }),
-    });
-  } catch (err) {
-    console.log("saveCustomCategories error:", err);
-  }
+  await apiFetch("/custom-categories", {
+    method: "PUT",
+    body: JSON.stringify({ household_id: hhId, categories }),
+  });
 }
 
 // ── Global items API helpers ───────────────────────────────────────
@@ -209,17 +154,8 @@ interface GlobalItem {
 }
 
 async function fetchGlobalItems(hhId: string): Promise<GlobalItem[]> {
-  try {
-    const res = await fetch(
-      `${API_BASE}/global-items?household_id=${hhId}`,
-      { headers: { Authorization: `Bearer ${publicAnonKey}` } },
-    );
-    const json = await res.json();
-    return json.items || [];
-  } catch (err) {
-    console.log("fetchGlobalItems error:", err);
-    return [];
-  }
+  const json = await apiFetch(`/global-items?household_id=${hhId}`);
+  return json.items || [];
 }
 
 async function upsertGlobalItem(
@@ -227,22 +163,10 @@ async function upsertGlobalItem(
   name: string,
   category: string,
 ): Promise<void> {
-  try {
-    await fetch(`${API_BASE}/global-items`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${publicAnonKey}`,
-      },
-      body: JSON.stringify({
-        household_id: hhId,
-        name,
-        category,
-      }),
-    });
-  } catch (err) {
-    console.log("upsertGlobalItem error:", err);
-  }
+  await apiFetch("/global-items", {
+    method: "PUT",
+    body: JSON.stringify({ household_id: hhId, name, category }),
+  });
 }
 
 // ── Local cache (instant hydration after the OS discards the page) ───
@@ -2905,6 +2829,22 @@ export function EinkaufenScreen({
   const bottomBarRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // ── Robust-save state ──────────────────────────────────────────
+  // While a flag is true, the corresponding local write (items / store
+  // settings) is unsaved — either in-flight or failed after all retries.
+  // A concurrent reload (poll / focus / realtime) must NOT overwrite local
+  // state or the cache while this is set; otherwise a failed save would be
+  // silently reverted to the stale server value (= the "list got reset" bug).
+  const pendingItemsSaveRef = useRef(false);
+  const pendingSettingsSaveRef = useRef(false);
+  // Always mirror the latest committed state so a retry persists the newest
+  // data (kept in sync via effects below + explicit sets on each change).
+  const latestItemsRef = useRef<ShoppingItem[]>([]);
+  const latestSettingsRef = useRef<StoreSettingEntry[]>([]);
+  // Generation tokens: a newer save supersedes any pending retry of an older one.
+  const itemsSaveGenRef = useRef(0);
+  const settingsSaveGenRef = useRef(0);
+
   // ── Fixed layout measurements ─────────────────────────────────
   // storeSelectorH: pixel height of the Store-Selector header (top anchor for list)
   const [storeSelectorH, setStoreSelectorH] = useState(82);
@@ -2953,16 +2893,23 @@ export function EinkaufenScreen({
       // Only update if no local changes happened during fetch
       if (Date.now() - lastLocalChangeRef.current < 2000)
         return;
-      setItems(serverItems);
-      if (settings.length > 0) {
+
+      // Never clobber an unsaved local write (in-flight or failed-after-retry)
+      // with the server value — that's exactly how lists got "reset". Keep the
+      // local items/settings; the pending save's retry will reconcile them.
+      const applyItems = !pendingItemsSaveRef.current;
+      const applySettings = !pendingSettingsSaveRef.current;
+
+      if (applyItems) setItems(serverItems);
+      if (applySettings && settings.length > 0) {
         setStoreSettings(settings);
         applyStoreSettings(DEFAULT_STORES, settings);
       }
       setGlobalCustomCategories(customCats);
       setGlobalItems(gItems);
       writeEinkaufCache(householdId, {
-        items: serverItems,
-        settings,
+        items: applyItems ? serverItems : latestItemsRef.current,
+        settings: applySettings ? settings : latestSettingsRef.current,
         customCats,
         gItems,
       });
@@ -3018,6 +2965,17 @@ export function EinkaufenScreen({
       gItems: globalItems,
     });
   }, [householdId, loaded, items, storeSettings, globalCustomCategories, globalItems]);
+
+  // ── Keep the "latest" refs in sync with state ──────────────────
+  // These mirror the current committed state so a save retry (which fires
+  // asynchronously) always persists the newest data, regardless of which
+  // code path produced the change.
+  useEffect(() => {
+    latestItemsRef.current = items;
+  }, [items]);
+  useEffect(() => {
+    latestSettingsRef.current = storeSettings;
+  }, [storeSettings]);
 
   // ── Supabase Realtime subscription for live sync ──
   useKvRealtime(
@@ -3077,10 +3035,20 @@ export function EinkaufenScreen({
       if (Date.now() - lastLocalChangeRef.current < 2000)
         return;
       if (!householdId) return;
-      const serverItems = await fetchItems(householdId);
+      // Don't overwrite an unsaved local write with the server value.
+      if (pendingItemsSaveRef.current) return;
+      let serverItems: ShoppingItem[];
+      try {
+        serverItems = await fetchItems(householdId);
+      } catch {
+        // Transient network/server error — keep current state and try again
+        // next tick. Never fall back to an empty list here.
+        return;
+      }
       // Re-check after async fetch in case a local change happened while waiting
       if (Date.now() - lastLocalChangeRef.current < 2000)
         return;
+      if (pendingItemsSaveRef.current) return;
       if (!activeDragId) {
         setItems(serverItems);
       }
@@ -3109,18 +3077,47 @@ export function EinkaufenScreen({
     };
   }, [storeReorderMode]);
 
+  // ── Robust item save (apiFetch retry + pending guard + self-retry) ──
+  // saveItems() now throws on failure (apiFetch already retried 5×). We keep
+  // a "pending" flag so a concurrent reload won't revert the change, and we
+  // re-attempt every 5 s with the LATEST items until it finally succeeds.
+  const flushItemsSave = useCallback(
+    async (hhId: string) => {
+      const gen = ++itemsSaveGenRef.current;
+      pendingItemsSaveRef.current = true;
+      const attempt = async (): Promise<void> => {
+        if (gen !== itemsSaveGenRef.current) return; // superseded by a newer save
+        try {
+          await saveItems(hhId, latestItemsRef.current);
+          if (gen === itemsSaveGenRef.current)
+            pendingItemsSaveRef.current = false;
+        } catch (err) {
+          if (gen !== itemsSaveGenRef.current) return;
+          console.log(
+            "[Einkaufen] saveItems endgültig fehlgeschlagen — retry in 5s:",
+            err,
+          );
+          setTimeout(attempt, 5000);
+        }
+      };
+      await attempt();
+    },
+    [],
+  );
+
   // ── Debounced save for items ───────────────────────────────────
   const debouncedSave = useCallback(
     (newItems: ShoppingItem[]) => {
+      latestItemsRef.current = newItems;
       if (saveTimeout.current)
         clearTimeout(saveTimeout.current);
       saveTimeout.current = setTimeout(() => {
         if (!householdId) return;
         broadcastChange([`shopping:${householdId}`]);
-        saveItems(householdId, newItems);
+        flushItemsSave(householdId);
       }, 300);
     },
-    [householdId],
+    [householdId, flushItemsSave],
   );
 
   const updateItems = useCallback(
@@ -3128,6 +3125,7 @@ export function EinkaufenScreen({
       lastLocalChangeRef.current = Date.now();
       setItems((prev) => {
         const next = updater(prev);
+        latestItemsRef.current = next;
         debouncedSave(next);
         return next;
       });
@@ -3135,18 +3133,44 @@ export function EinkaufenScreen({
     [debouncedSave],
   );
 
+  // ── Robust store-settings save (mirrors flushItemsSave) ────────
+  const flushSettingsSave = useCallback(
+    async (hhId: string) => {
+      const gen = ++settingsSaveGenRef.current;
+      pendingSettingsSaveRef.current = true;
+      const attempt = async (): Promise<void> => {
+        if (gen !== settingsSaveGenRef.current) return;
+        try {
+          await saveStoreSettings(hhId, latestSettingsRef.current);
+          if (gen === settingsSaveGenRef.current)
+            pendingSettingsSaveRef.current = false;
+        } catch (err) {
+          if (gen !== settingsSaveGenRef.current) return;
+          console.log(
+            "[Einkaufen] saveStoreSettings endgültig fehlgeschlagen — retry in 5s:",
+            err,
+          );
+          setTimeout(attempt, 5000);
+        }
+      };
+      await attempt();
+    },
+    [],
+  );
+
   // ── Debounced save for store settings ──────────────────────────
   const debouncedSaveSettings = useCallback(
     (newSettings: StoreSettingEntry[]) => {
+      latestSettingsRef.current = newSettings;
       if (settingsSaveTimeout.current)
         clearTimeout(settingsSaveTimeout.current);
       settingsSaveTimeout.current = setTimeout(() => {
         if (!householdId) return;
         broadcastChange([`store_settings:${householdId}`]);
-        saveStoreSettings(householdId, newSettings);
+        flushSettingsSave(householdId);
       }, 300);
     },
-    [householdId],
+    [householdId, flushSettingsSave],
   );
 
   const updateStoreSettings = useCallback(
@@ -3160,6 +3184,7 @@ export function EinkaufenScreen({
       lastLocalChangeRef.current = Date.now();
       setStoreSettings((prev) => {
         const next = updater(prev);
+        latestSettingsRef.current = next;
         debouncedSaveSettings(next);
         return next;
       });
@@ -3385,7 +3410,8 @@ export function EinkaufenScreen({
             times_used: 1,
           },
         ]);
-        if (householdId) upsertGlobalItem(householdId, newName, item.category);
+        if (householdId)
+          upsertGlobalItem(householdId, newName, item.category).catch(() => {});
       }
     },
     [items, globalItems, updateItems],
@@ -3531,7 +3557,8 @@ export function EinkaufenScreen({
           ];
         });
         // Persist to server (fire and forget)
-        if (householdId) upsertGlobalItem(householdId, name, category);
+        if (householdId)
+          upsertGlobalItem(householdId, name, category).catch(() => {});
       }
       // Track usage for the per-store quick-suggestion chips
       recordItemUsage(selectedStore, name);
@@ -3541,34 +3568,27 @@ export function EinkaufenScreen({
 
   // ── "Liste leeren" — löscht NUR die Items des aktuell gewählten Ladens ──
   const handleClearAll = useCallback(async () => {
-    // 1. Lokalen State sofort aktualisieren — nur Items des aktiven Ladens entfernen
+    if (!householdId) return;
+    // 1. Lokalen State sofort aktualisieren — nur Items des aktiven Ladens entfernen.
+    //    latestItemsRef wird per Effect mit `items` synchron gehalten, ist also
+    //    die zuverlässige Quelle (setItems-Updater läuft nicht synchron).
     lastLocalChangeRef.current = Date.now();
-    let remaining: ShoppingItem[] = [];
-    setItems((prev) => {
-      remaining = prev.filter((i) => i.store !== selectedStore);
-      return remaining;
-    });
+    const remaining = latestItemsRef.current.filter(
+      (i) => i.store !== selectedStore,
+    );
+    latestItemsRef.current = remaining;
+    setItems(remaining);
     // Laufenden Debounce-Save abbrechen, damit er keine veralteten Daten schickt
     if (saveTimeout.current) {
       clearTimeout(saveTimeout.current);
       saveTimeout.current = undefined;
     }
-    // 2. Sofort und robust via apiFetch persistieren (Retry-Logik + Token-Refresh)
-    if (!householdId) return;
-    try {
-      await apiFetch("/shopping", {
-        method: "PUT",
-        body: JSON.stringify({
-          household_id: householdId,
-          items: remaining,
-        }),
-      });
-      broadcastChange([`shopping:${householdId}`]);
-      console.log("[Einkaufen] Liste des Ladens erfolgreich geleert (KV-Store).");
-    } catch (err) {
-      console.log("[Einkaufen] Fehler beim Leeren der Liste:", err);
-    }
-  }, [householdId, selectedStore]);
+    // 2. Robust persistieren: gleiche Retry-/Pending-Logik wie jeder andere
+    //    Item-Save, damit ein fehlgeschlagenes Leeren nicht still verloren geht
+    //    und ein Reload die geleerte Liste nicht wieder befüllt.
+    broadcastChange([`shopping:${householdId}`]);
+    flushItemsSave(householdId);
+  }, [householdId, selectedStore, flushItemsSave]);
 
   const handleDeleteItem = useCallback(
     (itemId: string) => {
@@ -3837,7 +3857,7 @@ export function EinkaufenScreen({
         customCatSaveTimeout.current = setTimeout(() => {
           if (householdId) {
             broadcastChange([`custom_categories:${householdId}`]);
-            saveCustomCategories(householdId, next);
+            saveCustomCategories(householdId, next).catch(() => {});
           }
         }, 300);
         return next;
