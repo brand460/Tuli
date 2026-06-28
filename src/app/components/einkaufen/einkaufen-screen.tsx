@@ -2126,10 +2126,15 @@ function AddItemBar({
       categoryOrder.length > 0
         ? categoryOrder
         : getCategoriesForStore(storeId, stores);
-    // Only offer categories that actually have articles (or are custom).
-    // Removed/empty categories are filtered out everywhere.
     const validSet = new Set(validCategories);
-    return base.filter((c) => validSet.has(c));
+    // Categories the current store carries first (in its own order)…
+    const storeCats = base.filter((c) => validSet.has(c));
+    // …then every other valid category, so the user can pick ANY category
+    // regardless of the current store. Categories the store doesn't carry yet
+    // get added to it after the item is created (see handleAddItem).
+    const storeSet = new Set(storeCats);
+    const others = validCategories.filter((c) => !storeSet.has(c));
+    return [...storeCats, ...others];
   }, [categoryOrder, storeId, stores, validCategories]);
 
   return (
@@ -3476,6 +3481,45 @@ export function EinkaufenScreen({
 
   const handleAddItem = useCallback(
     (name: string, category: string) => {
+      // If the current store doesn't carry this category yet, add it at the
+      // LAST position so the item lands in a real category section and the
+      // store "learns" the category for future sorting. This lets the user
+      // add articles of any category regardless of the selected store.
+      if (category) {
+        const currentOrder = getCategoryOrderForStore(selectedStore);
+        if (!currentOrder.includes(category)) {
+          updateStoreSettings((prev) => {
+            const existing = prev.find(
+              (s) => s.store_id === selectedStore,
+            );
+            if (existing) {
+              const order = existing.category_order || [];
+              if (order.includes(category)) return prev;
+              return prev.map((s) =>
+                s.store_id === selectedStore
+                  ? { ...s, category_order: [...order, category] }
+                  : s,
+              );
+            }
+            // No persisted setting yet → seed one from the store's defaults.
+            const base = getCategoriesForStore(selectedStore, stores);
+            return [
+              ...prev,
+              {
+                store_id: selectedStore,
+                position: stores.findIndex(
+                  (s) => s.id === selectedStore,
+                ),
+                is_visible: true,
+                category_order: base.includes(category)
+                  ? base
+                  : [...base, category],
+              },
+            ];
+          });
+        }
+      }
+
       const catIdx = getCustomCategoryIndex(
         category,
         selectedStore,
@@ -3563,7 +3607,16 @@ export function EinkaufenScreen({
       // Track usage for the per-store quick-suggestion chips
       recordItemUsage(selectedStore, name);
     },
-    [items, selectedStore, getCustomCategoryIndex, updateItems, recordItemUsage],
+    [
+      items,
+      selectedStore,
+      getCustomCategoryIndex,
+      getCategoryOrderForStore,
+      updateStoreSettings,
+      stores,
+      updateItems,
+      recordItemUsage,
+    ],
   );
 
   // ── "Liste leeren" — löscht NUR die Items des aktuell gewählten Ladens ──
