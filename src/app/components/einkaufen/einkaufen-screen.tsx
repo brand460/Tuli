@@ -64,6 +64,7 @@ import {
   CATEGORY_COLORS,
   getCategoryChipColor,
   getItemCategoryDot,
+  setCategoryColorOverrides,
 } from "./shopping-data";
 import { apiFetch } from "../supabase-client";
 import {
@@ -166,6 +167,17 @@ async function saveStoreSettings(
 async function fetchCustomCategories(hhId: string): Promise<string[]> {
   const json = await apiFetch(`/custom-categories?household_id=${hhId}`);
   return json.categories || [];
+}
+
+async function fetchCategoryColors(
+  hhId: string,
+): Promise<Record<string, string>> {
+  try {
+    const json = await apiFetch(`/category-colors?household_id=${hhId}`);
+    return json.colors || {};
+  } catch {
+    return {};
+  }
 }
 
 async function saveCustomCategories(
@@ -2811,6 +2823,8 @@ export function EinkaufenScreen({
   const [storeSettings, setStoreSettings] = useState<
     StoreSettingEntry[]
   >([]);
+  // Bump to re-render when user-customized category colors change.
+  const [, forceColorRerender] = useState(0);
   // Track when any item name is being edited inline → hide AddItemBar
   const [isItemNameEditing, setIsItemNameEditing] =
     useState(false);
@@ -2924,13 +2938,19 @@ export function EinkaufenScreen({
     }
 
     try {
-      const [serverItems, settings, customCats, gItems] =
+      const [serverItems, settings, customCats, gItems, catColors] =
         await Promise.all([
           fetchItems(householdId),
           fetchStoreSettings(householdId),
           fetchCustomCategories(householdId),
           fetchGlobalItems(householdId),
+          fetchCategoryColors(householdId),
         ]);
+      // Apply user-customized category circle colors app-wide. Independent of
+      // the item/settings reconciliation below, so it runs before any early
+      // return.
+      setCategoryColorOverrides(catColors);
+      forceColorRerender((n) => n + 1);
       // Only update if no local changes happened during fetch
       if (Date.now() - lastLocalChangeRef.current < 2000)
         return;

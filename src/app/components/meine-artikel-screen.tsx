@@ -8,6 +8,8 @@ import { publicAnonKey } from "/utils/supabase/info";
 import {
   GROCERY_DATABASE,
   getAllCategories,
+  getCategoryColorOverrides,
+  setCategoryColorOverrides,
 } from "./einkaufen/shopping-data";
 import { useKeyboardOffset } from "./ui/use-keyboard-offset";
 
@@ -138,6 +140,38 @@ async function saveCustomCategories(hhId: string, categories: string[]): Promise
   }
 }
 
+async function fetchCategoryColors(hhId: string): Promise<Record<string, string>> {
+  try {
+    const res = await fetch(
+      `${API_BASE}/category-colors?household_id=${hhId}`,
+      { headers: { Authorization: `Bearer ${publicAnonKey}` } },
+    );
+    const json = await res.json();
+    return json.colors || {};
+  } catch (err) {
+    console.log("fetchCategoryColors error:", err);
+    return {};
+  }
+}
+
+async function saveCategoryColors(
+  hhId: string,
+  colors: Record<string, string>,
+): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/category-colors`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${publicAnonKey}`,
+      },
+      body: JSON.stringify({ household_id: hhId, colors }),
+    });
+  } catch (err) {
+    console.log("saveCategoryColors error:", err);
+  }
+}
+
 // ── Category chip colors (same as EinkaufenScreen) ─────────────────
 const CATEGORY_COLORS: Record<string, { bg: string; text: string }> = {
   "Obst & Gemüse": { bg: "#DCFCE7", text: "#22C55E" },
@@ -182,8 +216,18 @@ const CATEGORY_COLORS: Record<string, { bg: string; text: string }> = {
 };
 
 function getCatColor(category: string) {
-  return CATEGORY_COLORS[category] || CATEGORY_COLORS.Sonstiges;
+  const base = CATEGORY_COLORS[category] || CATEGORY_COLORS.Sonstiges;
+  const override = getCategoryColorOverrides()[category];
+  return override ? { bg: base.bg, text: override } : base;
 }
+
+// Curated swatch palette for the category-color picker (distinct, legible dots).
+const CATEGORY_COLOR_PRESETS: string[] = [
+  "#22C55E", "#10B981", "#0EA5E9", "#3B82F6", "#6366F1",
+  "#A855F7", "#EC4899", "#F472B6", "#EF4444", "#FB7185",
+  "#F97316", "#FB923C", "#F59E0B", "#EAB308", "#84CC16",
+  "#14B8A6", "#06B6D4", "#8B5CF6", "#D946EF", "#6B7280",
+];
 
 type SortMode = "az" | "kategorie" | "haeufigkeit";
 
@@ -202,6 +246,7 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
 
   // ── Custom categories ────────────────────────────────────────
   const [customCategories, setCustomCategories] = useState<string[]>([]);
+  const [categoryColors, setCategoryColors] = useState<Record<string, string>>({});
   const [showNewCategoryDrawer, setShowNewCategoryDrawer] = useState(false);
   const [renamingCategory, setRenamingCategory] = useState<string | null>(null);
 
@@ -253,14 +298,17 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
 
     (async () => {
       if (!initialLoadDone.current) setLoading(true);
-      const [globalItems, shoppingItems, customCats] = await Promise.all([
+      const [globalItems, shoppingItems, customCats, catColors] = await Promise.all([
         fetchGlobalItems(householdId),
         fetchShoppingItems(householdId),
         fetchCustomCategories(householdId),
+        fetchCategoryColors(householdId),
       ]);
 
       if (!cancelled) {
         setCustomCategories(customCats);
+        setCategoryColorOverrides(catColors);
+        setCategoryColors(catColors);
       }
 
       const shoppingCounts = new Map<string, number>();
@@ -394,13 +442,31 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
 
   // ── Rename category ────────────────────────────────────────────
   const handleRenameCategory = useCallback(
-    async (oldName: string, newName: string) => {
+    async (oldName: string, newName: string, color?: string) => {
       if (!householdId) return;
       const trimmed = newName.trim();
-      if (!trimmed || trimmed.toLowerCase() === oldName.toLowerCase()) {
+      const nameChanged =
+        !!trimmed && trimmed.toLowerCase() !== oldName.toLowerCase();
+      const finalName = nameChanged ? trimmed : oldName;
+
+      // ── Persist the chosen circle color (if any) ─────────────────
+      const prevColor = categoryColors[oldName];
+      if (color !== prevColor || nameChanged) {
+        const nextColors: Record<string, string> = { ...categoryColors };
+        if (nameChanged) delete nextColors[oldName];
+        if (color) nextColors[finalName] = color;
+        else delete nextColors[finalName];
+        setCategoryColors(nextColors);
+        setCategoryColorOverrides(nextColors);
+        await saveCategoryColors(householdId, nextColors);
+      }
+
+      if (!nameChanged) {
         setRenamingCategory(null);
+        reload();
         return;
       }
+
       // Update all articles that had the old category
       const articlesInCat = articles.filter(
         (a) => a.category.toLowerCase() === oldName.toLowerCase(),
@@ -427,7 +493,7 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
       setRenamingCategory(null);
       reload();
     },
-    [householdId, articles, customCategories, reload],
+    [householdId, articles, customCategories, categoryColors, reload],
   );
 
   // ── Delete empty category ──────────────────────────────────────
@@ -1147,7 +1213,12 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
         {renamingCategory && (
           <RenameCategoryDrawer
             currentName={renamingCategory}
-            onSubmit={(newName) => handleRenameCategory(renamingCategory, newName)}
+            currentColor={categoryColors[renamingCategory]}
+            defaultColor={getCatColor(renamingCategory).text}
+            presets={CATEGORY_COLOR_PRESETS}
+            onSubmit={(newName, color) =>
+              handleRenameCategory(renamingCategory, newName, color)
+            }
             onClose={() => setRenamingCategory(null)}
           />
         )}
@@ -1842,15 +1913,22 @@ function NewCategoryDrawer({
 // ── Rename Category Drawer ─────────────────────────────────────────
 function RenameCategoryDrawer({
   currentName,
+  currentColor,
+  defaultColor,
+  presets,
   onSubmit,
   onClose,
 }: {
   currentName: string;
-  onSubmit: (newName: string) => void;
+  currentColor?: string;
+  defaultColor: string;
+  presets: string[];
+  onSubmit: (newName: string, color?: string) => void;
   onClose: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState(currentName);
+  const [color, setColor] = useState<string>(currentColor || defaultColor);
   const { bottomOffset: renameBottomOffset, vpHeight: renameVpHeight } = useKeyboardOffset();
 
   useEffect(() => {
@@ -1886,11 +1964,11 @@ function RenameCategoryDrawer({
           <div className="w-9 h-1 rounded-full" style={{ background: "var(--zu-border)" }} />
         </div>
         <div className="px-5 pb-5 flex flex-col gap-3">
-          <h3 className="text-base font-bold text-text-1">Kategorie umbenennen</h3>
+          <h3 className="text-base font-bold text-text-1">Kategorie bearbeiten</h3>
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              if (name.trim()) onSubmit(name);
+              if (name.trim()) onSubmit(name, color);
             }}
             autoComplete="off"
           >
@@ -1918,17 +1996,68 @@ function RenameCategoryDrawer({
                 style={{ caretColor: "var(--accent)" }}
               />
             </div>
+
+            {/* Color picker for the category circle */}
+            <div className="mt-4">
+              <span className="text-xs font-semibold text-text-3 uppercase tracking-wider">
+                Farbe des Kreises
+              </span>
+              <div className="flex flex-wrap gap-2 mt-2">
+                {presets.map((preset) => {
+                  const active =
+                    color.toLowerCase() === preset.toLowerCase();
+                  return (
+                    <button
+                      key={preset}
+                      type="button"
+                      onPointerDown={(e) => e.preventDefault()}
+                      onClick={() => setColor(preset)}
+                      className="w-7 h-7 rounded-full flex items-center justify-center transition"
+                      style={{
+                        background: preset,
+                        boxShadow: active
+                          ? "0 0 0 2px var(--surface), 0 0 0 4px " + preset
+                          : "none",
+                      }}
+                      aria-label={`Farbe ${preset}`}
+                    >
+                      {active && (
+                        <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />
+                      )}
+                    </button>
+                  );
+                })}
+                {/* Free color picker */}
+                <label
+                  className="w-7 h-7 rounded-full flex items-center justify-center cursor-pointer overflow-hidden relative"
+                  style={{
+                    background:
+                      "conic-gradient(#ef4444,#f59e0b,#eab308,#22c55e,#0ea5e9,#6366f1,#a855f7,#ec4899,#ef4444)",
+                  }}
+                  aria-label="Eigene Farbe wählen"
+                >
+                  <Plus className="w-3.5 h-3.5 text-white" strokeWidth={3} />
+                  <input
+                    type="color"
+                    value={color}
+                    onChange={(e) => setColor(e.target.value)}
+                    className="absolute inset-0 opacity-0 cursor-pointer"
+                  />
+                </label>
+              </div>
+            </div>
+
             <button
               type="submit"
               disabled={!name.trim()}
               onPointerDown={(e) => e.preventDefault()}
-              className="w-full mt-3 py-3 rounded-full text-sm font-semibold transition"
+              className="w-full mt-4 py-3 rounded-full text-sm font-semibold transition"
               style={{
                 background: name.trim() ? "var(--accent)" : "var(--surface-2)",
                 color: name.trim() ? "white" : "var(--text-3)",
               }}
             >
-              Umbenennen
+              Speichern
             </button>
           </form>
         </div>
