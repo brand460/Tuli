@@ -3917,48 +3917,34 @@ export function EinkaufenScreen({
       });
 
       updateItems((prev) => {
+        // Re-sort ALL unchecked items of this store to follow the NEW category
+        // order. Stable within a category (keep current relative order). We
+        // also clear manual pins for this store so the list reliably snaps to
+        // the new sorting — an explicit category re-sort should win.
+        const catIndex = (cat: string) => {
+          const i = categories.indexOf(cat);
+          return i < 0 ? Number.MAX_SAFE_INTEGER : i;
+        };
         const storeUnchecked = prev
           .filter((i) => i.store === storeId && !i.is_checked)
           .sort((a, b) => a.position - b.position);
 
-        const manual = storeUnchecked.filter(
-          (i) => i.manually_positioned,
-        );
-        const auto = storeUnchecked.filter(
-          (i) => !i.manually_positioned,
-        );
-
-        auto.sort((a, b) => {
-          const ai = categories.indexOf(a.category);
-          const bi = categories.indexOf(b.category);
-          return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
+        const resorted = [...storeUnchecked].sort((a, b) => {
+          const d = catIndex(a.category) - catIndex(b.category);
+          return d !== 0 ? d : a.position - b.position;
         });
 
-        const merged = [...storeUnchecked];
-        let autoIdx = 0;
-        const result: ShoppingItem[] = [];
-        for (const item of merged) {
-          if (item.manually_positioned) {
-            result.push(item);
-          } else {
-            if (autoIdx < auto.length) {
-              result.push(auto[autoIdx]);
-              autoIdx++;
-            }
-          }
-        }
-        while (autoIdx < auto.length) {
-          result.push(auto[autoIdx]);
-          autoIdx++;
-        }
-
         const posMap = new Map<string, number>();
-        result.forEach((item, idx) => posMap.set(item.id, idx));
+        resorted.forEach((item, idx) => posMap.set(item.id, idx));
 
         return prev.map((i) => {
           const newPos = posMap.get(i.id);
           if (newPos !== undefined) {
-            return { ...i, position: newPos };
+            return {
+              ...i,
+              position: newPos,
+              manually_positioned: false,
+            };
           }
           return i;
         });

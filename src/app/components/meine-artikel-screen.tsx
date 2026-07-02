@@ -1815,6 +1815,14 @@ function NewCategoryDrawer({
             <button
               type="submit"
               disabled={!name.trim()}
+              onPointerDown={(e) => {
+                // Keep the input focused so tapping "Anlegen" while the
+                // keyboard is open does NOT blur → close keyboard → shift the
+                // drawer out from under the finger (tap then missed the button
+                // entirely on mobile / Pixel). preventDefault keeps focus, the
+                // click still fires and submits the form.
+                e.preventDefault();
+              }}
               className="w-full mt-3 py-3 rounded-full text-sm font-semibold transition"
               style={{
                 background: name.trim() ? "var(--accent)" : "var(--surface-2)",
@@ -1913,6 +1921,7 @@ function RenameCategoryDrawer({
             <button
               type="submit"
               disabled={!name.trim()}
+              onPointerDown={(e) => e.preventDefault()}
               className="w-full mt-3 py-3 rounded-full text-sm font-semibold transition"
               style={{
                 background: name.trim() ? "var(--accent)" : "var(--surface-2)",

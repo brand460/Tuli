@@ -972,6 +972,48 @@ Extraktionsregeln:
         }
       }
 
+      // Re-sort the target store's unchecked items so the freshly added
+      // ingredients follow the store's category order instead of piling up at
+      // the bottom (mirrors the shopping screen's category-based ordering).
+      const targetStoreValue =
+        ingredientStore === "alle" ? null : ingredientStore;
+      let categoryOrder: string[] = getAllCategories();
+      try {
+        const settingsRes = await apiFetch(
+          `/store-settings?household_id=${householdId}`
+        );
+        const settings: any[] = settingsRes.settings || [];
+        const entry = settings.find(
+          (s) => s.store_id === ingredientStore
+        );
+        if (
+          entry &&
+          Array.isArray(entry.category_order) &&
+          entry.category_order.length > 0
+        ) {
+          categoryOrder = entry.category_order;
+        }
+      } catch {
+        // fall back to the default category order
+      }
+      const catIndex = (cat: string) => {
+        const i = categoryOrder.indexOf(cat);
+        return i < 0 ? Number.MAX_SAFE_INTEGER : i;
+      };
+      const targetUnchecked = updatedItems
+        .filter((i) => i.store === targetStoreValue && !i.is_checked)
+        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+      const resorted = [...targetUnchecked].sort((a, b) => {
+        const d = catIndex(a.category) - catIndex(b.category);
+        return d !== 0 ? d : (a.position ?? 0) - (b.position ?? 0);
+      });
+      const posMap = new Map<string, number>();
+      resorted.forEach((item, idx) => posMap.set(item.id, idx));
+      for (const item of updatedItems) {
+        const np = posMap.get(item.id);
+        if (np !== undefined) item.position = np;
+      }
+
       await apiFetch("/shopping", {
         method: "PUT",
         body: JSON.stringify({
@@ -2118,6 +2160,11 @@ Extraktionsregeln:
               next[i] = !next[i];
               setSelectedIngredients(next);
             }}
+            onToggleAll={(checked) =>
+              setSelectedIngredients(
+                ingredientsRecipe.ingredients.map(() => checked)
+              )
+            }
             store={ingredientStore}
             onStoreChange={setIngredientStore}
             stores={stores}
@@ -4388,6 +4435,7 @@ function IngredientsModal({
   recipe,
   selected,
   onToggle,
+  onToggleAll,
   store,
   onStoreChange,
   stores,
@@ -4397,6 +4445,7 @@ function IngredientsModal({
   recipe: Recipe;
   selected: boolean[];
   onToggle: (i: number) => void;
+  onToggleAll: (checked: boolean) => void;
   store: string;
   onStoreChange: (s: string) => void;
   stores: any[];
@@ -4405,6 +4454,7 @@ function IngredientsModal({
 }) {
   const activeStores = stores.filter((s: any) => s.isActive !== false);
   const { bottomOffset: ingBottomOffset, vpHeight: ingVpHeight } = useKeyboardOffset();
+  const allSelected = selected.length > 0 && selected.every(Boolean);
 
   return (
     <motion.div
@@ -4427,6 +4477,19 @@ function IngredientsModal({
           <h3 className="text-base font-semibold">Zutaten zur Einkaufsliste?</h3>
           <p className="text-xs text-text-3 mt-0.5">{recipe.title}</p>
         </div>
+
+        {/* Select-all toggle */}
+        <label className="flex items-center gap-3 px-4 py-2.5 border-b border-border flex-shrink-0 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={allSelected}
+            onChange={(e) => onToggleAll(e.target.checked)}
+            className="w-4 h-4 rounded accent-accent"
+          />
+          <span className="text-sm font-medium text-text-2">
+            {allSelected ? "Alle abwählen" : "Alle auswählen"}
+          </span>
+        </label>
 
         <div className="flex-1 overflow-y-auto px-4 py-3">
           {recipe.ingredients.map((ing, i) => (
