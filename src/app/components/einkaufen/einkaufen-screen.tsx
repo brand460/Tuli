@@ -92,6 +92,41 @@ interface StoreSettingEntry {
   item_frequency?: Record<string, number>;
 }
 
+// Collapse duplicate store-setting entries (same store_id) into a single one.
+// Duplicates could accumulate through a race between reorder/add and the
+// realtime reload, and they broke everything: custom stores appeared N times,
+// deletion failed (visibility Map is last-wins while removal edited the first
+// entry), and dnd-kit misbehaved on duplicate IDs. Merges the group so no data
+// is lost (visible if ANY was visible, first non-empty category_order, first
+// defined custom_store / item_frequency, smallest position to keep order).
+function dedupeStoreSettings(
+  settings: StoreSettingEntry[],
+): StoreSettingEntry[] {
+  const byId = new Map<string, StoreSettingEntry>();
+  for (const s of settings) {
+    const prev = byId.get(s.store_id);
+    if (!prev) {
+      byId.set(s.store_id, { ...s });
+      continue;
+    }
+    byId.set(s.store_id, {
+      store_id: s.store_id,
+      position: Math.min(
+        prev.position ?? Number.MAX_SAFE_INTEGER,
+        s.position ?? Number.MAX_SAFE_INTEGER,
+      ),
+      is_visible: prev.is_visible || s.is_visible,
+      category_order:
+        prev.category_order && prev.category_order.length > 0
+          ? prev.category_order
+          : s.category_order,
+      custom_store: prev.custom_store ?? s.custom_store,
+      item_frequency: prev.item_frequency ?? s.item_frequency,
+    });
+  }
+  return Array.from(byId.values());
+}
+
 // ── API helpers ────────────────────────────────────────────────────
 // All helpers use `apiFetch`, which (unlike a raw fetch with publicAnonKey)
 // provides: real auth-token refresh, 5× retry with backoff on network/5xx/401,
@@ -2877,8 +2912,9 @@ export function EinkaufenScreen({
       if (cached) {
         setItems(cached.items);
         if (cached.settings.length > 0) {
-          setStoreSettings(cached.settings);
-          applyStoreSettings(DEFAULT_STORES, cached.settings);
+          const dedupedCached = dedupeStoreSettings(cached.settings);
+          setStoreSettings(dedupedCached);
+          applyStoreSettings(DEFAULT_STORES, dedupedCached);
         }
         setGlobalCustomCategories(cached.customCats);
         setGlobalItems(cached.gItems);
@@ -2899,6 +2935,17 @@ export function EinkaufenScreen({
       if (Date.now() - lastLocalChangeRef.current < 2000)
         return;
 
+      // Collapse any duplicate store-setting entries (self-heals corrupted
+      // data) and persist the cleaned version back if duplicates were found.
+      const dedupedSettings = dedupeStoreSettings(settings);
+      if (
+        dedupedSettings.length !== settings.length &&
+        !pendingSettingsSaveRef.current
+      ) {
+        latestSettingsRef.current = dedupedSettings;
+        flushSettingsSave(householdId);
+      }
+
       // Never clobber an unsaved local write (in-flight or failed-after-retry)
       // with the server value — that's exactly how lists got "reset". Keep the
       // local items/settings; the pending save's retry will reconcile them.
@@ -2906,15 +2953,15 @@ export function EinkaufenScreen({
       const applySettings = !pendingSettingsSaveRef.current;
 
       if (applyItems) setItems(serverItems);
-      if (applySettings && settings.length > 0) {
-        setStoreSettings(settings);
-        applyStoreSettings(DEFAULT_STORES, settings);
+      if (applySettings && dedupedSettings.length > 0) {
+        setStoreSettings(dedupedSettings);
+        applyStoreSettings(DEFAULT_STORES, dedupedSettings);
       }
       setGlobalCustomCategories(customCats);
       setGlobalItems(gItems);
       writeEinkaufCache(householdId, {
         items: applyItems ? serverItems : latestItemsRef.current,
-        settings: applySettings ? settings : latestSettingsRef.current,
+        settings: applySettings ? dedupedSettings : latestSettingsRef.current,
         customCats,
         gItems,
       });
@@ -2996,8 +3043,11 @@ export function EinkaufenScreen({
 
   const applyStoreSettings = (
     baseStores: StoreInfo[],
-    settings: StoreSettingEntry[],
+    settingsRaw: StoreSettingEntry[],
   ) => {
+    // Defensive: always work on a de-duplicated view so a single corrupted
+    // record can never render a store multiple times.
+    const settings = dedupeStoreSettings(settingsRaw);
     const settingsMap = new Map(
       settings.map((s) => [s.store_id, s]),
     );
@@ -3007,7 +3057,13 @@ export function EinkaufenScreen({
     const customStores = settings
       .filter((s) => s.custom_store && !baseIds.has(s.store_id))
       .map((s) => s.custom_store as StoreInfo);
-    const allStores = [...baseStores, ...customStores];
+    // Guard against duplicate ids across base + custom stores.
+    const seenIds = new Set<string>();
+    const allStores = [...baseStores, ...customStores].filter((s) => {
+      if (seenIds.has(s.id)) return false;
+      seenIds.add(s.id);
+      return true;
+    });
 
     const visible = allStores.filter((s) => {
       if (s.id === "alle") return true; // always visible, cannot be removed
@@ -3713,20 +3769,30 @@ export function EinkaufenScreen({
         }
         return [...prev, newStore];
       });
-      updateStoreSettings((prev) => [
-        ...prev,
-        {
+      updateStoreSettings((prev) => {
+        // Update-or-insert: never append a second entry for the same store,
+        // otherwise re-adding a previously removed custom store duplicates it.
+        const idx = prev.findIndex((s) => s.store_id === id);
+        const entry: StoreSettingEntry = {
           store_id: id,
-          position: stores.length,
+          position: idx >= 0 ? prev[idx].position : stores.length,
           is_visible: true,
-          category_order: getCategoriesForStore(id, [
-            ...stores,
-            newStore,
-          ]),
+          category_order:
+            idx >= 0 && prev[idx].category_order?.length
+              ? prev[idx].category_order
+              : getCategoriesForStore(id, [...stores, newStore]),
           // Persist full metadata so the store survives reloads.
           custom_store: newStore,
-        },
-      ]);
+        };
+        if (idx >= 0 && prev[idx].item_frequency)
+          entry.item_frequency = prev[idx].item_frequency;
+        if (idx >= 0) {
+          const copy = [...prev];
+          copy[idx] = entry;
+          return copy;
+        }
+        return [...prev, entry];
+      });
       setSelectedStore(id);
       setShowAddStore(false);
     },
@@ -3756,9 +3822,13 @@ export function EinkaufenScreen({
           (s) => s.store_id === storeId,
         );
         if (idx >= 0) {
-          const copy = [...prev];
-          copy[idx] = { ...copy[idx], is_visible: false };
-          return copy;
+          // Hide EVERY matching entry (defensive against any leftover
+          // duplicates) so the store reliably disappears.
+          return prev.map((s) =>
+            s.store_id === storeId
+              ? { ...s, is_visible: false }
+              : s,
+          );
         }
         return [
           ...prev,
@@ -3810,7 +3880,10 @@ export function EinkaufenScreen({
               !s.is_visible &&
               !moved.find((st) => st.id === s.store_id),
           );
-          return [...newSettings, ...hiddenSettings];
+          return dedupeStoreSettings([
+            ...newSettings,
+            ...hiddenSettings,
+          ]);
         });
         return moved;
       });
