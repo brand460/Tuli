@@ -174,7 +174,32 @@ export const CATEGORY_COLORS: Record<string, { bg: string; text: string; dot: st
 };
 
 export function getCategoryChipColor(category: string): { bg: string; text: string; dot: string } {
-  return CATEGORY_COLORS[category] || CATEGORY_COLORS.Sonstiges;
+  const base = CATEGORY_COLORS[category] || CATEGORY_COLORS.Sonstiges;
+  const override = categoryColorOverrides[category];
+  // Only the "circle" (dot) and its matching accent text are recolored by the
+  // user; the soft chip background stays derived from the built-in palette.
+  return override ? { ...base, dot: override, text: override } : base;
+}
+
+// ── Category color overrides (user-customizable per household) ──────
+// Users can recolor a category's circle in "Meine Artikel" via the pencil
+// drawer. We keep a module-level map so every screen (Einkaufen, Kochen,
+// Meine Artikel) renders the same custom dot color. Each screen loads the
+// persisted overrides on mount via setCategoryColorOverrides().
+let categoryColorOverrides: Record<string, string> = {};
+
+export function setCategoryColorOverrides(
+  map: Record<string, string> | null | undefined,
+): void {
+  categoryColorOverrides = map ? { ...map } : {};
+}
+
+export function getCategoryColorOverrides(): Record<string, string> {
+  return { ...categoryColorOverrides };
+}
+
+export function getCategoryDotColor(category: string): string {
+  return categoryColorOverrides[category] || getCategoryChipColor(category).dot;
 }
 
 // ── Common German grocery items — expanded ─────────────────────────
