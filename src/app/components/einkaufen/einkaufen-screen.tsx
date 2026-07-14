@@ -1901,6 +1901,7 @@ function CategorySortModal({
 function CheckedSection({
   items,
   onToggle,
+  onClearChecked,
   expanded,
   onExpandedChange,
   mergedItems,
@@ -1908,6 +1909,7 @@ function CheckedSection({
 }: {
   items: ShoppingItem[];
   onToggle: (id: string) => void;
+  onClearChecked: () => void;
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
   mergedItems: GroceryTemplate[];
@@ -1961,6 +1963,15 @@ function CheckedSection({
           </div>
         </div>
       ))}
+      <div className="px-4 py-2">
+        <button
+          onClick={onClearChecked}
+          className="flex items-center gap-1.5 text-xs text-danger transition"
+        >
+          <Trash2 className="w-3 h-3" />
+          Erledigte löschen
+        </button>
+      </div>
     </div>
   );
 
@@ -3719,6 +3730,23 @@ export function EinkaufenScreen({
     flushItemsSave(householdId);
   }, [householdId, selectedStore, flushItemsSave]);
 
+  // ── "Erledigte löschen" — entfernt NUR die abgehakten Items des aktiven Ladens ──
+  const handleClearChecked = useCallback(() => {
+    if (!householdId) return;
+    lastLocalChangeRef.current = Date.now();
+    const remaining = latestItemsRef.current.filter(
+      (i) => !(i.store === selectedStore && i.is_checked),
+    );
+    latestItemsRef.current = remaining;
+    setItems(remaining);
+    if (saveTimeout.current) {
+      clearTimeout(saveTimeout.current);
+      saveTimeout.current = undefined;
+    }
+    broadcastChange([`shopping:${householdId}`]);
+    flushItemsSave(householdId);
+  }, [householdId, selectedStore, flushItemsSave]);
+
   const handleDeleteItem = useCallback(
     (itemId: string) => {
       updateItems((prev) => prev.filter((i) => i.id !== itemId));
@@ -4621,6 +4649,7 @@ export function EinkaufenScreen({
           <CheckedSection
             items={checkedItems}
             onToggle={handleToggle}
+            onClearChecked={handleClearChecked}
             expanded={checkedExpanded}
             onExpandedChange={setCheckedExpanded}
             mergedItems={mergedItemsForDot}
