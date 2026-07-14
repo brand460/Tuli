@@ -69,7 +69,12 @@ html, body {
   padding: 0;
   overflow: hidden;
   height: 100%;
-  background: var(--zu-bg);
+  /* Gesture-Bar-Fix: Chrome Android färbt die System-Navigationsleiste nach
+     der background-color von html/body. Diese MUSS --surface sein (identisch
+     zur App-Bottom-Nav), sonst entsteht eine sichtbare Kante zwischen der
+     App-Nav (--surface) und der Systemleiste (--zu-bg). Der sichtbare App-
+     Hintergrund wird ohnehin vom MainShell-Container (--zu-bg) übermalt. */
+  background: var(--surface);
   color: var(--text-1);
 }
 
