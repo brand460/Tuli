@@ -21,7 +21,7 @@ import { ArrowCounterClockwise } from "phosphor-react";
 import { toast } from "sonner";
 import { apiFetch } from "../supabase-client";
 import { useKvRealtime, broadcastChange } from "../use-kv-realtime";
-import { useBackHandler, pushBack, removeBack } from "../ui/use-back-handler";
+import { useBackHandler } from "../ui/use-back-handler";
 import { useAuth } from "../auth-context";
 import {
   DndContext,
@@ -211,105 +211,36 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
   }, [isMobile, loaded, activePageId, pages]);
 
   // ── Save helpers ───────────────────────────────────────────────
-  const lastLocalListenWrite = useRef(0);
-  // Holds the most recent unsaved snapshot. Lets us flush a still-pending
-  // debounced save immediately when the app is backgrounded/closed — otherwise
-  // the 500 ms timer never fires (iOS freezes the JS context) and the last edits
-  // are lost. This is the core data-loss fix for the notes editor.
-  const pendingSaveRef = useRef<{ p: Page[]; c: PageContents } | null>(null);
-
-  // ── Local backup (survives crash / logout / failed network / JS freeze) ──
-  // Every edit is mirrored synchronously to localStorage. The backup is only
-  // cleared once the server CONFIRMS the write. On the next load we detect a
-  // leftover backup (= edits that never reached the server) and restore them.
-  // This is the ultimate safety net regardless of WHY a save failed
-  // (expired token → logout, network drop, app killed mid-save, …).
-  const backupKey = householdId ? `tuli_listen_backup:${householdId}` : null;
-
-  const writeLocalBackup = useCallback((p: Page[], c: PageContents) => {
-    if (!backupKey) return;
-    try {
-      localStorage.setItem(backupKey, JSON.stringify({ ts: Date.now(), pages: p, contents: c }));
-    } catch (_) { /* quota / private mode — ignore */ }
-  }, [backupKey]);
-
-  const clearLocalBackup = useCallback(() => {
-    if (!backupKey) return;
-    try { localStorage.removeItem(backupKey); } catch (_) { /* ignore */ }
-  }, [backupKey]);
-
-  const saveData = useCallback(async (p: Page[], c: PageContents, keepalive = false) => {
+  const saveData = useCallback(async (p: Page[], c: PageContents) => {
     try {
       broadcastChange([`custom_pages:${householdId}`, `custom_blocks:${householdId}`]);
       await Promise.all([
         apiFetch("/custom-pages", {
           method: "PUT",
           body: JSON.stringify({ household_id: householdId, pages: p }),
-          keepalive,
         }),
         apiFetch("/custom-blocks", {
           method: "PUT",
           body: JSON.stringify({ household_id: householdId, blocks: c }),
-          keepalive,
         }),
       ]);
-      // Server confirmed → this snapshot is safe, drop the pending state + backup.
-      pendingSaveRef.current = null;
-      clearLocalBackup();
     } catch (err) {
-      // Keep pendingSaveRef + localStorage backup intact so the data can be
-      // retried (on next edit / visibility change) or recovered on next load.
       console.error("Fehler beim Speichern:", err);
     }
-  }, [householdId, clearLocalBackup]);
+  }, [householdId]);
+
+  const lastLocalListenWrite = useRef(0);
 
   const scheduleSave = useCallback(
     (p: Page[], c: PageContents) => {
-      // Mark the local-write time *immediately* (not inside the timer) so a
-      // reload triggered by realtime/visibility within the debounce window can't
-      // overwrite freshly-typed content that hasn't reached the server yet.
-      lastLocalListenWrite.current = Date.now();
-      pendingSaveRef.current = { p, c };
-      // Mirror to localStorage synchronously — this line alone guarantees the
-      // edit survives even if the tab is killed in the very next millisecond.
-      writeLocalBackup(p, c);
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
-        saveTimerRef.current = null;
         lastLocalListenWrite.current = Date.now();
         saveData(p, c);
       }, 500);
     },
-    [saveData, writeLocalBackup]
+    [saveData]
   );
-
-  // ── Flush: persist any pending debounced save right now ──────────
-  // Called when the app is hidden or about to close. `keepalive` lets the
-  // request outlive the page lifecycle (used on pagehide / true app-close).
-  const flushSave = useCallback((keepalive = false) => {
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
-    }
-    const pending = pendingSaveRef.current;
-    if (pending) {
-      lastLocalListenWrite.current = Date.now();
-      saveData(pending.p, pending.c, keepalive);
-    }
-  }, [saveData]);
-
-  // ── Retry: re-attempt a save that previously failed ──────────────
-  // Triggered when the app regains focus/visibility — by then a broken token
-  // has usually been refreshed, so the retry succeeds and clears the backup.
-  const retryPendingSave = useCallback(() => {
-    const pending = pendingSaveRef.current;
-    if (pending) {
-      lastLocalListenWrite.current = Date.now();
-      saveData(pending.p, pending.c);
-      return true;
-    }
-    return false;
-  }, [saveData]);
 
   // ── Load data ──────────────────────────────────────────────────
 
@@ -321,43 +252,6 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
       ]);
       // Skip remote updates if we just wrote locally
       if (!isInitial && Date.now() - lastLocalListenWrite.current < 2000) return;
-
-      // ── Recover unsaved edits from a previous session ──────────────
-      // A leftover local backup means a save was scheduled but never confirmed
-      // by the server (failed token/network, app killed mid-save, …). On the
-      // initial load we trust this local copy over the (older) server state and
-      // re-push it so the user's work is never silently lost.
-      if (isInitial && backupKey) {
-        try {
-          const raw = localStorage.getItem(backupKey);
-          if (raw) {
-            const backup = JSON.parse(raw) as { ts: number; pages: Page[]; contents: PageContents };
-            if (backup?.pages?.length) {
-              setPages(backup.pages);
-              setPageContents(backup.contents || {});
-              const savedId = sessionStorage.getItem("listen_active_page");
-              const restoredId = (savedId && backup.pages.some(p => p.id === savedId)) ? savedId : backup.pages[0]?.id || null;
-              setActivePageId(restoredId);
-              const parentIds = new Set<string>(
-                backup.pages
-                  .filter(p => p.parent_id !== null && p.parent_id !== undefined)
-                  .map(p => p.parent_id as string)
-              );
-              setExpandedPages(parentIds);
-              setLoaded(true);
-              // Re-push the recovered snapshot to the server.
-              pendingSaveRef.current = { p: backup.pages, c: backup.contents || {} };
-              lastLocalListenWrite.current = Date.now();
-              saveData(backup.pages, backup.contents || {});
-              console.log("[Listen] Ungespeicherte Änderungen aus lokalem Backup wiederhergestellt");
-              return;
-            }
-          }
-        } catch (err) {
-          console.error("[Listen] Backup-Wiederherstellung fehlgeschlagen:", err);
-        }
-      }
-
       const loadedPages: Page[] = pRes.pages || [];
       const rawBlocks = bRes.blocks;
 
@@ -404,7 +298,7 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
         setLoaded(true);
       }
     }
-  }, [saveData, householdId, backupKey]);
+  }, [saveData, householdId]);
 
   useEffect(() => {
     loadListenData(true);
@@ -426,41 +320,22 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
   // ── Visibility / focus handlers for reconnection ──
   useEffect(() => {
     const handleVisibility = () => {
-      if (document.visibilityState === "hidden") {
-        // App is being backgrounded/closed — persist any pending edits NOW,
-        // before iOS freezes the JS context and the debounce timer can no
-        // longer fire. The page is still alive here, so a normal fetch works
-        // (no keepalive 64 KB body limit).
-        flushSave(false);
-      } else if (document.visibilityState === "visible") {
-        // If a previous save failed (e.g. token had expired), the token is
-        // usually refreshed by now — retry it first. Only reload from the
-        // server when there is nothing pending, so an unsaved in-memory edit
-        // is never clobbered by older server data.
-        if (!retryPendingSave()) {
-          console.log("[Listen] App visible again, reloading data...");
-          loadListenData(false);
-        }
+      if (document.visibilityState === "visible") {
+        console.log("[Listen] App visible again, reloading data...");
+        loadListenData(false);
       }
     };
     const handleFocus = () => {
-      if (retryPendingSave()) return;
       console.log("[Listen] Window focused, reloading data...");
       loadListenData(false);
     };
-    // pagehide fires on real page teardown (tab close / PWA close / navigation)
-    // where the JS context will be discarded — use keepalive so the request
-    // can outlive the page.
-    const handlePageHide = () => flushSave(true);
     document.addEventListener("visibilitychange", handleVisibility);
     window.addEventListener("focus", handleFocus);
-    window.addEventListener("pagehide", handlePageHide);
     return () => {
       document.removeEventListener("visibilitychange", handleVisibility);
       window.removeEventListener("focus", handleFocus);
-      window.removeEventListener("pagehide", handlePageHide);
     };
-  }, [loadListenData, flushSave, retryPendingSave]);
+  }, [loadListenData]);
 
   // ── Page operations ────────────────────────────────────────────
   const updatePages = useCallback(
@@ -857,11 +732,11 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
         />
       )}
 
-      {/* Context menu popover */}
-      {contextMenu && (() => {
+      {/* Context menu popover — desktop only */}
+      {!isTouch && contextMenu && (() => {
         return (
           <>
-            <div className="fixed inset-0 z-[1010]" onClick={() => setContextMenu(null)} />
+            <div className="fixed inset-0 z-[60]" onClick={() => setContextMenu(null)} />
             <div
               ref={(el) => {
                 if (!el) return;
@@ -880,11 +755,12 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
                 el.style.left = `${newLeft}px`;
                 el.style.top = `${newTop}px`;
               }}
-              className="fixed z-[1020] bg-surface rounded-xl p-1.5 min-w-[192px]"
+              className="fixed z-[70] bg-surface rounded-xl p-1.5 min-w-[192px]"
               style={{ left: contextMenu.x + 4, top: contextMenu.y, boxShadow: "var(--shadow-elevated)", border: "1px solid var(--zu-border)" }}
             >
               <button
-                onClick={(e) => {
+                onPointerDown={(e) => {
+                  e.preventDefault();
                   e.stopPropagation();
                   createPage(contextMenu.pageId);
                   setContextMenu(null);
@@ -896,7 +772,8 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
 
               <div className="my-1" style={{ borderTop: "1px solid var(--zu-border)" }} />
               <button
-                onClick={(e) => {
+                onPointerDown={(e) => {
+                  e.preventDefault();
                   e.stopPropagation();
                   setDeleteConfirmPageId(contextMenu.pageId);
                   setContextMenu(null);
@@ -915,7 +792,7 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
         const targetPage = pages.find((p) => p.id === deleteConfirmPageId);
         const hasSubpages = pages.some((p) => p.parent_id === deleteConfirmPageId);
         return (
-          <div className="fixed inset-0 z-[1030] flex items-center justify-center bg-black/40" onClick={() => setDeleteConfirmPageId(null)}>
+          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40" onClick={() => setDeleteConfirmPageId(null)}>
             <div className="bg-surface w-[320px] mx-4 p-6" style={{ borderRadius: "var(--radius-card)", boxShadow: "var(--shadow-elevated)" }} onClick={(e) => e.stopPropagation()}>
               <h3 className="text-base font-bold text-text-1 text-center">Seite l&ouml;schen?</h3>
               <p className="text-sm text-text-2 text-center mt-2">
@@ -1063,10 +940,9 @@ function SidebarContent(props: SidebarContentProps) {
   } | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-  // ── Back-gesture cancellation: id of the back-handler registered while
-  //    a drag is active (integrates with the centralized history guard so
-  //    finishing a drag never collides with open drawers' back handlers). ──
-  const dragBackIdRef = useRef<number | null>(null);
+  // ── History-state refs for Android swipe-back cancellation ──
+  const dragHistoryPushedRef = useRef(false);
+  const ignoringPopstateRef = useRef(false);
 
   // Flat list of all visible page IDs (tree order)
   const flatVisibleIds = useMemo(() => {
@@ -1103,8 +979,6 @@ function SidebarContent(props: SidebarContentProps) {
     const state = touchDragRef.current;
     if (state?.timerId) clearTimeout(state.timerId);
     touchDragRef.current = null;
-    // The back-handler that triggered this cancel has already been popped.
-    dragBackIdRef.current = null;
     setDragActiveId(null);
     setDragActiveWidth(0);
     setDropPreview(null);
@@ -1113,13 +987,32 @@ function SidebarContent(props: SidebarContentProps) {
     touchDragEndTimeRef.current = Date.now();
   }, []);
 
-  /** Remove the back-handler registered on drag activation (without firing it). */
+  /** Clean up the history entry we pushed when drag activated. */
   const cleanupDragHistory = useCallback(() => {
-    if (dragBackIdRef.current !== null) {
-      removeBack(dragBackIdRef.current);
-      dragBackIdRef.current = null;
+    if (dragHistoryPushedRef.current) {
+      dragHistoryPushedRef.current = false;
+      ignoringPopstateRef.current = true;
+      history.back();
     }
   }, []);
+
+  // popstate listener — fires when user presses Android back / swipe-back
+  useEffect(() => {
+    const onPopState = () => {
+      if (ignoringPopstateRef.current) {
+        // This popstate was triggered by our own cleanupDragHistory — ignore it
+        ignoringPopstateRef.current = false;
+        return;
+      }
+      if (dragHistoryPushedRef.current) {
+        // User navigated back while drag was active → cancel drag
+        dragHistoryPushedRef.current = false;
+        cancelTouchDrag();
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [cancelTouchDrag]);
 
   const computeTouchDropPreview = useCallback((cursorY: number, cursorX: number, dragPageId: string): { preview: DropPreview | null; overTrash: boolean } => {
     // Check trash zone
@@ -1191,10 +1084,9 @@ function SidebarContent(props: SidebarContentProps) {
       touchDragRef.current.activated = true;
       try { navigator.vibrate?.(30); } catch (_) {}
 
-      // Register a back-handler (via the centralized history guard) so Android
-      // swipe-back / back cancels the drag instead of closing the app. Using the
-      // shared API avoids colliding with an open drawer's own back handler.
-      dragBackIdRef.current = pushBack(() => cancelTouchDrag());
+      // Push a dummy history entry so Android swipe-back cancels drag instead of closing the app/tab
+      history.pushState({ drag: true }, "");
+      dragHistoryPushedRef.current = true;
 
       setDragActiveId(pageId);
       setTouchDragGhost({
@@ -1219,18 +1111,22 @@ function SidebarContent(props: SidebarContentProps) {
     const state = touchDragRef.current;
     if (!state) return;
 
-    if (!state.activated) {
-      // Plain tap (long-press never completed) — cancel the pending timer and
-      // let the row's onClick run to open the page.
-      if (state.timerId) clearTimeout(state.timerId);
-      touchDragRef.current = null;
-      return;
+    if (state.timerId) clearTimeout(state.timerId);
+
+    if (state.activated) {
+      // Execute the drop — use refs for latest values
+      executeTouchDrop(state.pageId, dropPreviewRef.current, dragOverTrashRef.current);
+      setDragActiveId(null);
+      setDragActiveWidth(0);
+      setDropPreview(null);
+      setDragOverTrash(false);
+      setTouchDragGhost(null);
+      touchDragEndTimeRef.current = Date.now();
+      cleanupDragHistory();
     }
-    // An activated drag is finalised by the document-level touchend listener
-    // (`endHandler`), which also calls preventDefault() to suppress the
-    // synthesized click that would otherwise close the drawer. We must NOT
-    // null touchDragRef here or that handler would bail out early.
-  }, []);
+
+    touchDragRef.current = null;
+  }, [executeTouchDrop, cleanupDragHistory]);
 
   // Native touchmove listener with { passive: false } to allow preventDefault during drag
   useEffect(() => {
@@ -1265,12 +1161,9 @@ function SidebarContent(props: SidebarContentProps) {
     };
 
     // touchend: execute the drop normally, then clean up history
-    const endHandler = (e: TouchEvent) => {
+    const endHandler = () => {
       const state = touchDragRef.current;
       if (!state || !state.activated) return;
-      // Suppress the synthesized click after a drag (would otherwise close the
-      // mobile drawer if the finger is released over its backdrop).
-      e.preventDefault();
       executeTouchDrop(state.pageId, dropPreviewRef.current, dragOverTrashRef.current);
       setDragActiveId(null);
       setDragActiveWidth(0);
@@ -1279,8 +1172,12 @@ function SidebarContent(props: SidebarContentProps) {
       setTouchDragGhost(null);
       touchDragEndTimeRef.current = Date.now();
       touchDragRef.current = null;
-      // Remove the back-handler registered on drag activation
-      cleanupDragHistory();
+      // Remove the dummy history entry we pushed on drag activation
+      if (dragHistoryPushedRef.current) {
+        dragHistoryPushedRef.current = false;
+        ignoringPopstateRef.current = true;
+        history.back();
+      }
     };
 
     // touchcancel (e.g. Android system gesture): cancel drag without executing drop
@@ -1295,21 +1192,25 @@ function SidebarContent(props: SidebarContentProps) {
         setDragOverTrash(false);
         setTouchDragGhost(null);
         touchDragEndTimeRef.current = Date.now();
-        // Remove the back-handler registered on drag activation
-        cleanupDragHistory();
+        // Remove the dummy history entry if we pushed one
+        if (dragHistoryPushedRef.current) {
+          dragHistoryPushedRef.current = false;
+          ignoringPopstateRef.current = true;
+          history.back();
+        }
       }
       touchDragRef.current = null;
     };
 
     document.addEventListener("touchmove", handler, { passive: false });
-    document.addEventListener("touchend", endHandler, { passive: false });
+    document.addEventListener("touchend", endHandler);
     document.addEventListener("touchcancel", cancelHandler);
     return () => {
       document.removeEventListener("touchmove", handler);
       document.removeEventListener("touchend", endHandler);
       document.removeEventListener("touchcancel", cancelHandler);
     };
-  }, [computeTouchDropPreview, executeTouchDrop, cleanupDragHistory]);
+  }, [computeTouchDropPreview, executeTouchDrop]);
 
   // Clean up on unmount
   useEffect(() => {
@@ -1600,6 +1501,20 @@ function SidebarContent(props: SidebarContentProps) {
         </div>
       )}
 
+      {/* Trash zone — visible during drag on touch devices */}
+      {isTouch && dragActiveId && (
+        <div
+          ref={trashZoneRef}
+          className={`flex-shrink-0 mx-2 mb-2 flex items-center justify-center gap-2 rounded-xl border-2 border-dashed transition-colors py-3 ${
+            dragOverTrash
+              ? "border-danger bg-danger-light text-danger"
+              : "border-border text-text-3"
+          }`}
+        >
+          <Trash2 className="w-4 h-4" />
+          <span className="text-sm font-medium">Seite entfernen</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -1786,22 +1701,18 @@ function PageTreeItem(props: PageTreeItemProps) {
           <span className="flex-1 min-w-0 truncate">{page.title}</span>
         )}
 
-        {/* Context menu button — always visible on touch, hover on desktop */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-            onContextMenu(page.id, rect.left, rect.bottom);
-          }}
-          onTouchStart={(e) => e.stopPropagation()}
-          className={`flex items-center justify-center flex-shrink-0 rounded hover:bg-surface-2 transition-opacity ${
-            isTouch
-              ? "w-7 h-7 opacity-100"
-              : "w-5 h-5 opacity-0 group-hover:opacity-100"
-          }`}
-        >
-          <MoreHorizontal className={`${isTouch ? "w-4 h-4" : "w-3.5 h-3.5"} text-text-3`} />
-        </button>
+        {/* Context menu button — desktop only */}
+        {!isTouch && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onContextMenu(page.id, e.clientX, e.clientY);
+            }}
+            className="w-5 h-5 flex items-center justify-center flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity rounded hover:bg-surface-2"
+          >
+            <MoreHorizontal className="w-3.5 h-3.5 text-text-3" />
+          </button>
+        )}
       </div>
 
       {/* Bottom drop indicator line */}
@@ -1956,17 +1867,6 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
   const [liDragging, setLiDragging] = useState(false);
   const [liDropIndicator, setLiDropIndicator] = useState<number | null>(null);
   const HANDLE_LINE_H = 44;
-  const isTouch = useIsTouch();
-
-  // ── Touch drag: floating ghost (Notion-style highlight, triggered from handle) ──
-  const [liGhost, setLiGhost] = useState<{ x: number; y: number; width: number; label: string } | null>(null);
-
-  // Own text of a list item, excluding any nested sub-lists.
-  const getLiOwnText = useCallback((el: HTMLElement): string => {
-    const clone = el.cloneNode(true) as HTMLElement;
-    clone.querySelectorAll("ul, ol").forEach((n) => n.remove());
-    return (clone.textContent || "").trim();
-  }, []);
 
   // Helper: get the "own-line" midpoint of a <li>, excluding nested sublists.
   // Parent <li> elements have very tall bounding rects (they contain nested <ul>/<ol>),
@@ -2234,16 +2134,24 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
   }, [syncContent]);
 
   // ── Li drag touch handlers ──
-  // Shared setup: prepare drag state for an item (used by long-press + legacy handle).
-  const setupLiDrag = useCallback((el: HTMLElement, elType: "li" | "todo", startX: number, startY: number): boolean => {
+  const handleLiTouchStart = useCallback((e: React.TouchEvent, idx: number) => {
+    const touch = e.touches[0];
+    e.preventDefault();
+    e.stopPropagation();
+    const el = liElsRef.current[idx];
+    if (!el) return;
+    const pos = liPositions[idx];
+    const elType = pos?.type || "li";
+
     let parentList: HTMLElement;
     let siblings: HTMLElement[];
     if (elType === "todo") {
+      // Todos are siblings at editor top level — gather consecutive .editor-todo elements around this one
       parentList = el.parentElement!;
       siblings = Array.from(parentList.children).filter((c) => c.classList.contains("editor-todo")) as HTMLElement[];
     } else {
       const pl = el.parentElement;
-      if (!pl || (pl.tagName !== "UL" && pl.tagName !== "OL")) return false;
+      if (!pl || (pl.tagName !== "UL" && pl.tagName !== "OL")) return;
       parentList = pl;
       siblings = Array.from(pl.children).filter((c) => c.tagName === "LI") as HTMLElement[];
     }
@@ -2258,35 +2166,13 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
       : [];
     const allSrcIdx = allItems.indexOf(el);
     liDragRef.current = {
-      el, elType, intent: "none", startX, startY,
+      el, elType, intent: "none", startX: touch.clientX, startY: touch.clientY,
       parentList, siblings, srcIdx,
       indentLevel: level, lastFlashedLevel: level, dropIdx: allSrcIdx,
       allItems, allSrcIdx,
     };
     setLiDragging(true);
-    return true;
-  }, [getLiIndentLevel]);
-
-  // Activate a drag: set up state + show floating ghost.
-  const activateLiDrag = useCallback((el: HTMLElement, elType: "li" | "todo", x: number, y: number) => {
-    if (!setupLiDrag(el, elType, x, y)) return;
-    try { navigator.vibrate?.(30); } catch (_) { /* ignored */ }
-    window.getSelection()?.removeAllRanges();
-    editorRef.current?.classList.add("li-drag-noselect");
-    const width = Math.min(el.getBoundingClientRect().width || 220, 280);
-    setLiGhost({ x, y, width, label: getLiOwnText(el) || "Element" });
-  }, [setupLiDrag, getLiOwnText]);
-
-  const handleLiTouchStart = useCallback((e: React.TouchEvent, idx: number) => {
-    const touch = e.touches[0];
-    e.preventDefault();
-    e.stopPropagation();
-    const el = liElsRef.current[idx];
-    if (!el) return;
-    const pos = liPositions[idx];
-    const elType = pos?.type || "li";
-    activateLiDrag(el, elType, touch.clientX, touch.clientY);
-  }, [activateLiDrag, liPositions]);
+  }, [getLiIndentLevel, liPositions]);
 
   const handleLiTouchMove = useCallback((e: TouchEvent) => {
     const state = liDragRef.current;
@@ -2295,9 +2181,6 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
     const touch = e.touches[0];
     const dx = touch.clientX - state.startX;
     const dy = touch.clientY - state.startY;
-
-    // Floating ghost follows the finger
-    setLiGhost((g) => (g ? { ...g, x: touch.clientX, y: touch.clientY } : g));
 
     if (state.intent === "none") {
       if (Math.sqrt(dx * dx + dy * dy) >= 10) {
@@ -2353,14 +2236,9 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
     }
   }, [indentLi, outdentLi, getLiIndentLevel, getOwnMidpoint]);
 
-  const handleLiTouchEnd = useCallback((e?: Event) => {
+  const handleLiTouchEnd = useCallback(() => {
     const state = liDragRef.current;
     if (!state) return;
-    // A drag was active → suppress the synthesized click so the editor doesn't
-    // place the caret / pop up the keyboard where the finger was released.
-    e?.preventDefault?.();
-    editorRef.current?.classList.remove("li-drag-noselect");
-    setLiGhost(null);
     state.el.style.opacity = "";
     state.el.classList.remove("li-indent-flash");
     if (state.intent === "vertical" && state.dropIdx !== state.allSrcIdx) {
@@ -2568,7 +2446,7 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
   // Each handler checks liDragRef.current and returns early if null.
   useEffect(() => {
     document.addEventListener("touchmove", handleLiTouchMove, { passive: false });
-    document.addEventListener("touchend", handleLiTouchEnd, { passive: false });
+    document.addEventListener("touchend", handleLiTouchEnd);
     document.addEventListener("touchcancel", handleLiTouchEnd);
     return () => {
       document.removeEventListener("touchmove", handleLiTouchMove);
@@ -4239,19 +4117,12 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
             </>
           )}
 
-          {/* Drag handles for li and todo items (touch + desktop).
-              Kept mounted during drag — only hidden via styles — so the active
-              touch sequence isn't interrupted by the handle being unmounted. */}
-          {liPositions.map((pos, i) => (
+          {/* Drag handles for li and todo items */}
+          {!liDragging && liPositions.map((pos, i) => (
             <div
               key={i}
               className="li-drag-handle"
-              style={{
-                top: pos.top,
-                left: pos.left,
-                height: HANDLE_LINE_H,
-                ...(liDragging ? { opacity: 0, pointerEvents: "none" as const } : {}),
-              }}
+              style={{ top: pos.top, left: pos.left, height: HANDLE_LINE_H }}
               onTouchStart={(e) => handleLiTouchStart(e, i)}
               onMouseDown={(e) => handleLiMouseDown(e, i)}
               onContextMenu={(e) => e.preventDefault()}
@@ -4261,33 +4132,6 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
               <GripVertical className="w-3 h-3" />
             </div>
           ))}
-
-          {/* Floating ghost — follows the finger during a touch drag.
-              Sized to its text (not the full row) and clamped into the viewport. */}
-          {isTouch && liGhost && (
-            <div
-              ref={(el) => {
-                if (!el) return;
-                const w = el.offsetWidth;
-                const vw = window.innerWidth;
-                let left = liGhost.x - w / 2;
-                if (left < 8) left = 8;
-                if (left + w > vw - 8) left = vw - 8 - w;
-                el.style.left = `${left}px`;
-              }}
-              className="fixed z-[60] flex items-center gap-1 px-2 py-1 rounded-lg bg-surface border border-accent-mid text-sm text-text-1 shadow-lg pointer-events-none whitespace-nowrap"
-              style={{
-                left: liGhost.x,
-                top: liGhost.y - 20,
-                maxWidth: "min(70vw, 280px)",
-                opacity: 0.95,
-                transform: "scale(1.02)",
-              }}
-            >
-              <GripVertical className="w-3 h-3 text-text-3 flex-shrink-0" />
-              <span className="min-w-0 truncate">{liGhost.label}</span>
-            </div>
-          )}
 
           {/* Li vertical drag drop indicator */}
           {liDropIndicator !== null && (

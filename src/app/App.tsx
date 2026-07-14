@@ -66,44 +66,6 @@ export default function App() {
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, []);
 
-  // Bildschirm wachhalten, solange die App geöffnet/sichtbar ist (Screen Wake Lock API).
-  // Der Lock wird beim Verstecken des Tabs automatisch vom Browser freigegeben,
-  // daher beim erneuten Sichtbarwerden neu anfordern.
-  useEffect(() => {
-    if (!("wakeLock" in navigator)) return;
-
-    let wakeLock: WakeLockSentinel | null = null;
-    let released = false;
-
-    const requestWakeLock = async () => {
-      if (document.visibilityState !== "visible") return;
-      try {
-        wakeLock = await navigator.wakeLock.request("screen");
-        wakeLock.addEventListener("release", () => {
-          wakeLock = null;
-        });
-      } catch (_) {
-        // z. B. bei niedrigem Akkustand oder nicht unterstützt — still ignorieren
-      }
-    };
-
-    const handleVisibility = () => {
-      if (document.visibilityState === "visible" && !released) {
-        requestWakeLock();
-      }
-    };
-
-    requestWakeLock();
-    document.addEventListener("visibilitychange", handleVisibility);
-
-    return () => {
-      released = true;
-      document.removeEventListener("visibilitychange", handleVisibility);
-      wakeLock?.release().catch(() => { /* ignored */ });
-      wakeLock = null;
-    };
-  }, []);
-
   // Auth is handled inside AppContent → AuthProvider
   return (
     <HelmetProvider>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { ChevronLeft, Search, Plus, X, Pencil, Trash2, Type, Check } from "lucide-react";
+import { ChevronLeft, Search, Plus, X, Pencil, Trash2, Type } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { useAuth } from "./auth-context";
 import { API_BASE } from "./supabase-client";
@@ -8,8 +8,6 @@ import { publicAnonKey } from "/utils/supabase/info";
 import {
   GROCERY_DATABASE,
   getAllCategories,
-  getCategoryColorOverrides,
-  setCategoryColorOverrides,
 } from "./einkaufen/shopping-data";
 import { useKeyboardOffset } from "./ui/use-keyboard-offset";
 
@@ -140,38 +138,6 @@ async function saveCustomCategories(hhId: string, categories: string[]): Promise
   }
 }
 
-async function fetchCategoryColors(hhId: string): Promise<Record<string, string>> {
-  try {
-    const res = await fetch(
-      `${API_BASE}/category-colors?household_id=${hhId}`,
-      { headers: { Authorization: `Bearer ${publicAnonKey}` } },
-    );
-    const json = await res.json();
-    return json.colors || {};
-  } catch (err) {
-    console.log("fetchCategoryColors error:", err);
-    return {};
-  }
-}
-
-async function saveCategoryColors(
-  hhId: string,
-  colors: Record<string, string>,
-): Promise<void> {
-  try {
-    await fetch(`${API_BASE}/category-colors`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${publicAnonKey}`,
-      },
-      body: JSON.stringify({ household_id: hhId, colors }),
-    });
-  } catch (err) {
-    console.log("saveCategoryColors error:", err);
-  }
-}
-
 // ── Category chip colors (same as EinkaufenScreen) ─────────────────
 const CATEGORY_COLORS: Record<string, { bg: string; text: string }> = {
   "Obst & Gemüse": { bg: "#DCFCE7", text: "#22C55E" },
@@ -216,18 +182,8 @@ const CATEGORY_COLORS: Record<string, { bg: string; text: string }> = {
 };
 
 function getCatColor(category: string) {
-  const base = CATEGORY_COLORS[category] || CATEGORY_COLORS.Sonstiges;
-  const override = getCategoryColorOverrides()[category];
-  return override ? { bg: base.bg, text: override } : base;
+  return CATEGORY_COLORS[category] || CATEGORY_COLORS.Sonstiges;
 }
-
-// Curated swatch palette for the category-color picker (distinct, legible dots).
-const CATEGORY_COLOR_PRESETS: string[] = [
-  "#22C55E", "#10B981", "#0EA5E9", "#3B82F6", "#6366F1",
-  "#A855F7", "#EC4899", "#F472B6", "#EF4444", "#FB7185",
-  "#F97316", "#FB923C", "#F59E0B", "#EAB308", "#84CC16",
-  "#14B8A6", "#06B6D4", "#8B5CF6", "#D946EF", "#6B7280",
-];
 
 type SortMode = "az" | "kategorie" | "haeufigkeit";
 
@@ -239,14 +195,9 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
   const [articles, setArticles] = useState<MergedArticle[]>([]);
   const [loading, setLoading] = useState(true);
   const [reloadTick, setReloadTick] = useState(0);
-  // Only show the full-screen spinner on the very first load. Subsequent
-  // reloads (after delete/rename/etc.) keep the existing list mounted so the
-  // scroll position is preserved instead of collapsing to the spinner.
-  const initialLoadDone = useRef(false);
 
   // ── Custom categories ────────────────────────────────────────
   const [customCategories, setCustomCategories] = useState<string[]>([]);
-  const [categoryColors, setCategoryColors] = useState<Record<string, string>>({});
   const [showNewCategoryDrawer, setShowNewCategoryDrawer] = useState(false);
   const [renamingCategory, setRenamingCategory] = useState<string | null>(null);
 
@@ -268,47 +219,21 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
   // ── Rename article ────────────────────────────────────────────
   const [renameArticle, setRenameArticle] = useState<MergedArticle | null>(null);
 
-  // ── Multi-select mode ─────────────────────────────────────────
-  const [multiSelectMode, setMultiSelectMode] = useState(false);
-  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
-  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
-  const [bulkCatOpen, setBulkCatOpen] = useState(false);
-
-  const exitMultiSelect = useCallback(() => {
-    setMultiSelectMode(false);
-    setSelectedKeys(new Set());
-    setBulkDeleteOpen(false);
-    setBulkCatOpen(false);
-  }, []);
-
-  const toggleSelect = useCallback((name: string) => {
-    setSelectedKeys((prev) => {
-      const next = new Set(prev);
-      const key = name.toLowerCase();
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }, []);
-
   // ── Load & merge data ──────────────────────────────────────────
   useEffect(() => {
     if (!householdId) return;
     let cancelled = false;
 
     (async () => {
-      if (!initialLoadDone.current) setLoading(true);
-      const [globalItems, shoppingItems, customCats, catColors] = await Promise.all([
+      setLoading(true);
+      const [globalItems, shoppingItems, customCats] = await Promise.all([
         fetchGlobalItems(householdId),
         fetchShoppingItems(householdId),
         fetchCustomCategories(householdId),
-        fetchCategoryColors(householdId),
       ]);
 
       if (!cancelled) {
         setCustomCategories(customCats);
-        setCategoryColorOverrides(catColors);
-        setCategoryColors(catColors);
       }
 
       const shoppingCounts = new Map<string, number>();
@@ -402,7 +327,6 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
       if (!cancelled) {
         setArticles(Array.from(map.values()));
         setLoading(false);
-        initialLoadDone.current = true;
       }
     })();
 
@@ -411,17 +335,12 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
 
   const reload = useCallback(() => setReloadTick((t) => t + 1), []);
 
-  // ── Merged categories (only categories that have articles + custom) ──
-  // Empty built-in categories and manually-removed categories are excluded,
-  // so they no longer appear in the category-change / add-article pickers.
+  // ── Merged categories (built-in + custom) ──────────────────────
   const mergedCategories = useMemo(() => {
-    const set = new Set<string>();
-    for (const a of articles) {
-      if (a.category) set.add(a.category);
-    }
+    const set = new Set(getAllCategories());
     for (const c of customCategories) set.add(c);
     return Array.from(set).sort((a, b) => a.localeCompare(b, "de"));
-  }, [articles, customCategories]);
+  }, [customCategories]);
 
   // ── Create new category ────────────────────────────────────────
   const handleCreateCategory = useCallback(
@@ -442,31 +361,13 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
 
   // ── Rename category ────────────────────────────────────────────
   const handleRenameCategory = useCallback(
-    async (oldName: string, newName: string, color?: string) => {
+    async (oldName: string, newName: string) => {
       if (!householdId) return;
       const trimmed = newName.trim();
-      const nameChanged =
-        !!trimmed && trimmed.toLowerCase() !== oldName.toLowerCase();
-      const finalName = nameChanged ? trimmed : oldName;
-
-      // ── Persist the chosen circle color (if any) ─────────────────
-      const prevColor = categoryColors[oldName];
-      if (color !== prevColor || nameChanged) {
-        const nextColors: Record<string, string> = { ...categoryColors };
-        if (nameChanged) delete nextColors[oldName];
-        if (color) nextColors[finalName] = color;
-        else delete nextColors[finalName];
-        setCategoryColors(nextColors);
-        setCategoryColorOverrides(nextColors);
-        await saveCategoryColors(householdId, nextColors);
-      }
-
-      if (!nameChanged) {
+      if (!trimmed || trimmed.toLowerCase() === oldName.toLowerCase()) {
         setRenamingCategory(null);
-        reload();
         return;
       }
-
       // Update all articles that had the old category
       const articlesInCat = articles.filter(
         (a) => a.category.toLowerCase() === oldName.toLowerCase(),
@@ -493,7 +394,7 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
       setRenamingCategory(null);
       reload();
     },
-    [householdId, articles, customCategories, categoryColors, reload],
+    [householdId, articles, customCategories, reload],
   );
 
   // ── Delete empty category ──────────────────────────────────────
@@ -640,24 +541,18 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
   // ── Delete ─────────────────────────────────────────────────────
   const handleDelete = useCallback(async () => {
     if (!householdId || !deleteArticle) return;
-    const target = deleteArticle;
-    // Optimistic local removal so the row disappears instantly and the
-    // scroll position is kept (no spinner flash from a full reload).
-    setArticles((prev) =>
-      prev.filter((a) => a.name.toLowerCase() !== target.name.toLowerCase()),
-    );
-    setDeleteArticle(null);
-    if (target.source === "grocery") {
+    if (deleteArticle.source === "grocery") {
       // Soft-delete: create a global_items entry with deleted: true
       // so the GROCERY_DATABASE item gets filtered out in the merge
-      await upsertGlobalItem(householdId, target.name, target.category, true, {
+      await upsertGlobalItem(householdId, deleteArticle.name, deleteArticle.category, true, {
         deleted: true,
-        original_name: target.name,
+        original_name: deleteArticle.name,
       });
     } else {
       // Hard-delete existing global_items entry (source === "global" or "shopping")
-      await deleteGlobalItem(householdId, target.name);
+      await deleteGlobalItem(householdId, deleteArticle.name);
     }
+    setDeleteArticle(null);
     reload();
   }, [householdId, deleteArticle, reload]);
 
@@ -694,57 +589,6 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
     },
     [householdId, renameArticle, reload],
   );
-
-  // ── Bulk delete (multi-select) ─────────────────────────────────
-  const handleBulkDelete = useCallback(async () => {
-    if (!householdId) return;
-    const targets = articles.filter((a) =>
-      selectedKeys.has(a.name.toLowerCase()),
-    );
-    // Optimistic local removal so rows disappear instantly, scroll kept.
-    setArticles((prev) =>
-      prev.filter((a) => !selectedKeys.has(a.name.toLowerCase())),
-    );
-    exitMultiSelect();
-    for (const t of targets) {
-      if (t.source === "grocery") {
-        await upsertGlobalItem(householdId, t.name, t.category, true, {
-          deleted: true,
-          original_name: t.name,
-        });
-      } else {
-        await deleteGlobalItem(householdId, t.name);
-      }
-    }
-    reload();
-  }, [householdId, articles, selectedKeys, exitMultiSelect, reload]);
-
-  // ── Bulk category change (multi-select) ────────────────────────
-  const handleBulkCategoryChange = useCallback(
-    async (category: string) => {
-      if (!householdId) return;
-      const targets = articles.filter((a) =>
-        selectedKeys.has(a.name.toLowerCase()),
-      );
-      // Optimistic local update
-      setArticles((prev) =>
-        prev.map((a) =>
-          selectedKeys.has(a.name.toLowerCase())
-            ? { ...a, category }
-            : a,
-        ),
-      );
-      exitMultiSelect();
-      for (const t of targets) {
-        // category_only = true → don't increment times_used
-        await upsertGlobalItem(householdId, t.name, category, true);
-      }
-      reload();
-    },
-    [householdId, articles, selectedKeys, exitMultiSelect, reload],
-  );
-
-  const selectedCount = selectedKeys.size;
 
   const sortOptions: { key: SortMode; label: string }[] = [
     { key: "az", label: "A–Z" },
@@ -827,34 +671,12 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
           ))}
         </div>
 
-        {/* ── Article count + Select / New Category buttons ── */}
+        {/* ── Article count + New Category button ── */}
         <div className="flex items-center justify-between pt-1 pb-2">
-          <div className="flex items-center gap-3">
-            <span className="text-xs font-medium" style={{ color: "var(--text-3)" }}>
-              {multiSelectMode && selectedCount > 0
-                ? `${selectedCount} ausgewählt`
-                : `${sorted.length} Artikel`}
-            </span>
-            {!multiSelectMode && sorted.length > 0 && (
-              <button
-                onClick={() => setMultiSelectMode(true)}
-                className="text-xs font-semibold active:opacity-70 transition"
-                style={{ color: "var(--accent)" }}
-              >
-                Auswählen
-              </button>
-            )}
-            {multiSelectMode && (
-              <button
-                onClick={exitMultiSelect}
-                className="text-xs font-semibold active:opacity-70 transition"
-                style={{ color: "var(--text-2)" }}
-              >
-                Abbrechen
-              </button>
-            )}
-          </div>
-          {!multiSelectMode && sortMode === "kategorie" && (
+          <span className="text-xs font-medium" style={{ color: "var(--text-3)" }}>
+            {sorted.length} Artikel
+          </span>
+          {sortMode === "kategorie" && (
             <button
               onClick={() => setShowNewCategoryDrawer(true)}
               className="text-xs font-semibold active:opacity-70 transition"
@@ -912,15 +734,13 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
                   >
                     {group.category}
                   </span>
-                  {!multiSelectMode && (
-                    <button
-                      onClick={() => setRenamingCategory(group.category)}
-                      className="w-6 h-6 flex items-center justify-center rounded-md active:bg-surface-2 transition"
-                    >
-                      <Pencil className="w-3 h-3" style={{ color: "var(--text-3)" }} />
-                    </button>
-                  )}
-                  {!multiSelectMode && isEmpty && isCustom && (
+                  <button
+                    onClick={() => setRenamingCategory(group.category)}
+                    className="w-6 h-6 flex items-center justify-center rounded-md active:bg-surface-2 transition"
+                  >
+                    <Pencil className="w-3 h-3" style={{ color: "var(--text-3)" }} />
+                  </button>
+                  {isEmpty && isCustom && (
                     <button
                       onClick={() => handleDeleteCategory(group.category)}
                       className="w-6 h-6 flex items-center justify-center rounded-md active:bg-surface-2 transition"
@@ -942,9 +762,6 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
                       article={article}
                       showBorder={idx < group.items.length - 1}
                       showCategory={false}
-                      selectMode={multiSelectMode}
-                      selected={selectedKeys.has(article.name.toLowerCase())}
-                      onToggleSelect={() => toggleSelect(article.name)}
                       onPointerDown={(e) => handlePointerDown(article, e)}
                       onPointerMove={handlePointerMove}
                       onPointerUp={handlePointerUp}
@@ -968,9 +785,6 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
                   article={article}
                   showBorder={idx < sorted.length - 1}
                   showCategory
-                  selectMode={multiSelectMode}
-                  selected={selectedKeys.has(article.name.toLowerCase())}
-                  onToggleSelect={() => toggleSelect(article.name)}
                   onPointerDown={(e) => handlePointerDown(article, e)}
                   onPointerMove={handlePointerMove}
                   onPointerUp={handlePointerUp}
@@ -981,106 +795,26 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
         </div>
       </div>
 
-      {/* ── FAB: Add article (hidden during multi-select) ── */}
-      {!multiSelectMode && (
-        <button
-          onClick={() => {
-            setAddName("");
-            setAddStep("name");
-            setShowAddDrawer(true);
-          }}
-          className="absolute flex items-center justify-center rounded-full shadow-lg active:scale-95 transition-transform"
-          style={{
-            width: 56,
-            height: 56,
-            bottom: 24,
-            right: 20,
-            background: "var(--accent)",
-            boxShadow: "0 4px 16px color-mix(in srgb, var(--accent) 40%, transparent)",
-            zIndex: 20,
-          }}
-        >
-          <Plus className="w-6 h-6 text-white" />
-        </button>
-      )}
-
-      {/* ── Multi-select action FABs (appear once ≥1 article is selected) ── */}
-      <AnimatePresence>
-        {multiSelectMode && selectedCount > 0 && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9, y: 8 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: 8 }}
-            transition={{ duration: 0.15 }}
-            className="absolute flex flex-col items-end gap-3"
-            style={{ bottom: 24, right: 20, zIndex: 20 }}
-          >
-            {/* Kategorie wechseln */}
-            <div className="flex items-center gap-2.5">
-              <span
-                className="text-xs font-semibold px-2.5 py-1 rounded-md"
-                style={{ background: "var(--surface)", color: "var(--text-1)", boxShadow: "var(--shadow-elevated)" }}
-              >
-                Kategorie wechseln
-              </span>
-              <button
-                onClick={() => setBulkCatOpen(true)}
-                className="flex items-center justify-center rounded-full active:scale-95 transition-transform"
-                style={{
-                  width: 48,
-                  height: 48,
-                  background: "var(--accent)",
-                  boxShadow: "0 4px 16px color-mix(in srgb, var(--accent) 40%, transparent)",
-                }}
-              >
-                <Pencil className="w-5 h-5 text-white" />
-              </button>
-            </div>
-            {/* Löschen */}
-            <div className="flex items-center gap-2.5">
-              <span
-                className="text-xs font-semibold px-2.5 py-1 rounded-md"
-                style={{ background: "var(--surface)", color: "var(--text-1)", boxShadow: "var(--shadow-elevated)" }}
-              >
-                Löschen
-              </span>
-              <button
-                onClick={() => setBulkDeleteOpen(true)}
-                className="flex items-center justify-center rounded-full active:scale-95 transition-transform"
-                style={{
-                  width: 48,
-                  height: 48,
-                  background: "var(--danger)",
-                  boxShadow: "0 4px 16px color-mix(in srgb, var(--danger) 40%, transparent)",
-                }}
-              >
-                <Trash2 className="w-5 h-5 text-white" />
-              </button>
-            </div>
-            {/* Abbrechen */}
-            <div className="flex items-center gap-2.5">
-              <span
-                className="text-xs font-semibold px-2.5 py-1 rounded-md"
-                style={{ background: "var(--surface)", color: "var(--text-2)", boxShadow: "var(--shadow-elevated)" }}
-              >
-                Abbrechen
-              </span>
-              <button
-                onClick={exitMultiSelect}
-                className="flex items-center justify-center rounded-full active:scale-95 transition-transform"
-                style={{
-                  width: 48,
-                  height: 48,
-                  background: "var(--surface-2)",
-                  border: "1px solid var(--zu-border)",
-                }}
-              >
-                <X className="w-5 h-5" style={{ color: "var(--text-2)" }} />
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* ── FAB ── */}
+      <button
+        onClick={() => {
+          setAddName("");
+          setAddStep("name");
+          setShowAddDrawer(true);
+        }}
+        className="absolute flex items-center justify-center rounded-full shadow-lg active:scale-95 transition-transform"
+        style={{
+          width: 56,
+          height: 56,
+          bottom: 24,
+          right: 20,
+          background: "var(--accent)",
+          boxShadow: "0 4px 16px color-mix(in srgb, var(--accent) 40%, transparent)",
+          zIndex: 20,
+        }}
+      >
+        <Plus className="w-6 h-6 text-white" />
+      </button>
 
       {/* ── Add Article Drawer ── */}
       <AnimatePresence>
@@ -1168,36 +902,6 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
         )}
       </AnimatePresence>
 
-      {/* ── Bulk Category Change Drawer ── */}
-      <AnimatePresence>
-        {bulkCatOpen && (
-          <CategoryPickerDrawer
-            subtitle={`Für ${selectedCount} ausgewählte Artikel`}
-            categories={mergedCategories}
-            onSelect={handleBulkCategoryChange}
-            onClose={() => setBulkCatOpen(false)}
-          />
-        )}
-      </AnimatePresence>
-
-      {/* ── Bulk Delete Confirmation ── */}
-      <AnimatePresence>
-        {bulkDeleteOpen && (
-          <DeleteConfirmModal
-            count={selectedCount}
-            articleName={
-              selectedCount === 1
-                ? articles.find((a) =>
-                    selectedKeys.has(a.name.toLowerCase()),
-                  )?.name
-                : undefined
-            }
-            onConfirm={handleBulkDelete}
-            onCancel={() => setBulkDeleteOpen(false)}
-          />
-        )}
-      </AnimatePresence>
-
       {/* ── New Category Drawer ── */}
       <AnimatePresence>
         {showNewCategoryDrawer && (
@@ -1213,12 +917,7 @@ export function MeineArtikelScreen({ onClose }: { onClose: () => void }) {
         {renamingCategory && (
           <RenameCategoryDrawer
             currentName={renamingCategory}
-            currentColor={categoryColors[renamingCategory]}
-            defaultColor={getCatColor(renamingCategory).text}
-            presets={CATEGORY_COLOR_PRESETS}
-            onSubmit={(newName, color) =>
-              handleRenameCategory(renamingCategory, newName, color)
-            }
+            onSubmit={(newName) => handleRenameCategory(renamingCategory, newName)}
             onClose={() => setRenamingCategory(null)}
           />
         )}
@@ -1243,9 +942,6 @@ function ArticleRow({
   article,
   showBorder,
   showCategory,
-  selectMode,
-  selected,
-  onToggleSelect,
   onPointerDown,
   onPointerMove,
   onPointerUp,
@@ -1253,9 +949,6 @@ function ArticleRow({
   article: MergedArticle;
   showBorder: boolean;
   showCategory: boolean;
-  selectMode?: boolean;
-  selected?: boolean;
-  onToggleSelect?: () => void;
   onPointerDown: (e: React.PointerEvent) => void;
   onPointerMove: (e: React.PointerEvent) => void;
   onPointerUp: () => void;
@@ -1270,28 +963,13 @@ function ArticleRow({
         WebkitTouchCallout: "none",
         WebkitUserSelect: "none",
         userSelect: "none",
-        cursor: selectMode ? "pointer" : undefined,
       }}
-      onClick={selectMode ? onToggleSelect : undefined}
-      onPointerDown={selectMode ? undefined : onPointerDown}
-      onPointerMove={selectMode ? undefined : onPointerMove}
-      onPointerUp={selectMode ? undefined : onPointerUp}
-      onPointerCancel={selectMode ? undefined : onPointerUp}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
       onContextMenu={(e) => e.preventDefault()}
     >
-      {selectMode && (
-        <span
-          className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center transition"
-          style={{
-            border: selected
-              ? "2px solid var(--accent)"
-              : "2px solid var(--zu-border)",
-            background: selected ? "var(--accent)" : "transparent",
-          }}
-        >
-          {selected && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
-        </span>
-      )}
       <span
         className="flex-1 text-sm font-medium truncate"
         style={{ color: "var(--text-1)" }}
@@ -1603,13 +1281,11 @@ function AddArticleDrawer({
 // ── Category Picker Drawer (for changing category) ─────────────────
 function CategoryPickerDrawer({
   itemName,
-  subtitle,
   categories,
   onSelect,
   onClose,
 }: {
-  itemName?: string;
-  subtitle?: string;
+  itemName: string;
   categories: string[];
   onSelect: (cat: string) => void;
   onClose: () => void;
@@ -1660,7 +1336,7 @@ function CategoryPickerDrawer({
         <div className="px-5 pb-2 flex-shrink-0">
           <h3 className="text-base font-bold text-text-1">Kategorie wechseln</h3>
           <p className="text-sm text-text-2 mt-0.5">
-            {subtitle ?? <>Für &bdquo;{itemName}&ldquo;</>}
+            Für &bdquo;{itemName}&ldquo;
           </p>
         </div>
         {/* Search */}
@@ -1737,16 +1413,13 @@ function CategoryPickerDrawer({
 // ── Delete Confirmation Modal ──────────────────────────────────────
 function DeleteConfirmModal({
   articleName,
-  count,
   onConfirm,
   onCancel,
 }: {
-  articleName?: string;
-  count?: number;
+  articleName: string;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
-  const isBulk = typeof count === "number" && count > 1;
   const { bottomOffset: delBottomOffset, vpHeight: delVpHeight } = useKeyboardOffset();
   return createPortal(
     <motion.div
@@ -1773,17 +1446,10 @@ function DeleteConfirmModal({
           <div className="w-9 h-1 rounded-full" style={{ background: "var(--zu-border)" }} />
         </div>
         <h3 className="text-base font-bold text-text-1 text-center">
-          {isBulk ? `${count} Artikel löschen?` : "Artikel löschen?"}
+          Artikel löschen?
         </h3>
         <p className="text-sm text-text-3 text-center mt-2 mb-5">
-          {isBulk ? (
-            <>
-              {count} ausgewählte Artikel werden unwiderruflich aus deiner
-              Artikeldatenbank entfernt.
-            </>
-          ) : (
-            <>&bdquo;{articleName}&ldquo; wird aus deiner Artikeldatenbank entfernt.</>
-          )}
+          &bdquo;{articleName}&ldquo; wird aus deiner Artikeldatenbank entfernt.
         </p>
         <div className="flex gap-3 justify-center">
           <button
@@ -1886,14 +1552,6 @@ function NewCategoryDrawer({
             <button
               type="submit"
               disabled={!name.trim()}
-              onPointerDown={(e) => {
-                // Keep the input focused so tapping "Anlegen" while the
-                // keyboard is open does NOT blur → close keyboard → shift the
-                // drawer out from under the finger (tap then missed the button
-                // entirely on mobile / Pixel). preventDefault keeps focus, the
-                // click still fires and submits the form.
-                e.preventDefault();
-              }}
               className="w-full mt-3 py-3 rounded-full text-sm font-semibold transition"
               style={{
                 background: name.trim() ? "var(--accent)" : "var(--surface-2)",
@@ -1913,22 +1571,15 @@ function NewCategoryDrawer({
 // ── Rename Category Drawer ─────────────────────────────────────────
 function RenameCategoryDrawer({
   currentName,
-  currentColor,
-  defaultColor,
-  presets,
   onSubmit,
   onClose,
 }: {
   currentName: string;
-  currentColor?: string;
-  defaultColor: string;
-  presets: string[];
-  onSubmit: (newName: string, color?: string) => void;
+  onSubmit: (newName: string) => void;
   onClose: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState(currentName);
-  const [color, setColor] = useState<string>(currentColor || defaultColor);
   const { bottomOffset: renameBottomOffset, vpHeight: renameVpHeight } = useKeyboardOffset();
 
   useEffect(() => {
@@ -1964,11 +1615,11 @@ function RenameCategoryDrawer({
           <div className="w-9 h-1 rounded-full" style={{ background: "var(--zu-border)" }} />
         </div>
         <div className="px-5 pb-5 flex flex-col gap-3">
-          <h3 className="text-base font-bold text-text-1">Kategorie bearbeiten</h3>
+          <h3 className="text-base font-bold text-text-1">Kategorie umbenennen</h3>
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              if (name.trim()) onSubmit(name, color);
+              if (name.trim()) onSubmit(name);
             }}
             autoComplete="off"
           >
@@ -1996,68 +1647,16 @@ function RenameCategoryDrawer({
                 style={{ caretColor: "var(--accent)" }}
               />
             </div>
-
-            {/* Color picker for the category circle */}
-            <div className="mt-4">
-              <span className="text-xs font-semibold text-text-3 uppercase tracking-wider">
-                Farbe des Kreises
-              </span>
-              <div className="flex flex-wrap gap-2 mt-2">
-                {presets.map((preset) => {
-                  const active =
-                    color.toLowerCase() === preset.toLowerCase();
-                  return (
-                    <button
-                      key={preset}
-                      type="button"
-                      onPointerDown={(e) => e.preventDefault()}
-                      onClick={() => setColor(preset)}
-                      className="w-7 h-7 rounded-full flex items-center justify-center transition"
-                      style={{
-                        background: preset,
-                        boxShadow: active
-                          ? "0 0 0 2px var(--surface), 0 0 0 4px " + preset
-                          : "none",
-                      }}
-                      aria-label={`Farbe ${preset}`}
-                    >
-                      {active && (
-                        <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />
-                      )}
-                    </button>
-                  );
-                })}
-                {/* Free color picker */}
-                <label
-                  className="w-7 h-7 rounded-full flex items-center justify-center cursor-pointer overflow-hidden relative"
-                  style={{
-                    background:
-                      "conic-gradient(#ef4444,#f59e0b,#eab308,#22c55e,#0ea5e9,#6366f1,#a855f7,#ec4899,#ef4444)",
-                  }}
-                  aria-label="Eigene Farbe wählen"
-                >
-                  <Plus className="w-3.5 h-3.5 text-white" strokeWidth={3} />
-                  <input
-                    type="color"
-                    value={color}
-                    onChange={(e) => setColor(e.target.value)}
-                    className="absolute inset-0 opacity-0 cursor-pointer"
-                  />
-                </label>
-              </div>
-            </div>
-
             <button
               type="submit"
               disabled={!name.trim()}
-              onPointerDown={(e) => e.preventDefault()}
-              className="w-full mt-4 py-3 rounded-full text-sm font-semibold transition"
+              className="w-full mt-3 py-3 rounded-full text-sm font-semibold transition"
               style={{
                 background: name.trim() ? "var(--accent)" : "var(--surface-2)",
                 color: name.trim() ? "white" : "var(--text-3)",
               }}
             >
-              Speichern
+              Umbenennen
             </button>
           </form>
         </div>

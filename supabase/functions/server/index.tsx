@@ -272,40 +272,6 @@ app.put("/make-server-2a26506b/custom-categories", async (c) => {
   }
 });
 
-// ── Category colors (user-customizable dot color per category) ──────
-
-// GET — load category color overrides (map: category name → hex color)
-app.get("/make-server-2a26506b/category-colors", async (c) => {
-  try {
-    const householdId = c.req.query("household_id");
-    if (!householdId) {
-      return c.json({ error: "household_id ist erforderlich." }, 400);
-    }
-    const key = `category_colors:${householdId}`;
-    const colors = await withRetry(() => kv.get(key));
-    return c.json({ colors: colors || {} });
-  } catch (err) {
-    console.log("GET /category-colors error:", err);
-    return c.json({ error: `Fehler beim Laden der Kategorie-Farben: ${err}` }, 500);
-  }
-});
-
-// PUT — save category color overrides
-app.put("/make-server-2a26506b/category-colors", async (c) => {
-  try {
-    const { household_id, colors } = await c.req.json();
-    if (!household_id) {
-      return c.json({ error: "household_id ist erforderlich." }, 400);
-    }
-    const key = `category_colors:${household_id}`;
-    await withRetry(() => kv.set(key, colors || {}));
-    return c.json({ ok: true });
-  } catch (err) {
-    console.log("PUT /category-colors error:", err);
-    return c.json({ error: `Fehler beim Speichern der Kategorie-Farben: ${err}` }, 500);
-  }
-});
-
 // ── Custom recipe categories ────────────────────────────────────────
 
 // GET — load custom recipe categories

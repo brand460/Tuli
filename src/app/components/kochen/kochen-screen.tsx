@@ -23,7 +23,7 @@ import { useBackHandler, pushBack, popBack } from "../ui/use-back-handler";
 import { useAuth, type HouseholdMember } from "../auth-context";
 import { useKeyboardOffset } from "../ui/use-keyboard-offset";
 import { INGREDIENT_UNITS } from "./ingredient-units";
-import { GROCERY_DATABASE, DEFAULT_STORES, buildMergedItems, buildExcludeSet, getCategoryChipColor, getLogoUrl, getItemCategoryDot, getAllCategories, setCategoryColorOverrides } from "../einkaufen/shopping-data";
+import { GROCERY_DATABASE, DEFAULT_STORES, buildMergedItems, buildExcludeSet, getCategoryChipColor, getLogoUrl, getItemCategoryDot, getAllCategories } from "../einkaufen/shopping-data";
 
 const DRAWER_SPRING = { type: "spring" as const, damping: 25, stiffness: 300 };
 
@@ -272,8 +272,6 @@ export function KochenScreen({ openRecipeId, sharedText, onSharedTextConsumed, o
   const [selectedIngredients, setSelectedIngredients] = useState<boolean[]>([]);
   const [ingredientStore, setIngredientStore] = useState("alle");
   const [stores, setStores] = useState<any[]>([]);
-  // Bump to re-render when user-customized category colors change.
-  const [, forceColorRerender] = useState(0);
 
   // Delete confirmation
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
@@ -355,51 +353,30 @@ export function KochenScreen({ openRecipeId, sharedText, onSharedTextConsumed, o
 
   const loadData = useCallback(async () => {
     try {
-      const [recipeRes, mealRes, storeRes, customCatRes, catColorRes] = await Promise.all([
+      const [recipeRes, mealRes, storeRes, customCatRes] = await Promise.all([
         apiFetch(`/recipes?household_id=${householdId}`),
         apiFetch(`/meal-plan?household_id=${householdId}`),
         apiFetch(`/store-settings?household_id=${householdId}`),
         apiFetch(`/custom-recipe-categories?household_id=${householdId}`).catch(() => ({ categories: [] })),
-        apiFetch(`/category-colors?household_id=${householdId}`).catch(() => ({ colors: {} })),
       ]);
       setRecipes(recipeRes.recipes || []);
       setMealPlan(mealRes.entries || []);
-      // Apply user-customized category circle colors app-wide.
-      setCategoryColorOverrides(catColorRes.colors || {});
-      forceColorRerender((n) => n + 1);
       const capitalizeFirst = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
       setCustomRecipeCategories((customCatRes.categories || []).map(capitalizeFirst));
       // Merge StoreSettingEntry[] with DEFAULT_STORES to get full StoreInfo objects
-      // (same logic as applyStoreSettings in einkaufen-screen), including any
-      // user-created custom stores so they show up in the shopping drawer too.
-      const rawSettings: any[] = storeRes.settings || [];
-      const settingsMap = new Map<string, any>(
-        rawSettings.map((s) => [s.store_id, s]),
-      );
-      const baseIds = new Set(DEFAULT_STORES.map((s) => s.id));
-      // Reconstruct user-created stores from their persisted metadata.
-      const customStores = rawSettings
-        .filter((s) => s.custom_store && !baseIds.has(s.store_id))
-        .map((s) => s.custom_store);
-      const seenIds = new Set<string>();
-      const allStores = [
-        ...DEFAULT_STORES.filter((s) => s.id !== "alle"), // "Alle" makes no sense here
-        ...customStores,
-      ].filter((s) => {
-        if (!s || seenIds.has(s.id)) return false;
-        seenIds.add(s.id);
-        return true;
+      // (same logic as applyStoreSettings in einkaufen-screen)
+      const rawSettings: Array<{ store_id: string; position: number; is_visible: boolean }> =
+        storeRes.settings || [];
+      const settingsMap = new Map(rawSettings.map((s) => [s.store_id, s]));
+      const mergedStores = DEFAULT_STORES.filter((s) => {
+        if (s.id === "alle") return false; // "Alle" makes no sense in add-to-shopping drawer
+        const setting = settingsMap.get(s.id);
+        return setting ? setting.is_visible !== false : true;
+      }).sort((a, b) => {
+        const pa = settingsMap.get(a.id)?.position ?? 999;
+        const pb = settingsMap.get(b.id)?.position ?? 999;
+        return pa - pb;
       });
-      const mergedStores = allStores
-        .filter((s) => {
-          const setting = settingsMap.get(s.id);
-          return setting ? setting.is_visible !== false : true;
-        })
-        .sort((a, b) => {
-          const pa = settingsMap.get(a.id)?.position ?? 999;
-          const pb = settingsMap.get(b.id)?.position ?? 999;
-          return pa - pb;
-        });
       setStores(mergedStores.length > 0 ? mergedStores : DEFAULT_STORES.filter((s) => s.id !== "alle"));
     } catch (err) {
       console.error("Fehler beim Laden der Kochen-Daten:", err);
@@ -993,48 +970,6 @@ Extraktionsregeln:
           existingMap.set(existingKey, newItem);
           addedCount++;
         }
-      }
-
-      // Re-sort the target store's unchecked items so the freshly added
-      // ingredients follow the store's category order instead of piling up at
-      // the bottom (mirrors the shopping screen's category-based ordering).
-      const targetStoreValue =
-        ingredientStore === "alle" ? null : ingredientStore;
-      let categoryOrder: string[] = getAllCategories();
-      try {
-        const settingsRes = await apiFetch(
-          `/store-settings?household_id=${householdId}`
-        );
-        const settings: any[] = settingsRes.settings || [];
-        const entry = settings.find(
-          (s) => s.store_id === ingredientStore
-        );
-        if (
-          entry &&
-          Array.isArray(entry.category_order) &&
-          entry.category_order.length > 0
-        ) {
-          categoryOrder = entry.category_order;
-        }
-      } catch {
-        // fall back to the default category order
-      }
-      const catIndex = (cat: string) => {
-        const i = categoryOrder.indexOf(cat);
-        return i < 0 ? Number.MAX_SAFE_INTEGER : i;
-      };
-      const targetUnchecked = updatedItems
-        .filter((i) => i.store === targetStoreValue && !i.is_checked)
-        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
-      const resorted = [...targetUnchecked].sort((a, b) => {
-        const d = catIndex(a.category) - catIndex(b.category);
-        return d !== 0 ? d : (a.position ?? 0) - (b.position ?? 0);
-      });
-      const posMap = new Map<string, number>();
-      resorted.forEach((item, idx) => posMap.set(item.id, idx));
-      for (const item of updatedItems) {
-        const np = posMap.get(item.id);
-        if (np !== undefined) item.position = np;
       }
 
       await apiFetch("/shopping", {
@@ -3007,41 +2942,6 @@ function RecipeDetailView({
                   <X className="w-4 h-4 text-text-2" />
                 </button>
               </div>
-
-              {/* Select-all toggle */}
-              {(() => {
-                const allSelected =
-                  recipe.ingredients.length > 0 &&
-                  recipe.ingredients.every((_, i) => checkedIngredients[i]);
-                return (
-                  <button
-                    onClick={() =>
-                      setCheckedIngredients(
-                        recipe.ingredients.map(() => !allSelected),
-                      )
-                    }
-                    className="w-full flex items-center gap-3 px-4 py-3 text-left flex-shrink-0"
-                    style={{ borderBottom: "1px solid var(--zu-border)" }}
-                  >
-                    <div
-                      className="flex-shrink-0 w-5 h-5 rounded flex items-center justify-center"
-                      style={{
-                        background: allSelected ? "var(--color-accent)" : "transparent",
-                        border: allSelected ? "none" : "1.5px solid var(--zu-border)",
-                      }}
-                    >
-                      {allSelected && (
-                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                          <path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                      )}
-                    </div>
-                    <span className="text-sm font-semibold text-text-1">
-                      Alle
-                    </span>
-                  </button>
-                );
-              })()}
 
               {/* Ingredient list */}
               <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">

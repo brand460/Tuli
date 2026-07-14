@@ -437,27 +437,6 @@
   opacity: 1;
 }
 
-/* On touch devices the handles must be clearly visible & easy to grab
-   (no hover, smaller screen). Make them solid and larger (grey like elsewhere). */
-@media (pointer: coarse) {
-  .li-drag-handle {
-    opacity: 1;
-    color: var(--text-3);
-  }
-  .li-drag-handle svg {
-    width: 18px;
-    height: 18px;
-  }
-}
-
-/* Suppress text selection / callout while a list item is being long-press dragged */
-.li-drag-noselect,
-.li-drag-noselect * {
-  user-select: none !important;
-  -webkit-user-select: none !important;
-  -webkit-touch-callout: none !important;
-}
-
 /* Flash animation when indent level changes */
 @keyframes li-indent-flash {
   0% { background-color: var(--accent-light); }
