@@ -59,15 +59,14 @@ import {
   StoreSuggestion,
   GroceryTemplate,
   GROCERY_DATABASE,
-  getAllCategories,
   buildMergedItems,
   buildExcludeSet,
   CATEGORY_COLORS,
   getCategoryChipColor,
   getItemCategoryDot,
+  setCategoryColorOverrides,
 } from "./shopping-data";
-import { API_BASE, apiFetch } from "../supabase-client";
-import { publicAnonKey } from "/utils/supabase/info";
+import { apiFetch } from "../supabase-client";
 import {
   useKvRealtime,
   broadcastChange,
@@ -75,7 +74,7 @@ import {
 import { useBackHandler } from "../ui/use-back-handler";
 import { useAuth } from "../auth-context";
 import { useKeyboardOffset } from "../ui/use-keyboard-offset";
-import { useSessionState } from "../ui/use-session-state";
+import { useSessionState, useLocalState } from "../ui/use-session-state";
 import { toast } from "sonner";
 const bagEmptyImg = '/images/bag-empty.png';
 const bagFullImg = '/images/bag-full.png';
@@ -86,89 +85,98 @@ interface StoreSettingEntry {
   position: number;
   is_visible: boolean;
   category_order: string[];
+  /** Full metadata for user-created stores so they survive reloads
+   *  (default stores are reconstructed from DEFAULT_STORES instead). */
+  custom_store?: StoreInfo;
+  /** Per-store usage counter: item name → times added. Drives the
+   *  usage-based quick-suggestion chips. */
+  item_frequency?: Record<string, number>;
+}
+
+// Collapse duplicate store-setting entries (same store_id) into a single one.
+// Duplicates could accumulate through a race between reorder/add and the
+// realtime reload, and they broke everything: custom stores appeared N times,
+// deletion failed (visibility Map is last-wins while removal edited the first
+// entry), and dnd-kit misbehaved on duplicate IDs. Merges the group so no data
+// is lost (visible if ANY was visible, first non-empty category_order, first
+// defined custom_store / item_frequency, smallest position to keep order).
+function dedupeStoreSettings(
+  settings: StoreSettingEntry[],
+): StoreSettingEntry[] {
+  const byId = new Map<string, StoreSettingEntry>();
+  for (const s of settings) {
+    const prev = byId.get(s.store_id);
+    if (!prev) {
+      byId.set(s.store_id, { ...s });
+      continue;
+    }
+    byId.set(s.store_id, {
+      store_id: s.store_id,
+      position: Math.min(
+        prev.position ?? Number.MAX_SAFE_INTEGER,
+        s.position ?? Number.MAX_SAFE_INTEGER,
+      ),
+      is_visible: prev.is_visible || s.is_visible,
+      category_order:
+        prev.category_order && prev.category_order.length > 0
+          ? prev.category_order
+          : s.category_order,
+      custom_store: prev.custom_store ?? s.custom_store,
+      item_frequency: prev.item_frequency ?? s.item_frequency,
+    });
+  }
+  return Array.from(byId.values());
 }
 
 // ── API helpers ────────────────────────────────────────────────────
+// All helpers use `apiFetch`, which (unlike a raw fetch with publicAnonKey)
+// provides: real auth-token refresh, 5× retry with backoff on network/5xx/401,
+// and proper error propagation. The fetch helpers intentionally THROW on
+// failure instead of returning an empty array — otherwise a failed network
+// request would be indistinguishable from "the list is genuinely empty" and
+// would overwrite good local/cached data with [].
 async function fetchItems(hhId: string): Promise<ShoppingItem[]> {
-  try {
-    const res = await fetch(
-      `${API_BASE}/shopping?household_id=${hhId}`,
-      { headers: { Authorization: `Bearer ${publicAnonKey}` } },
-    );
-    const json = await res.json();
-    return json.items || [];
-  } catch (err) {
-    console.log("fetchItems error:", err);
-    return [];
-  }
+  const json = await apiFetch(`/shopping?household_id=${hhId}`);
+  return json.items || [];
 }
 
 async function saveItems(hhId: string, items: ShoppingItem[]): Promise<void> {
-  try {
-    await fetch(`${API_BASE}/shopping`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${publicAnonKey}`,
-      },
-      body: JSON.stringify({
-        household_id: hhId,
-        items,
-      }),
-    });
-  } catch (err) {
-    console.log("saveItems error:", err);
-  }
+  await apiFetch("/shopping", {
+    method: "PUT",
+    body: JSON.stringify({ household_id: hhId, items }),
+  });
 }
 
 async function fetchStoreSettings(hhId: string): Promise<
   StoreSettingEntry[]
 > {
-  try {
-    const res = await fetch(
-      `${API_BASE}/store-settings?household_id=${hhId}`,
-      { headers: { Authorization: `Bearer ${publicAnonKey}` } },
-    );
-    const json = await res.json();
-    return json.settings || [];
-  } catch (err) {
-    console.log("fetchStoreSettings error:", err);
-    return [];
-  }
+  const json = await apiFetch(`/store-settings?household_id=${hhId}`);
+  return json.settings || [];
 }
 
 async function saveStoreSettings(
   hhId: string,
   settings: StoreSettingEntry[],
 ): Promise<void> {
-  try {
-    await fetch(`${API_BASE}/store-settings`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${publicAnonKey}`,
-      },
-      body: JSON.stringify({
-        household_id: hhId,
-        settings,
-      }),
-    });
-  } catch (err) {
-    console.log("saveStoreSettings error:", err);
-  }
+  await apiFetch("/store-settings", {
+    method: "PUT",
+    body: JSON.stringify({ household_id: hhId, settings }),
+  });
 }
 
 async function fetchCustomCategories(hhId: string): Promise<string[]> {
+  const json = await apiFetch(`/custom-categories?household_id=${hhId}`);
+  return json.categories || [];
+}
+
+async function fetchCategoryColors(
+  hhId: string,
+): Promise<Record<string, string>> {
   try {
-    const res = await fetch(
-      `${API_BASE}/custom-categories?household_id=${hhId}`,
-      { headers: { Authorization: `Bearer ${publicAnonKey}` } },
-    );
-    const json = await res.json();
-    return json.categories || [];
-  } catch (err) {
-    console.log("fetchCustomCategories error:", err);
-    return [];
+    const json = await apiFetch(`/category-colors?household_id=${hhId}`);
+    return json.colors || {};
+  } catch {
+    return {};
   }
 }
 
@@ -176,21 +184,10 @@ async function saveCustomCategories(
   hhId: string,
   categories: string[],
 ): Promise<void> {
-  try {
-    await fetch(`${API_BASE}/custom-categories`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${publicAnonKey}`,
-      },
-      body: JSON.stringify({
-        household_id: hhId,
-        categories,
-      }),
-    });
-  } catch (err) {
-    console.log("saveCustomCategories error:", err);
-  }
+  await apiFetch("/custom-categories", {
+    method: "PUT",
+    body: JSON.stringify({ household_id: hhId, categories }),
+  });
 }
 
 // ── Global items API helpers ───────────────────────────────────────
@@ -204,17 +201,8 @@ interface GlobalItem {
 }
 
 async function fetchGlobalItems(hhId: string): Promise<GlobalItem[]> {
-  try {
-    const res = await fetch(
-      `${API_BASE}/global-items?household_id=${hhId}`,
-      { headers: { Authorization: `Bearer ${publicAnonKey}` } },
-    );
-    const json = await res.json();
-    return json.items || [];
-  } catch (err) {
-    console.log("fetchGlobalItems error:", err);
-    return [];
-  }
+  const json = await apiFetch(`/global-items?household_id=${hhId}`);
+  return json.items || [];
 }
 
 async function upsertGlobalItem(
@@ -222,25 +210,47 @@ async function upsertGlobalItem(
   name: string,
   category: string,
 ): Promise<void> {
+  await apiFetch("/global-items", {
+    method: "PUT",
+    body: JSON.stringify({ household_id: hhId, name, category }),
+  });
+}
+
+// ── Local cache (instant hydration after the OS discards the page) ───
+// Android/iOS may kill the PWA's page when the screen locks. On unlock the
+// app remounts with empty state and would otherwise show empty lists for
+// 10+ seconds on slow mobile data while the network re-fetches everything.
+// We mirror the loaded data into localStorage and hydrate from it instantly.
+const EINKAUF_CACHE_PREFIX = "tuli_einkauf_cache:";
+
+interface EinkaufCache {
+  items: ShoppingItem[];
+  settings: StoreSettingEntry[];
+  customCats: string[];
+  gItems: GlobalItem[];
+}
+
+function readEinkaufCache(hhId: string): EinkaufCache | null {
   try {
-    await fetch(`${API_BASE}/global-items`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${publicAnonKey}`,
-      },
-      body: JSON.stringify({
-        household_id: hhId,
-        name,
-        category,
-      }),
-    });
-  } catch (err) {
-    console.log("upsertGlobalItem error:", err);
+    const raw = localStorage.getItem(EINKAUF_CACHE_PREFIX + hhId);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.items)) return null;
+    return parsed as EinkaufCache;
+  } catch {
+    return null;
   }
 }
 
-// ── Store Logo Avatar ──────────────────────────────────────────────
+function writeEinkaufCache(hhId: string, data: EinkaufCache): void {
+  try {
+    localStorage.setItem(EINKAUF_CACHE_PREFIX + hhId, JSON.stringify(data));
+  } catch {
+    /* quota exceeded / unavailable — ignore */
+  }
+}
+
+
 function StoreLogo({
   store,
   size = 48,
@@ -1285,15 +1295,16 @@ function SortableShoppingItem({
             <Check className="w-3.5 h-3.5 text-white" />
           )}
         </button>
-        {/* Category dot — only for known items */}
+        {/* Category dot — only for known items; unknown items keep an
+            invisible spacer of the same width so the name stays aligned. */}
         {(() => {
           const dotColor = getItemCategoryDot(item.name, mergedItems);
-          return dotColor ? (
+          return (
             <span
               className="flex-shrink-0 w-2 h-2 rounded-full"
-              style={{ backgroundColor: dotColor }}
+              style={dotColor ? { backgroundColor: dotColor } : { visibility: "hidden" }}
             />
-          ) : null;
+          );
         })()}
         <div className="flex-1 min-w-0">
           {isEditingName && !item.is_checked ? (
@@ -1890,81 +1901,138 @@ function CategorySortModal({
 function CheckedSection({
   items,
   onToggle,
-  onClearAll,
+  onClearChecked,
+  expanded,
+  onExpandedChange,
+  mergedItems,
+  selfScroll = false,
 }: {
   items: ShoppingItem[];
   onToggle: (id: string) => void;
-  onClearAll: () => void;
+  onClearChecked: () => void;
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
+  mergedItems: GroceryTemplate[];
+  selfScroll?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
-
   if (items.length === 0) return null;
+
+  const rows = (
+    <div>
+      {items.map((item) => (
+        <div
+          key={item.id}
+          className="flex items-center gap-2 px-4 py-2.5"
+        >
+          <button
+            onClick={() => onToggle(item.id)}
+            className="flex-shrink-0 w-6 h-6 rounded-full border-2 bg-accent border-accent flex items-center justify-center"
+          >
+            <Check className="w-3.5 h-3.5 text-white" />
+          </button>
+          {(() => {
+            const dotColor = getItemCategoryDot(
+              item.name,
+              mergedItems,
+            );
+            return (
+              <span
+                className="flex-shrink-0 w-2 h-2 rounded-full"
+                style={
+                  dotColor
+                    ? { backgroundColor: dotColor }
+                    : { visibility: "hidden" }
+                }
+              />
+            );
+          })()}
+          <div className="flex-1 min-w-0">
+            <p className="text-sm leading-tight truncate line-through text-text-3">
+              {item.name}
+            </p>
+          </div>
+          <div className="flex items-baseline gap-0.5 flex-shrink-0 min-w-[28px] justify-center">
+            <span className="text-sm font-semibold text-text-3">
+              {formatQuantity(item.quantity, item.unit)}
+            </span>
+            {item.unit && item.unit !== "Stk." && (
+              <span className="text-xs text-text-3">
+                {item.unit}
+              </span>
+            )}
+          </div>
+        </div>
+      ))}
+      <div className="px-4 py-2">
+        <button
+          onClick={onClearChecked}
+          className="flex items-center gap-1.5 text-xs text-danger transition"
+        >
+          <Trash2 className="w-3 h-3" />
+          Erledigte löschen
+        </button>
+      </div>
+    </div>
+  );
+
+  // When `selfScroll` is true (end screen — no active items above), the
+  // accordion fills the remaining height and its content scrolls on its
+  // own. Otherwise it's a normal block that scrolls together with the list.
+  const rootClass = selfScroll
+    ? expanded
+      ? "flex flex-col min-h-0 flex-1"
+      : "flex flex-col flex-shrink-0"
+    : "mt-2";
 
   return (
     <div
-      className="bg-surface-2"
+      className={rootClass}
       style={{ borderTop: "1px solid var(--zu-border)" }}
     >
-      {/* Content ABOVE the header — expands upward */}
-      <AnimatePresence>
-        {expanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.22, ease: [0.25, 1, 0.5, 1] }}
-            className="overflow-hidden"
-          >
-            <div>
-              {items.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex items-center gap-3 px-4 py-1.5 opacity-60"
-                >
-                  <button
-                    onClick={() => onToggle(item.id)}
-                    className="flex-shrink-0 w-5 h-5 rounded-full bg-accent border-2 border-accent flex items-center justify-center"
-                  >
-                    <Check className="w-3 h-3 text-white" />
-                  </button>
-                  <span className="text-xs line-through text-text-3 flex-1 truncate">
-                    {item.name}
-                  </span>
-                  <span className="text-[10px] text-text-3">
-                    {formatQuantity(item.quantity, item.unit)}
-                    {item.unit && item.unit !== "Stk."
-                      ? item.unit
-                      : "x"}
-                  </span>
-                </div>
-              ))}
-            </div>
-            <div className="px-4 pb-3 pt-1">
-              <button
-                onClick={onClearAll}
-                className="flex items-center gap-1.5 text-xs text-danger hover:text-danger transition"
-              >
-                <Trash2 className="w-3 h-3" />
-                Erledigte löschen
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-      {/* Header always at the bottom */}
+      {/* Header at the top */}
       <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between px-4 py-2.5"
+        onClick={() => onExpandedChange(!expanded)}
+        className="flex-shrink-0 w-full flex items-center justify-between px-4 py-2.5"
       >
         <span className="text-xs font-medium text-text-2">
           Erledigt ({items.length})
         </span>
         {expanded ? (
-          <ChevronDown className="w-3.5 h-3.5 text-text-3" />
-        ) : (
           <ChevronUp className="w-3.5 h-3.5 text-text-3" />
+        ) : (
+          <ChevronDown className="w-3.5 h-3.5 text-text-3" />
         )}
       </button>
+
+      {selfScroll ? (
+        // End-screen mode — own scroll region, no height animation.
+        expanded && (
+          <div
+            className="flex-1 min-h-0 overflow-y-auto"
+            style={{
+              WebkitOverflowScrolling: "touch",
+              overscrollBehavior: "contain",
+            }}
+          >
+            {rows}
+          </div>
+        )
+      ) : (
+        // Inline mode — expands downward, scrolls together with the list.
+        <AnimatePresence>
+          {expanded && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.22, ease: [0.25, 1, 0.5, 1] }}
+              className="overflow-hidden"
+            >
+              {rows}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      )}
     </div>
   );
 }
@@ -1979,6 +2047,8 @@ function AddItemBar({
   categoryOrder,
   itemEditing,
   globalItems,
+  suggestionPool,
+  validCategories,
 }: {
   storeId: string;
   stores: StoreInfo[];
@@ -1988,6 +2058,8 @@ function AddItemBar({
   categoryOrder: string[];
   itemEditing?: boolean;
   globalItems: GlobalItem[];
+  suggestionPool: string[];
+  validCategories: string[];
 }) {
   const [query, setQuery] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -2011,14 +2083,24 @@ function AddItemBar({
       }
     }
 
-    const suggestions = getQuickSuggestions(storeId)
+    const suggestions = (suggestionPool.length > 0 ? suggestionPool : getQuickSuggestions(storeId))
       .filter((s) => !deletedSet.has(s.toLowerCase()))
       .map((s) => renameMap.get(s.toLowerCase()) ?? s)
       // After remapping, deduplicate and filter out already-existing items
-      .filter((s, idx, arr) => arr.indexOf(s) === idx && !existingNames.has(s));
+      .filter((s, idx, arr) => arr.indexOf(s) === idx && !existingNames.has(s))
+      // Only suggest items that actually have a known category — uncategorized
+      // items shouldn't appear as chips (they'd show a meaningless dot).
+      .filter((s) => {
+        const cat =
+          findGroceryTemplate(s, customTemplates)?.category ||
+          globalItems.find((g) => !g.deleted && g.name.toLowerCase() === s.toLowerCase())?.category;
+        return !!cat;
+      })
+      // Keep the chip row to a sensible length (usage-ranked items first)
+      .slice(0, 8);
 
     setQuickChips(suggestions);
-  }, [storeId, existingNames, globalItems]);
+  }, [storeId, existingNames, globalItems, suggestionPool, customTemplates]);
 
   // Build exclusion set for searchGroceries: covers deleted items AND renamed items'
   // original names so GROCERY_DATABASE entries are suppressed when a global_item
@@ -2077,9 +2159,10 @@ function AddItemBar({
         searchResults[0].category,
       );
     } else {
-      // No match → add directly as "Sonstiges" (quick add without category picker)
+      // No match → add WITHOUT a category. Unknown items stay uncategorized
+      // (no colored dot) instead of being forced into "Sonstiges".
       const name = query.trim();
-      onAdd(name, "Sonstiges");
+      onAdd(name, "");
       setQuickChips((prev) => prev.filter((c) => c !== name));
       setQuery("");
       setShowSuggestions(false);
@@ -2096,10 +2179,21 @@ function AddItemBar({
     }
   };
 
-  const pickerCategories =
-    categoryOrder.length > 0
-      ? categoryOrder
-      : getCategoriesForStore(storeId, stores);
+  const pickerCategories = useMemo(() => {
+    const base =
+      categoryOrder.length > 0
+        ? categoryOrder
+        : getCategoriesForStore(storeId, stores);
+    const validSet = new Set(validCategories);
+    // Categories the current store carries first (in its own order)…
+    const storeCats = base.filter((c) => validSet.has(c));
+    // …then every other valid category, so the user can pick ANY category
+    // regardless of the current store. Categories the store doesn't carry yet
+    // get added to it after the item is created (see handleAddItem).
+    const storeSet = new Set(storeCats);
+    const others = validCategories.filter((c) => !storeSet.has(c));
+    return [...storeCats, ...others];
+  }, [categoryOrder, storeId, stores, validCategories]);
 
   return (
     <>
@@ -2740,14 +2834,17 @@ export function EinkaufenScreen({
   const [storeSettings, setStoreSettings] = useState<
     StoreSettingEntry[]
   >([]);
+  // Bump to re-render when user-customized category colors change.
+  const [, forceColorRerender] = useState(0);
   // Track when any item name is being edited inline → hide AddItemBar
   const [isItemNameEditing, setIsItemNameEditing] =
     useState(false);
   // Ref mirror so updateListBottom (stable callback) can read the value without re-creating
   const isItemNameEditingRef = useRef(false);
-  const [selectedStore, setSelectedStore] = useSessionState<string>("einkaufen_store", "alle");
+  const [selectedStore, setSelectedStore] = useLocalState<string>("einkaufen_store", "alle");
   const [showAddStore, setShowAddStore] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const loadedRef = useRef(false);
   const [activeDragId, setActiveDragId] = useState<
     string | null
   >(null);
@@ -2791,25 +2888,37 @@ export function EinkaufenScreen({
     useRef<ReturnType<typeof setTimeout>>();
   const storeSelectorRef = useRef<HTMLDivElement>(null);
   const checkedSectionRef = useRef<HTMLDivElement>(null);
+  const [checkedExpanded, setCheckedExpanded] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const lastLocalChangeRef = useRef<number>(0);
   const bottomBarRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // ── Robust-save state ──────────────────────────────────────────
+  // While a flag is true, the corresponding local write (items / store
+  // settings) is unsaved — either in-flight or failed after all retries.
+  // A concurrent reload (poll / focus / realtime) must NOT overwrite local
+  // state or the cache while this is set; otherwise a failed save would be
+  // silently reverted to the stale server value (= the "list got reset" bug).
+  const pendingItemsSaveRef = useRef(false);
+  const pendingSettingsSaveRef = useRef(false);
+  // Always mirror the latest committed state so a retry persists the newest
+  // data (kept in sync via effects below + explicit sets on each change).
+  const latestItemsRef = useRef<ShoppingItem[]>([]);
+  const latestSettingsRef = useRef<StoreSettingEntry[]>([]);
+  // Generation tokens: a newer save supersedes any pending retry of an older one.
+  const itemsSaveGenRef = useRef(0);
+  const settingsSaveGenRef = useRef(0);
 
   // ── Fixed layout measurements ─────────────────────────────────
   // storeSelectorH: pixel height of the Store-Selector header (top anchor for list)
   const [storeSelectorH, setStoreSelectorH] = useState(82);
   // addItemBarH: pixel height of the AddItemBar (bottom anchor for list)
   const addItemBarHRef = useRef(60);
-  // checkedSectionH: pixel height of the CheckedSection sticky bar
-  const checkedSectionHRef = useRef(0);
   // listBottomFixed: dynamic CSS `bottom` for the scroll container
-  //   keyboard closed → addItemBarH + checkedSectionH
-  //   keyboard open   → keyboardHeight + addItemBarH + checkedSectionH
+  //   keyboard closed → addItemBarH
+  //   keyboard open   → keyboardHeight + addItemBarH
   const [listBottomFixed, setListBottomFixed] = useState(60);
-  // checkedSectionBottom: CSS `bottom` for the CheckedSection absolute element
-  //   = kbOffset + addItemBarH  (no checkedSectionH, it sits on top of AddItemBar)
-  const [checkedSectionBottom, setCheckedSectionBottom] = useState(60);
   // kbOffset: keyboard height relative to the container (not the screen).
   // Used to position the AddItemBar above the keyboard so the browser
   // doesn't auto-scroll the fixed layout to reveal the focused input.
@@ -2818,24 +2927,76 @@ export function EinkaufenScreen({
   // ── Load items + store settings ────────────────────────────────
   const reloadAllData = useCallback(async () => {
     if (!householdId) return;
+
+    // Instant hydration from local cache on the first load (fresh mount).
+    // Android discards the page on screen-lock; on unlock we remount with
+    // empty state — show the cached list immediately while the network
+    // refresh runs in the background, instead of an empty list for 10+ s.
+    if (!loadedRef.current) {
+      const cached = readEinkaufCache(householdId);
+      if (cached) {
+        setItems(cached.items);
+        if (cached.settings.length > 0) {
+          const dedupedCached = dedupeStoreSettings(cached.settings);
+          setStoreSettings(dedupedCached);
+          applyStoreSettings(DEFAULT_STORES, dedupedCached);
+        }
+        setGlobalCustomCategories(cached.customCats);
+        setGlobalItems(cached.gItems);
+        loadedRef.current = true;
+        setLoaded(true);
+      }
+    }
+
     try {
-      const [serverItems, settings, customCats, gItems] =
+      const [serverItems, settings, customCats, gItems, catColors] =
         await Promise.all([
           fetchItems(householdId),
           fetchStoreSettings(householdId),
           fetchCustomCategories(householdId),
           fetchGlobalItems(householdId),
+          fetchCategoryColors(householdId),
         ]);
+      // Apply user-customized category circle colors app-wide. Independent of
+      // the item/settings reconciliation below, so it runs before any early
+      // return.
+      setCategoryColorOverrides(catColors);
+      forceColorRerender((n) => n + 1);
       // Only update if no local changes happened during fetch
       if (Date.now() - lastLocalChangeRef.current < 2000)
         return;
-      setItems(serverItems);
-      if (settings.length > 0) {
-        setStoreSettings(settings);
-        applyStoreSettings(DEFAULT_STORES, settings);
+
+      // Collapse any duplicate store-setting entries (self-heals corrupted
+      // data) and persist the cleaned version back if duplicates were found.
+      const dedupedSettings = dedupeStoreSettings(settings);
+      if (
+        dedupedSettings.length !== settings.length &&
+        !pendingSettingsSaveRef.current
+      ) {
+        latestSettingsRef.current = dedupedSettings;
+        flushSettingsSave(householdId);
+      }
+
+      // Never clobber an unsaved local write (in-flight or failed-after-retry)
+      // with the server value — that's exactly how lists got "reset". Keep the
+      // local items/settings; the pending save's retry will reconcile them.
+      const applyItems = !pendingItemsSaveRef.current;
+      const applySettings = !pendingSettingsSaveRef.current;
+
+      if (applyItems) setItems(serverItems);
+      if (applySettings && dedupedSettings.length > 0) {
+        setStoreSettings(dedupedSettings);
+        applyStoreSettings(DEFAULT_STORES, dedupedSettings);
       }
       setGlobalCustomCategories(customCats);
       setGlobalItems(gItems);
+      writeEinkaufCache(householdId, {
+        items: applyItems ? serverItems : latestItemsRef.current,
+        settings: applySettings ? dedupedSettings : latestSettingsRef.current,
+        customCats,
+        gItems,
+      });
+      loadedRef.current = true;
       setLoaded(true);
     } catch (err) {
       console.log("reloadAllData error:", err);
@@ -2876,6 +3037,29 @@ export function EinkaufenScreen({
     };
   }, [reloadAllData]);
 
+  // ── Keep the local cache fresh on every change (so the next unlock shows
+  //    the latest checked/added items instantly, even offline). ──
+  useEffect(() => {
+    if (!householdId || !loaded) return;
+    writeEinkaufCache(householdId, {
+      items,
+      settings: storeSettings,
+      customCats: globalCustomCategories,
+      gItems: globalItems,
+    });
+  }, [householdId, loaded, items, storeSettings, globalCustomCategories, globalItems]);
+
+  // ── Keep the "latest" refs in sync with state ──────────────────
+  // These mirror the current committed state so a save retry (which fires
+  // asynchronously) always persists the newest data, regardless of which
+  // code path produced the change.
+  useEffect(() => {
+    latestItemsRef.current = items;
+  }, [items]);
+  useEffect(() => {
+    latestSettingsRef.current = storeSettings;
+  }, [storeSettings]);
+
   // ── Supabase Realtime subscription for live sync ──
   useKvRealtime(
     householdId ? [
@@ -2890,21 +3074,42 @@ export function EinkaufenScreen({
 
   const applyStoreSettings = (
     baseStores: StoreInfo[],
-    settings: StoreSettingEntry[],
+    settingsRaw: StoreSettingEntry[],
   ) => {
+    // Defensive: always work on a de-duplicated view so a single corrupted
+    // record can never render a store multiple times.
+    const settings = dedupeStoreSettings(settingsRaw);
     const settingsMap = new Map(
       settings.map((s) => [s.store_id, s]),
     );
-    const visible = baseStores.filter((s) => {
+    // Reconstruct user-created stores from their persisted metadata so they
+    // survive reloads (they are not part of DEFAULT_STORES).
+    const baseIds = new Set(baseStores.map((s) => s.id));
+    const customStores = settings
+      .filter((s) => s.custom_store && !baseIds.has(s.store_id))
+      .map((s) => s.custom_store as StoreInfo);
+    // Guard against duplicate ids across base + custom stores.
+    const seenIds = new Set<string>();
+    const allStores = [...baseStores, ...customStores].filter((s) => {
+      if (seenIds.has(s.id)) return false;
+      seenIds.add(s.id);
+      return true;
+    });
+
+    const visible = allStores.filter((s) => {
       if (s.id === "alle") return true; // always visible, cannot be removed
       const setting = settingsMap.get(s.id);
       return setting ? setting.is_visible : true;
     });
-    visible.sort((a, b) => {
-      const pa = settingsMap.get(a.id)?.position ?? 999;
-      const pb = settingsMap.get(b.id)?.position ?? 999;
-      return pa - pb;
-    });
+    // Order by persisted position; for stores without an explicit position
+    // fall back to their natural index so the bar keeps a sensible order.
+    // "alle" is always pinned last.
+    const positionOf = (s: StoreInfo) => {
+      if (s.id === "alle") return Number.MAX_SAFE_INTEGER;
+      const p = settingsMap.get(s.id)?.position;
+      return typeof p === "number" ? p : allStores.indexOf(s);
+    };
+    visible.sort((a, b) => positionOf(a) - positionOf(b));
     setStores(visible);
     if (
       !visible.find((s) => s.id === selectedStore) &&
@@ -2922,10 +3127,20 @@ export function EinkaufenScreen({
       if (Date.now() - lastLocalChangeRef.current < 2000)
         return;
       if (!householdId) return;
-      const serverItems = await fetchItems(householdId);
+      // Don't overwrite an unsaved local write with the server value.
+      if (pendingItemsSaveRef.current) return;
+      let serverItems: ShoppingItem[];
+      try {
+        serverItems = await fetchItems(householdId);
+      } catch {
+        // Transient network/server error — keep current state and try again
+        // next tick. Never fall back to an empty list here.
+        return;
+      }
       // Re-check after async fetch in case a local change happened while waiting
       if (Date.now() - lastLocalChangeRef.current < 2000)
         return;
+      if (pendingItemsSaveRef.current) return;
       if (!activeDragId) {
         setItems(serverItems);
       }
@@ -2954,18 +3169,47 @@ export function EinkaufenScreen({
     };
   }, [storeReorderMode]);
 
+  // ── Robust item save (apiFetch retry + pending guard + self-retry) ──
+  // saveItems() now throws on failure (apiFetch already retried 5×). We keep
+  // a "pending" flag so a concurrent reload won't revert the change, and we
+  // re-attempt every 5 s with the LATEST items until it finally succeeds.
+  const flushItemsSave = useCallback(
+    async (hhId: string) => {
+      const gen = ++itemsSaveGenRef.current;
+      pendingItemsSaveRef.current = true;
+      const attempt = async (): Promise<void> => {
+        if (gen !== itemsSaveGenRef.current) return; // superseded by a newer save
+        try {
+          await saveItems(hhId, latestItemsRef.current);
+          if (gen === itemsSaveGenRef.current)
+            pendingItemsSaveRef.current = false;
+        } catch (err) {
+          if (gen !== itemsSaveGenRef.current) return;
+          console.log(
+            "[Einkaufen] saveItems endgültig fehlgeschlagen — retry in 5s:",
+            err,
+          );
+          setTimeout(attempt, 5000);
+        }
+      };
+      await attempt();
+    },
+    [],
+  );
+
   // ── Debounced save for items ───────────────────────────────────
   const debouncedSave = useCallback(
     (newItems: ShoppingItem[]) => {
+      latestItemsRef.current = newItems;
       if (saveTimeout.current)
         clearTimeout(saveTimeout.current);
       saveTimeout.current = setTimeout(() => {
         if (!householdId) return;
         broadcastChange([`shopping:${householdId}`]);
-        saveItems(householdId, newItems);
+        flushItemsSave(householdId);
       }, 300);
     },
-    [householdId],
+    [householdId, flushItemsSave],
   );
 
   const updateItems = useCallback(
@@ -2973,6 +3217,7 @@ export function EinkaufenScreen({
       lastLocalChangeRef.current = Date.now();
       setItems((prev) => {
         const next = updater(prev);
+        latestItemsRef.current = next;
         debouncedSave(next);
         return next;
       });
@@ -2980,18 +3225,44 @@ export function EinkaufenScreen({
     [debouncedSave],
   );
 
+  // ── Robust store-settings save (mirrors flushItemsSave) ────────
+  const flushSettingsSave = useCallback(
+    async (hhId: string) => {
+      const gen = ++settingsSaveGenRef.current;
+      pendingSettingsSaveRef.current = true;
+      const attempt = async (): Promise<void> => {
+        if (gen !== settingsSaveGenRef.current) return;
+        try {
+          await saveStoreSettings(hhId, latestSettingsRef.current);
+          if (gen === settingsSaveGenRef.current)
+            pendingSettingsSaveRef.current = false;
+        } catch (err) {
+          if (gen !== settingsSaveGenRef.current) return;
+          console.log(
+            "[Einkaufen] saveStoreSettings endgültig fehlgeschlagen — retry in 5s:",
+            err,
+          );
+          setTimeout(attempt, 5000);
+        }
+      };
+      await attempt();
+    },
+    [],
+  );
+
   // ── Debounced save for store settings ──────────────────────────
   const debouncedSaveSettings = useCallback(
     (newSettings: StoreSettingEntry[]) => {
+      latestSettingsRef.current = newSettings;
       if (settingsSaveTimeout.current)
         clearTimeout(settingsSaveTimeout.current);
       settingsSaveTimeout.current = setTimeout(() => {
         if (!householdId) return;
         broadcastChange([`store_settings:${householdId}`]);
-        saveStoreSettings(householdId, newSettings);
+        flushSettingsSave(householdId);
       }, 300);
     },
-    [householdId],
+    [householdId, flushSettingsSave],
   );
 
   const updateStoreSettings = useCallback(
@@ -3000,8 +3271,12 @@ export function EinkaufenScreen({
         prev: StoreSettingEntry[],
       ) => StoreSettingEntry[],
     ) => {
+      // Mark a local change so a concurrent reload (poll / realtime / focus)
+      // doesn't clobber the freshly-changed store config before it's saved.
+      lastLocalChangeRef.current = Date.now();
       setStoreSettings((prev) => {
         const next = updater(prev);
+        latestSettingsRef.current = next;
         debouncedSaveSettings(next);
         return next;
       });
@@ -3128,6 +3403,25 @@ export function EinkaufenScreen({
     return [...merged, ...extra];
   }, [items, globalItems]);
 
+  // ── Valid categories ───────────────────────────────────────────
+  // A category is only "valid" (selectable / displayable) when it has at
+  // least one known article OR is an explicitly-kept custom category.
+  // Empty built-in categories and manually-removed categories disappear
+  // from every picker (add item, store "Anpassen", category change).
+  const validCategories = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of customTemplates) {
+      if (t.category) set.add(t.category);
+    }
+    for (const c of globalCustomCategories) set.add(c);
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "de"));
+  }, [customTemplates, globalCustomCategories]);
+
+  const validCategorySet = useMemo(
+    () => new Set(validCategories),
+    [validCategories],
+  );
+
   // ── Handlers ───────────────────────────────────────────────────
   const handleToggle = useCallback(
     (id: string) => {
@@ -3208,7 +3502,8 @@ export function EinkaufenScreen({
             times_used: 1,
           },
         ]);
-        if (householdId) upsertGlobalItem(householdId, newName, item.category);
+        if (householdId)
+          upsertGlobalItem(householdId, newName, item.category).catch(() => {});
       }
     },
     [items, globalItems, updateItems],
@@ -3239,8 +3534,79 @@ export function EinkaufenScreen({
   }, []);
   useEffect(() => { onRegisterReset?.(handleReset); }, [onRegisterReset, handleReset]);
 
+  // ── Per-store usage tracking for the quick-suggestion chips ──────
+  // Increments a counter for (store, item) on every add so the chips can
+  // surface the items this household actually buys most at each store.
+  const recordItemUsage = useCallback(
+    (storeId: string, name: string) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      updateStoreSettings((prev) => {
+        const idx = prev.findIndex((s) => s.store_id === storeId);
+        if (idx >= 0) {
+          const copy = [...prev];
+          const freq = { ...(copy[idx].item_frequency || {}) };
+          freq[trimmed] = (freq[trimmed] || 0) + 1;
+          copy[idx] = { ...copy[idx], item_frequency: freq };
+          return copy;
+        }
+        // No settings entry yet for this store → create one (keeps natural order).
+        return [
+          ...prev,
+          {
+            store_id: storeId,
+            position: stores.findIndex((s) => s.id === storeId),
+            is_visible: true,
+            category_order: getCategoriesForStore(storeId, stores),
+            item_frequency: { [trimmed]: 1 },
+          },
+        ];
+      });
+    },
+    [updateStoreSettings, stores],
+  );
+
   const handleAddItem = useCallback(
     (name: string, category: string) => {
+      // If the current store doesn't carry this category yet, add it at the
+      // LAST position so the item lands in a real category section and the
+      // store "learns" the category for future sorting. This lets the user
+      // add articles of any category regardless of the selected store.
+      if (category) {
+        const currentOrder = getCategoryOrderForStore(selectedStore);
+        if (!currentOrder.includes(category)) {
+          updateStoreSettings((prev) => {
+            const existing = prev.find(
+              (s) => s.store_id === selectedStore,
+            );
+            if (existing) {
+              const order = existing.category_order || [];
+              if (order.includes(category)) return prev;
+              return prev.map((s) =>
+                s.store_id === selectedStore
+                  ? { ...s, category_order: [...order, category] }
+                  : s,
+              );
+            }
+            // No persisted setting yet → seed one from the store's defaults.
+            const base = getCategoriesForStore(selectedStore, stores);
+            return [
+              ...prev,
+              {
+                store_id: selectedStore,
+                position: stores.findIndex(
+                  (s) => s.id === selectedStore,
+                ),
+                is_visible: true,
+                category_order: base.includes(category)
+                  ? base
+                  : [...base, category],
+              },
+            ];
+          });
+        }
+      }
+
       const catIdx = getCustomCategoryIndex(
         category,
         selectedStore,
@@ -3290,11 +3656,13 @@ export function EinkaufenScreen({
         return [...shifted, newItem];
       });
 
-      // If this is a custom article (not in built-in DB), save/upsert to global items
+      // If this is a custom article (not in built-in DB) WITH a category,
+      // save/upsert to global items. Uncategorized items are not learned —
+      // they'd otherwise reappear with a (wrong) category dot.
       const isBuiltIn = GROCERY_DATABASE.some(
         (g) => g.name.toLowerCase() === name.toLowerCase(),
       );
-      if (!isBuiltIn) {
+      if (!isBuiltIn && category) {
         // Update local state immediately for instant search visibility
         setGlobalItems((prev) => {
           const idx = prev.findIndex(
@@ -3320,46 +3688,64 @@ export function EinkaufenScreen({
           ];
         });
         // Persist to server (fire and forget)
-        if (householdId) upsertGlobalItem(householdId, name, category);
+        if (householdId)
+          upsertGlobalItem(householdId, name, category).catch(() => {});
       }
+      // Track usage for the per-store quick-suggestion chips
+      recordItemUsage(selectedStore, name);
     },
-    [items, selectedStore, getCustomCategoryIndex, updateItems],
+    [
+      items,
+      selectedStore,
+      getCustomCategoryIndex,
+      getCategoryOrderForStore,
+      updateStoreSettings,
+      stores,
+      updateItems,
+      recordItemUsage,
+    ],
   );
 
-  const handleClearChecked = useCallback(() => {
-    updateItems((prev) =>
-      prev.filter(
-        (i) => !(i.store === selectedStore && i.is_checked),
-      ),
-    );
-  }, [selectedStore, updateItems]);
-
-  // ── "Liste leeren" — löscht ALLE Items haushaltsweit und persistiert sofort ──
+  // ── "Liste leeren" — löscht NUR die Items des aktuell gewählten Ladens ──
   const handleClearAll = useCallback(async () => {
-    // 1. Lokalen State sofort leeren
+    if (!householdId) return;
+    // 1. Lokalen State sofort aktualisieren — nur Items des aktiven Ladens entfernen.
+    //    latestItemsRef wird per Effect mit `items` synchron gehalten, ist also
+    //    die zuverlässige Quelle (setItems-Updater läuft nicht synchron).
     lastLocalChangeRef.current = Date.now();
-    setItems([]);
+    const remaining = latestItemsRef.current.filter(
+      (i) => i.store !== selectedStore,
+    );
+    latestItemsRef.current = remaining;
+    setItems(remaining);
     // Laufenden Debounce-Save abbrechen, damit er keine veralteten Daten schickt
     if (saveTimeout.current) {
       clearTimeout(saveTimeout.current);
       saveTimeout.current = undefined;
     }
-    // 2. Sofort und robust via apiFetch persistieren (Retry-Logik + Token-Refresh)
+    // 2. Robust persistieren: gleiche Retry-/Pending-Logik wie jeder andere
+    //    Item-Save, damit ein fehlgeschlagenes Leeren nicht still verloren geht
+    //    und ein Reload die geleerte Liste nicht wieder befüllt.
+    broadcastChange([`shopping:${householdId}`]);
+    flushItemsSave(householdId);
+  }, [householdId, selectedStore, flushItemsSave]);
+
+  // ── "Erledigte löschen" — entfernt NUR die abgehakten Items des aktiven Ladens ──
+  const handleClearChecked = useCallback(() => {
     if (!householdId) return;
-    try {
-      await apiFetch("/shopping", {
-        method: "PUT",
-        body: JSON.stringify({
-          household_id: householdId,
-          items: [],
-        }),
-      });
-      broadcastChange([`shopping:${householdId}`]);
-      console.log("[Einkaufen] Liste erfolgreich geleert (KV-Store).");
-    } catch (err) {
-      console.log("[Einkaufen] Fehler beim Leeren der Liste:", err);
+    lastLocalChangeRef.current = Date.now();
+    const remaining = latestItemsRef.current.filter(
+      (i) => !(i.store === selectedStore && i.is_checked),
+    );
+    latestItemsRef.current = remaining;
+    setItems(remaining);
+    if (saveTimeout.current) {
+      clearTimeout(saveTimeout.current);
+      saveTimeout.current = undefined;
     }
-  }, [householdId]);
+    broadcastChange([`shopping:${householdId}`]);
+    flushItemsSave(householdId);
+  }, [householdId, selectedStore, flushItemsSave]);
 
   const handleDeleteItem = useCallback(
     (itemId: string) => {
@@ -3431,18 +3817,30 @@ export function EinkaufenScreen({
         }
         return [...prev, newStore];
       });
-      updateStoreSettings((prev) => [
-        ...prev,
-        {
+      updateStoreSettings((prev) => {
+        // Update-or-insert: never append a second entry for the same store,
+        // otherwise re-adding a previously removed custom store duplicates it.
+        const idx = prev.findIndex((s) => s.store_id === id);
+        const entry: StoreSettingEntry = {
           store_id: id,
-          position: stores.length,
+          position: idx >= 0 ? prev[idx].position : stores.length,
           is_visible: true,
-          category_order: getCategoriesForStore(id, [
-            ...stores,
-            newStore,
-          ]),
-        },
-      ]);
+          category_order:
+            idx >= 0 && prev[idx].category_order?.length
+              ? prev[idx].category_order
+              : getCategoriesForStore(id, [...stores, newStore]),
+          // Persist full metadata so the store survives reloads.
+          custom_store: newStore,
+        };
+        if (idx >= 0 && prev[idx].item_frequency)
+          entry.item_frequency = prev[idx].item_frequency;
+        if (idx >= 0) {
+          const copy = [...prev];
+          copy[idx] = entry;
+          return copy;
+        }
+        return [...prev, entry];
+      });
       setSelectedStore(id);
       setShowAddStore(false);
     },
@@ -3472,9 +3870,13 @@ export function EinkaufenScreen({
           (s) => s.store_id === storeId,
         );
         if (idx >= 0) {
-          const copy = [...prev];
-          copy[idx] = { ...copy[idx], is_visible: false };
-          return copy;
+          // Hide EVERY matching entry (defensive against any leftover
+          // duplicates) so the store reliably disappears.
+          return prev.map((s) =>
+            s.store_id === storeId
+              ? { ...s, is_visible: false }
+              : s,
+          );
         }
         return [
           ...prev,
@@ -3507,7 +3909,7 @@ export function EinkaufenScreen({
             const existing = settings.find(
               (s) => s.store_id === store.id,
             );
-            return {
+            const entry: StoreSettingEntry = {
               store_id: store.id,
               position: idx,
               is_visible: true,
@@ -3515,13 +3917,21 @@ export function EinkaufenScreen({
                 existing?.category_order ||
                 getCategoriesForStore(store.id, moved),
             };
+            // Preserve metadata that isn't represented in the store list.
+            if (existing?.custom_store) entry.custom_store = existing.custom_store;
+            else if (!DEFAULT_STORES.some((d) => d.id === store.id)) entry.custom_store = store;
+            if (existing?.item_frequency) entry.item_frequency = existing.item_frequency;
+            return entry;
           });
           const hiddenSettings = settings.filter(
             (s) =>
               !s.is_visible &&
               !moved.find((st) => st.id === s.store_id),
           );
-          return [...newSettings, ...hiddenSettings];
+          return dedupeStoreSettings([
+            ...newSettings,
+            ...hiddenSettings,
+          ]);
         });
         return moved;
       });
@@ -3555,48 +3965,34 @@ export function EinkaufenScreen({
       });
 
       updateItems((prev) => {
+        // Re-sort ALL unchecked items of this store to follow the NEW category
+        // order. Stable within a category (keep current relative order). We
+        // also clear manual pins for this store so the list reliably snaps to
+        // the new sorting — an explicit category re-sort should win.
+        const catIndex = (cat: string) => {
+          const i = categories.indexOf(cat);
+          return i < 0 ? Number.MAX_SAFE_INTEGER : i;
+        };
         const storeUnchecked = prev
           .filter((i) => i.store === storeId && !i.is_checked)
           .sort((a, b) => a.position - b.position);
 
-        const manual = storeUnchecked.filter(
-          (i) => i.manually_positioned,
-        );
-        const auto = storeUnchecked.filter(
-          (i) => !i.manually_positioned,
-        );
-
-        auto.sort((a, b) => {
-          const ai = categories.indexOf(a.category);
-          const bi = categories.indexOf(b.category);
-          return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
+        const resorted = [...storeUnchecked].sort((a, b) => {
+          const d = catIndex(a.category) - catIndex(b.category);
+          return d !== 0 ? d : a.position - b.position;
         });
 
-        const merged = [...storeUnchecked];
-        let autoIdx = 0;
-        const result: ShoppingItem[] = [];
-        for (const item of merged) {
-          if (item.manually_positioned) {
-            result.push(item);
-          } else {
-            if (autoIdx < auto.length) {
-              result.push(auto[autoIdx]);
-              autoIdx++;
-            }
-          }
-        }
-        while (autoIdx < auto.length) {
-          result.push(auto[autoIdx]);
-          autoIdx++;
-        }
-
         const posMap = new Map<string, number>();
-        result.forEach((item, idx) => posMap.set(item.id, idx));
+        resorted.forEach((item, idx) => posMap.set(item.id, idx));
 
         return prev.map((i) => {
           const newPos = posMap.get(i.id);
           if (newPos !== undefined) {
-            return { ...i, position: newPos };
+            return {
+              ...i,
+              position: newPos,
+              manually_positioned: false,
+            };
           }
           return i;
         });
@@ -3621,7 +4017,7 @@ export function EinkaufenScreen({
         customCatSaveTimeout.current = setTimeout(() => {
           if (householdId) {
             broadcastChange([`custom_categories:${householdId}`]);
-            saveCustomCategories(householdId, next);
+            saveCustomCategories(householdId, next).catch(() => {});
           }
         }, 300);
         return next;
@@ -3906,6 +4302,27 @@ export function EinkaufenScreen({
     [selectedStore, getCategoryOrderForStore],
   );
 
+  // ── Usage-based quick suggestions for the AddItemBar chips ──────
+  // Items the household added most often at the current store come first;
+  // the hardcoded defaults pad the rest so there's always a full set.
+  const quickSuggestionPool = useMemo(() => {
+    const freq =
+      storeSettings.find((s) => s.store_id === selectedStore)
+        ?.item_frequency || {};
+    const usedByFrequency = Object.keys(freq).sort(
+      (a, b) => freq[b] - freq[a],
+    );
+    const seen = new Set(usedByFrequency.map((n) => n.toLowerCase()));
+    const merged = [...usedByFrequency];
+    for (const name of getQuickSuggestions(selectedStore)) {
+      if (!seen.has(name.toLowerCase())) {
+        merged.push(name);
+        seen.add(name.toLowerCase());
+      }
+    }
+    return merged;
+  }, [storeSettings, selectedStore]);
+
   const categorySortStoreName = useMemo(() => {
     if (!categorySortStore) return "";
     return (
@@ -3915,25 +4332,18 @@ export function EinkaufenScreen({
 
   const categorySortInitial = useMemo(() => {
     if (!categorySortStore) return [];
-    return getCategoryOrderForStore(categorySortStore);
-  }, [categorySortStore, getCategoryOrderForStore]);
+    // Filter out removed/empty categories so they no longer appear as
+    // active chips in the store "Anpassen" menu.
+    return getCategoryOrderForStore(categorySortStore).filter((c) =>
+      validCategorySet.has(c),
+    );
+  }, [categorySortStore, getCategoryOrderForStore, validCategorySet]);
 
   const allKnownCategories = useMemo(() => {
-    const base = getAllCategories();
-    const fromSettings = new Set<string>();
-    for (const setting of storeSettings) {
-      if (setting.category_order) {
-        for (const c of setting.category_order) {
-          fromSettings.add(c);
-        }
-      }
-    }
-    const result = [...base];
-    for (const c of fromSettings) {
-      if (!result.includes(c)) result.push(c);
-    }
-    return result;
-  }, [storeSettings]);
+    // Pool of categories offered in the store "Anpassen" menu: only those
+    // that have articles or are custom (already deduped + sorted).
+    return validCategories;
+  }, [validCategories]);
 
   // ── updateListBottom: recalculates list container's bottom offset ──
   // Called whenever keyboard state OR addItemBar height changes.
@@ -3965,10 +4375,10 @@ export function EinkaufenScreen({
     const barH = isItemNameEditingRef.current
       ? 0
       : addItemBarHRef.current;
-    const checkedH = checkedSectionHRef.current;
     const base = isKbOpen ? kbH + barH : barH;
-    setCheckedSectionBottom(base);
-    setListBottomFixed(base + checkedH);
+    // CheckedSection is now part of the scrollable list (no longer a fixed
+    // bar above the AddItemBar), so the list only needs to clear the bar.
+    setListBottomFixed(base);
   }, []);
 
   // ── Measure store-selector height ─────────────────────────────
@@ -3993,19 +4403,6 @@ export function EinkaufenScreen({
       updateListBottom();
     });
     ro.observe(bottomBarRef.current);
-    return () => ro.disconnect();
-  }, [updateListBottom]);
-
-  // ── Measure checked-section height; update listBottom on change ──
-  useEffect(() => {
-    if (!checkedSectionRef.current) return;
-    const ro = new ResizeObserver(() => {
-      const h =
-        checkedSectionRef.current?.getBoundingClientRect().height ?? 0;
-      checkedSectionHRef.current = h;
-      updateListBottom();
-    });
-    ro.observe(checkedSectionRef.current);
     return () => ro.disconnect();
   }, [updateListBottom]);
 
@@ -4139,7 +4536,22 @@ export function EinkaufenScreen({
           overscrollBehavior: "contain",
         }}
       >
-        <div style={isDesktop ? { maxWidth: 680, margin: "0 auto", width: "100%" } : undefined}>
+        <div
+          style={{
+            ...(isDesktop
+              ? { maxWidth: 680, margin: "0 auto", width: "100%" }
+              : {}),
+            ...(loaded &&
+            sortedStoreItems.length === 0 &&
+            checkedItems.length > 0
+              ? {
+                  height: "100%",
+                  display: "flex",
+                  flexDirection: "column" as const,
+                }
+              : {}),
+          }}
+        >
         {!loaded ? (
           <div className="flex items-center justify-center py-20">
             <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
@@ -4164,10 +4576,7 @@ export function EinkaufenScreen({
           </div>
         ) : sortedStoreItems.length === 0 &&
           checkedItems.length > 0 ? (
-          <div
-            className="flex flex-col items-center px-6 pt-20 pb-20"
-            style={{ minHeight: "100%" }}
-          >
+          <div className="flex flex-col items-center px-6 pt-12 pb-6 flex-shrink-0">
             <img
               src={bagFullImg}
               alt="Einkaufstasche"
@@ -4233,28 +4642,26 @@ export function EinkaufenScreen({
             )}
           </SortableContext>
         </StableDndContext>
-        </div>{/* end max-width wrapper */}
 
-      </div>
-
-      {/* ── CheckedSection — absolute, sits directly above AddItemBar ── */}
-      <div
-        ref={checkedSectionRef}
-        style={{
-          position: "absolute",
-          bottom: checkedSectionBottom,
-          left: 0,
-          right: 0,
-          zIndex: 90,
-        }}
-      >
-        <div style={isDesktop ? { maxWidth: 680, margin: "0 auto", width: "100%" } : undefined}>
+        {/* ── Erledigt-Sektion — Teil der scrollbaren Liste, am Ende ──
+             Default geschlossen, expandiert nach unten. */}
+        {loaded && (
           <CheckedSection
             items={checkedItems}
             onToggle={handleToggle}
-            onClearAll={handleClearChecked}
+            onClearChecked={handleClearChecked}
+            expanded={checkedExpanded}
+            onExpandedChange={setCheckedExpanded}
+            mergedItems={mergedItemsForDot}
+            selfScroll={
+              sortedStoreItems.length === 0 && checkedItems.length > 0
+            }
           />
-        </div>
+        )}
+        {/* Bottom spacer so the last row isn't flush against the AddItemBar */}
+        <div style={{ height: 8, flexShrink: 0 }} />
+        </div>{/* end max-width wrapper */}
+
       </div>
 
       {/* ── AddItemBar ──────────────────────────────────────────────────
@@ -4286,6 +4693,8 @@ export function EinkaufenScreen({
           categoryOrder={currentCategoryOrder}
           itemEditing={isItemNameEditing}
           globalItems={globalItems}
+          suggestionPool={quickSuggestionPool}
+          validCategories={validCategories}
         />
       </div>
 

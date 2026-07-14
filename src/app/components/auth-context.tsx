@@ -1,5 +1,11 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from "react";
-import { supabase, apiFetch } from "./supabase-client";
+import {
+  supabase,
+  apiFetch,
+  saveDeviceCredentials,
+  clearDeviceCredentials,
+  attemptSilentRelogin,
+} from "./supabase-client";
 import { logoutOneSignal } from "./onesignal";
 import type { Session, User, RealtimeChannel } from "@supabase/supabase-js";
 
@@ -280,9 +286,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session: s } }) => {
-      setSession(s);
-      setUser(s?.user ?? null);
       if (s?.user) {
+        setSession(s);
+        setUser(s.user);
         // Ensure profile is synced on app load
         ensureProfile(s.user).finally(() =>
           loadProfile(s.user!.id).finally(() => {
@@ -291,8 +297,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           })
         );
       } else {
-        setLoading(false);
-        isInitialLoad.current = false;
+        // Keine persistierte Session (iOS-PWA hat Storage geleert oder der
+        // Refresh-Token ist abgelaufen). Bevor der Login-Screen erscheint,
+        // still im Hintergrund mit den gespeicherten Geräte-Zugangsdaten neu
+        // anmelden. Bei Erfolg übernimmt der SIGNED_IN-Handler Session/Profil.
+        attemptSilentRelogin().then((restored) => {
+          if (!restored) {
+            setSession(null);
+            setUser(null);
+          }
+          setLoading(false);
+          isInitialLoad.current = false;
+        });
       }
     });
 
@@ -319,7 +335,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setUser(data.session.user ?? null);
             return;
           }
-          console.log("[Auth] Session truly gone — proceeding with sign-out");
+          // Session wirklich weg, aber der Nutzer wollte sich NICHT abmelden.
+          // Erst versuchen, sie still aus den gespeicherten Zugangsdaten
+          // wiederherzustellen, bevor der Login-Screen erscheint.
+          console.log("[Auth] Session truly gone — versuche stilles Re-Login...");
+          const restored = await attemptSilentRelogin();
+          if (restored) {
+            console.log("[Auth] Stilles Re-Login erfolgreich — bleibe angemeldet");
+            return; // SIGNED_IN-Event richtet neue Session + Profil ein
+          }
+          console.log("[Auth] Stilles Re-Login fehlgeschlagen — melde ab");
         }
         // User explicitly signed out OR session truly gone
         userInitiatedSignOutRef.current = false;
@@ -365,7 +390,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const handleVisibility = async () => {
       if (document.visibilityState !== "visible") return;
       const { data: { user: u } } = await supabase.auth.getUser();
-      if (u) setUser(u);
+      if (u) {
+        setUser(u);
+        return;
+      }
+      // Beim Zurückkehren in die PWA keine gültige Session mehr (typischer
+      // iOS-Fall). Still im Hintergrund aus den gespeicherten Zugangsdaten
+      // wiederherstellen, statt den Nutzer auszuloggen. Der In-Flight-Guard
+      // verhindert parallele Versuche; ohne gespeicherte Creds passiert nichts.
+      attemptSilentRelogin();
     };
     document.addEventListener("visibilitychange", handleVisibility);
     return () => document.removeEventListener("visibilitychange", handleVisibility);
@@ -374,6 +407,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw new Error(error.message);
+    // Zugangsdaten für das automatische Hintergrund-Re-Login sichern, damit
+    // ein späterer Session-Verlust nicht zum erneuten Login-Screen führt.
+    saveDeviceCredentials(email, password);
   };
 
   const signInWithGoogle = async () => {
@@ -411,6 +447,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = async () => {
     // Mark the sign-out as user-initiated
     signOutFlagRef.current();
+    // Gespeicherte Geräte-Zugangsdaten löschen, damit das automatische
+    // Re-Login nach einem bewussten Logout NICHT wieder anmeldet.
+    clearDeviceCredentials();
 
     // Clean up realtime subscription
     if (profileChannelRef.current) {

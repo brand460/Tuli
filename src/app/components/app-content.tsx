@@ -60,9 +60,9 @@ function AppRouter() {
         style={{ height: "100dvh", background: "var(--zu-bg)" }}
       >
         <img
-          src="/Tuli-Logo.png"
+          src="/icon-512.png"
           alt="Tuli"
-          style={{ width: 56, height: 56, borderRadius: 14, marginBottom: 16, objectFit: "cover" }}
+          style={{ width: 120, height: 120, borderRadius: 28, marginBottom: 20, objectFit: "cover" }}
         />
         <Loader2 className="w-5 h-5 animate-spin" style={{ color: "var(--text-3)" }} />
       </div>

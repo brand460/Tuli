@@ -38,9 +38,15 @@ export const DEFAULT_STORES: StoreInfo[] = [
   { id: "alle", name: "Alle", abbr: "🏠", color: "#D97706", bgColor: "#FEF3C7", type: "sonstige" },
 ];
 
+// ── Lokale Logo-Overrides (eigene Bilder statt Favicon) ────────────
+const LOCAL_LOGO_OVERRIDES: Record<string, string> = {
+  "postenboerse.de": "/images/stores/posten-boerse.png",
+};
+
 // ── Google Favicon URL helper ──────────────────────────────────────
 export function getLogoUrl(domain?: string): string | null {
   if (!domain) return null;
+  if (LOCAL_LOGO_OVERRIDES[domain]) return LOCAL_LOGO_OVERRIDES[domain];
   return `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
 }
 
@@ -168,7 +174,32 @@ export const CATEGORY_COLORS: Record<string, { bg: string; text: string; dot: st
 };
 
 export function getCategoryChipColor(category: string): { bg: string; text: string; dot: string } {
-  return CATEGORY_COLORS[category] || CATEGORY_COLORS.Sonstiges;
+  const base = CATEGORY_COLORS[category] || CATEGORY_COLORS.Sonstiges;
+  const override = categoryColorOverrides[category];
+  // Only the "circle" (dot) and its matching accent text are recolored by the
+  // user; the soft chip background stays derived from the built-in palette.
+  return override ? { ...base, dot: override, text: override } : base;
+}
+
+// ── Category color overrides (user-customizable per household) ──────
+// Users can recolor a category's circle in "Meine Artikel" via the pencil
+// drawer. We keep a module-level map so every screen (Einkaufen, Kochen,
+// Meine Artikel) renders the same custom dot color. Each screen loads the
+// persisted overrides on mount via setCategoryColorOverrides().
+let categoryColorOverrides: Record<string, string> = {};
+
+export function setCategoryColorOverrides(
+  map: Record<string, string> | null | undefined,
+): void {
+  categoryColorOverrides = map ? { ...map } : {};
+}
+
+export function getCategoryColorOverrides(): Record<string, string> {
+  return { ...categoryColorOverrides };
+}
+
+export function getCategoryDotColor(category: string): string {
+  return categoryColorOverrides[category] || getCategoryChipColor(category).dot;
 }
 
 // ── Common German grocery items — expanded ─────────────────────────
@@ -987,6 +1018,7 @@ export interface StoreSuggestion {
 export const STORE_SUGGESTIONS: StoreSuggestion[] = [
   { name: "Rewe", domain: "rewe.de", type: "supermarkt", bgColor: "#CC071E" },
   { name: "Penny", domain: "penny.de", type: "supermarkt", bgColor: "#CD1719" },
+  { name: "Postenbörse", domain: "postenboerse.de", type: "supermarkt", bgColor: "#E2001A" },
   { name: "Norma", domain: "norma-online.de", type: "supermarkt", bgColor: "#E30613" },
   { name: "Globus", domain: "globus.de", type: "supermarkt", bgColor: "#004B93" },
   { name: "Hit", domain: "hit.de", type: "supermarkt", bgColor: "#E2001A" },
@@ -1103,6 +1135,6 @@ export function buildMergedItems(
  */
 export function getItemCategoryDot(name: string, mergedItems: GroceryTemplate[]): string | null {
   const match = mergedItems.find(i => i.name.toLowerCase() === name.toLowerCase());
-  if (!match) return null;
+  if (!match || !match.category) return null;
   return getCategoryChipColor(match.category).dot;
 }
