@@ -60,12 +60,12 @@ function AppRouter() {
     return (
       <div
         className="flex flex-col items-center justify-center font-sans"
-        style={{ height: "100dvh", background: "#141412" }}
+        style={{ height: "100dvh", background: "#F7F7F5" }}
       >
         <img
           src="/icon-512.png"
           alt="Tuli"
-          style={{ width: 160, height: 160, borderRadius: 36, marginBottom: 24, objectFit: "cover" }}
+          style={{ width: 132, height: 132, borderRadius: 30, marginBottom: 24, objectFit: "cover" }}
         />
         <Loader2 className="w-5 h-5 animate-spin" style={{ color: "var(--text-3)" }} />
       </div>
