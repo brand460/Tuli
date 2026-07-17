@@ -53,16 +53,19 @@ function AppRouter() {
 
   // ── Loading splash ─────────────────────────────────────────
   // Show spinner only during the very first auth check, never on resume.
+  // Background + icon are intentionally hardcoded to match the native PWA
+  // splash screen (manifest background_color #141412, OS-scaled icon) so the
+  // OS splash flows seamlessly into this screen with no visible jump.
   if ((loading || isLoadingHousehold) && !hasLoadedOnce.current) {
     return (
       <div
         className="flex flex-col items-center justify-center font-sans"
-        style={{ height: "100dvh", background: "var(--zu-bg)" }}
+        style={{ height: "100dvh", background: "#141412" }}
       >
         <img
           src="/icon-512.png"
           alt="Tuli"
-          style={{ width: 120, height: 120, borderRadius: 28, marginBottom: 20, objectFit: "cover" }}
+          style={{ width: 160, height: 160, borderRadius: 36, marginBottom: 24, objectFit: "cover" }}
         />
         <Loader2 className="w-5 h-5 animate-spin" style={{ color: "var(--text-3)" }} />
       </div>

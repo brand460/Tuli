@@ -6,8 +6,8 @@
   "scope": "/",
   "display": "standalone",
   "display_override": ["window-controls-overlay", "standalone"],
-  "background_color": "#F7F7F5",
-  "theme_color": "#F7F7F5",
+  "background_color": "#141412",
+  "theme_color": "#141412",
   "orientation": "portrait",
   "launch_handler": {
     "client_mode": "focus-existing"
