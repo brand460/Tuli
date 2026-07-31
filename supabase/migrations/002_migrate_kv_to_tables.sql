@@ -34,6 +34,9 @@ from public.kv_store_2a26506b k
 cross join lateral jsonb_array_elements(k.value) elem
 where k.key like 'shopping:%'
   and jsonb_typeof(k.value) = 'array'
+  -- Nur echte UUID-Haushalte migrieren (überspringt Alt-/Test-Keys wie
+  -- 'shopping:dev-household', die keine gültige UUID sind).
+  and split_part(k.key, ':', 2) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
   and coalesce(elem->>'name', '') <> ''
 on conflict (id) do nothing;
 
@@ -52,6 +55,7 @@ from public.kv_store_2a26506b k
 cross join lateral jsonb_array_elements(k.value) elem
 where k.key like 'store_settings:%'
   and jsonb_typeof(k.value) = 'array'
+  and split_part(k.key, ':', 2) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
   and coalesce(elem->>'store_id', '') <> ''
 on conflict (household_id, store_id) do nothing;
 
@@ -75,6 +79,7 @@ left join public.kv_store_2a26506b b
   on b.key = 'custom_blocks:' || split_part(p.key, ':', 2)
 where p.key like 'custom_pages:%'
   and jsonb_typeof(p.value) = 'array'
+  and split_part(p.key, ':', 2) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
   and coalesce(page->>'id', '') <> ''
 on conflict (id) do nothing;
 
