@@ -66,11 +66,20 @@ import {
   getItemCategoryDot,
   setCategoryColorOverrides,
 } from "./shopping-data";
-import { apiFetch } from "../supabase-client";
+import { apiFetch, supabase } from "../supabase-client";
 import {
   useKvRealtime,
   broadcastChange,
 } from "../use-kv-realtime";
+import {
+  fetchShoppingItems,
+  fetchStoreSettings as fetchStoreSettingsRows,
+  subscribeShoppingItems,
+  subscribeStoreSettings,
+  syncItemsDiff,
+  syncStoreSettingsDiff,
+  hasPendingRowWrite,
+} from "./shopping-sync";
 import { useBackHandler } from "../ui/use-back-handler";
 import { useAuth } from "../auth-context";
 import { useKeyboardOffset } from "../ui/use-keyboard-offset";
@@ -128,6 +137,41 @@ function dedupeStoreSettings(
   return Array.from(byId.values());
 }
 
+// Beim Reload den Server-Stand übernehmen, aber Zeilen mit noch laufendem
+// lokalem Schreibvorgang (hasPendingRowWrite) NICHT überschreiben — sonst ginge
+// eine noch nicht bestätigte Änderung verloren. Lokale, noch nicht auf dem
+// Server angekommene Zeilen bleiben zusätzlich erhalten.
+function mergeServerItems(
+  server: ShoppingItem[],
+  local: ShoppingItem[],
+): ShoppingItem[] {
+  const localMap = new Map(local.map((i) => [i.id, i]));
+  const result = server.map((si) =>
+    hasPendingRowWrite(`item:${si.id}`) ? localMap.get(si.id) ?? si : si,
+  );
+  const serverIds = new Set(server.map((s) => s.id));
+  for (const l of local) {
+    if (!serverIds.has(l.id) && hasPendingRowWrite(`item:${l.id}`)) result.push(l);
+  }
+  return result;
+}
+
+function mergeServerSettings(
+  server: StoreSettingEntry[],
+  local: StoreSettingEntry[],
+): StoreSettingEntry[] {
+  const localMap = new Map(local.map((s) => [s.store_id, s]));
+  const result = server.map((ss) =>
+    hasPendingRowWrite(`store:${ss.store_id}`) ? localMap.get(ss.store_id) ?? ss : ss,
+  );
+  const serverIds = new Set(server.map((s) => s.store_id));
+  for (const l of local) {
+    if (!serverIds.has(l.store_id) && hasPendingRowWrite(`store:${l.store_id}`))
+      result.push(l);
+  }
+  return result;
+}
+
 // ── API helpers ────────────────────────────────────────────────────
 // All helpers use `apiFetch`, which (unlike a raw fetch with publicAnonKey)
 // provides: real auth-token refresh, 5× retry with backoff on network/5xx/401,
@@ -135,33 +179,18 @@ function dedupeStoreSettings(
 // failure instead of returning an empty array — otherwise a failed network
 // request would be indistinguishable from "the list is genuinely empty" and
 // would overwrite good local/cached data with [].
+// Zeilenbasiert statt Blob: liest direkt aus shopping_items / store_settings
+// (Supabase-Client mit RLS). Die alten Blob-Endpunkte /shopping und
+// /store-settings werden nicht mehr verwendet. Gespeichert wird granular pro
+// Zeile über syncItemsDiff / syncStoreSettingsDiff (siehe flush*Save unten).
 async function fetchItems(hhId: string): Promise<ShoppingItem[]> {
-  const json = await apiFetch(`/shopping?household_id=${hhId}`);
-  return json.items || [];
-}
-
-async function saveItems(hhId: string, items: ShoppingItem[]): Promise<void> {
-  await apiFetch("/shopping", {
-    method: "PUT",
-    body: JSON.stringify({ household_id: hhId, items }),
-  });
+  return fetchShoppingItems(hhId);
 }
 
 async function fetchStoreSettings(hhId: string): Promise<
   StoreSettingEntry[]
 > {
-  const json = await apiFetch(`/store-settings?household_id=${hhId}`);
-  return json.settings || [];
-}
-
-async function saveStoreSettings(
-  hhId: string,
-  settings: StoreSettingEntry[],
-): Promise<void> {
-  await apiFetch("/store-settings", {
-    method: "PUT",
-    body: JSON.stringify({ household_id: hhId, settings }),
-  });
+  return (await fetchStoreSettingsRows(hhId)) as unknown as StoreSettingEntry[];
 }
 
 async function fetchCustomCategories(hhId: string): Promise<string[]> {
@@ -2906,6 +2935,10 @@ export function EinkaufenScreen({
   // data (kept in sync via effects below + explicit sets on each change).
   const latestItemsRef = useRef<ShoppingItem[]>([]);
   const latestSettingsRef = useRef<StoreSettingEntry[]>([]);
+  // Zuletzt mit der DB synchronisierter Stand — Basis für den Zeilen-Diff, damit
+  // beim Speichern nur die tatsächlich geänderten Zeilen geschrieben werden.
+  const syncedItemsRef = useRef<ShoppingItem[]>([]);
+  const syncedSettingsRef = useRef<StoreSettingEntry[]>([]);
   // Generation tokens: a newer save supersedes any pending retry of an older one.
   const itemsSaveGenRef = useRef(0);
   const settingsSaveGenRef = useRef(0);
@@ -2936,9 +2969,16 @@ export function EinkaufenScreen({
       const cached = readEinkaufCache(householdId);
       if (cached) {
         setItems(cached.items);
+        latestItemsRef.current = cached.items;
+        // Diff-Basis vorläufig auf den Cache setzen, damit eine Bearbeitung
+        // VOR dem ersten Netzwerk-Reload korrekt als Änderung erkannt wird
+        // (der Reload setzt die Basis danach auf den echten Serverstand).
+        syncedItemsRef.current = cached.items;
         if (cached.settings.length > 0) {
           const dedupedCached = dedupeStoreSettings(cached.settings);
           setStoreSettings(dedupedCached);
+          latestSettingsRef.current = dedupedCached;
+          syncedSettingsRef.current = dedupedCached;
           applyStoreSettings(DEFAULT_STORES, dedupedCached);
         }
         setGlobalCustomCategories(cached.customCats);
@@ -2977,22 +3017,31 @@ export function EinkaufenScreen({
         flushSettingsSave(householdId);
       }
 
-      // Never clobber an unsaved local write (in-flight or failed-after-retry)
-      // with the server value — that's exactly how lists got "reset". Keep the
-      // local items/settings; the pending save's retry will reconcile them.
-      const applyItems = !pendingItemsSaveRef.current;
-      const applySettings = !pendingSettingsSaveRef.current;
+      // Server-Stand übernehmen, aber Zeilen mit noch laufendem lokalem
+      // Schreibvorgang NICHT überschreiben (siehe mergeServerItems). Der
+      // zeilenweise Retry im Sync-Modul gleicht offene Änderungen ab.
+      const mergedItems = mergeServerItems(serverItems, latestItemsRef.current);
+      setItems(mergedItems);
+      latestItemsRef.current = mergedItems;
+      syncedItemsRef.current = serverItems;
 
-      if (applyItems) setItems(serverItems);
-      if (applySettings && dedupedSettings.length > 0) {
-        setStoreSettings(dedupedSettings);
-        applyStoreSettings(DEFAULT_STORES, dedupedSettings);
+      let effectiveSettings = latestSettingsRef.current;
+      if (dedupedSettings.length > 0) {
+        const mergedSettings = mergeServerSettings(
+          dedupedSettings,
+          latestSettingsRef.current,
+        );
+        setStoreSettings(mergedSettings);
+        latestSettingsRef.current = mergedSettings;
+        syncedSettingsRef.current = dedupedSettings;
+        effectiveSettings = mergedSettings;
+        applyStoreSettings(DEFAULT_STORES, mergedSettings);
       }
       setGlobalCustomCategories(customCats);
       setGlobalItems(gItems);
       writeEinkaufCache(householdId, {
-        items: applyItems ? serverItems : latestItemsRef.current,
-        settings: applySettings ? dedupedSettings : latestSettingsRef.current,
+        items: mergedItems,
+        settings: effectiveSettings,
         customCats,
         gItems,
       });
@@ -3060,11 +3109,12 @@ export function EinkaufenScreen({
     latestSettingsRef.current = storeSettings;
   }, [storeSettings]);
 
-  // ── Supabase Realtime subscription for live sync ──
+  // ── Realtime für die NICHT migrierten Bereiche (global_items,
+  //    custom_categories) läuft weiter über den Broadcast-Mechanismus. Artikel
+  //    + Laden-Einstellungen nutzen jetzt echtes postgres_changes (Effect
+  //    weiter unten). ──
   useKvRealtime(
     householdId ? [
-      `shopping:${householdId}`,
-      `store_settings:${householdId}`,
       `global_items:${householdId}`,
       `custom_categories:${householdId}`,
     ] : [],
@@ -3119,34 +3169,79 @@ export function EinkaufenScreen({
     }
   };
 
-  // ── Poll for sync ──────────────────────────────────────────────
+  // ── Realtime (postgres_changes) für Artikel + Laden-Einstellungen ──
+  // Ersetzt Polling + Custom-Broadcast: eingehende INSERT/UPDATE/DELETE werden
+  // INKREMENTELL auf den lokalen State angewendet (kein Voll-Reload). Zeilen,
+  // die wir gerade selbst schreiben (hasPendingRowWrite), werden ignoriert, um
+  // ein Echo-Überschreiben der eigenen optimistischen Änderung zu vermeiden.
+  // Während eines aktiven Drags werden Item-Events übersprungen (der spätere
+  // Focus-Reload gleicht ab), damit die Sortierung nicht mitten im Ziehen springt.
+  const applyStoreSettingsRef = useRef(applyStoreSettings);
+  applyStoreSettingsRef.current = applyStoreSettings;
+  const activeDragIdRef = useRef(activeDragId);
+  activeDragIdRef.current = activeDragId;
   useEffect(() => {
-    const interval = setInterval(async () => {
-      // Skip poll if a local change happened recently (debounce save is 300ms,
-      // give extra buffer so the server has time to persist)
-      if (Date.now() - lastLocalChangeRef.current < 2000)
-        return;
-      if (!householdId) return;
-      // Don't overwrite an unsaved local write with the server value.
-      if (pendingItemsSaveRef.current) return;
-      let serverItems: ShoppingItem[];
-      try {
-        serverItems = await fetchItems(householdId);
-      } catch {
-        // Transient network/server error — keep current state and try again
-        // next tick. Never fall back to an empty list here.
-        return;
-      }
-      // Re-check after async fetch in case a local change happened while waiting
-      if (Date.now() - lastLocalChangeRef.current < 2000)
-        return;
-      if (pendingItemsSaveRef.current) return;
-      if (!activeDragId) {
-        setItems(serverItems);
-      }
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [activeDragId, householdId]);
+    if (!householdId) return;
+    const chItems = subscribeShoppingItems(householdId, {
+      onInsert: (item) => {
+        if (activeDragIdRef.current) return;
+        if (hasPendingRowWrite(`item:${item.id}`)) return;
+        const base = latestItemsRef.current;
+        const next = base.some((i) => i.id === item.id)
+          ? base.map((i) => (i.id === item.id ? item : i))
+          : [...base, item];
+        latestItemsRef.current = next;
+        syncedItemsRef.current = next;
+        setItems(next);
+      },
+      onUpdate: (item) => {
+        if (activeDragIdRef.current) return;
+        if (hasPendingRowWrite(`item:${item.id}`)) return;
+        const base = latestItemsRef.current;
+        const next = base.some((i) => i.id === item.id)
+          ? base.map((i) => (i.id === item.id ? item : i))
+          : [...base, item];
+        latestItemsRef.current = next;
+        syncedItemsRef.current = next;
+        setItems(next);
+      },
+      onDelete: (id) => {
+        if (hasPendingRowWrite(`item:${id}`)) return;
+        const next = latestItemsRef.current.filter((i) => i.id !== id);
+        latestItemsRef.current = next;
+        syncedItemsRef.current = next;
+        setItems(next);
+      },
+    });
+    const chStores = subscribeStoreSettings(householdId, {
+      onUpsert: (entryRaw) => {
+        const entry = entryRaw as unknown as StoreSettingEntry;
+        if (hasPendingRowWrite(`store:${entry.store_id}`)) return;
+        const others = latestSettingsRef.current.filter(
+          (s) => s.store_id !== entry.store_id,
+        );
+        const next = dedupeStoreSettings([...others, entry]);
+        latestSettingsRef.current = next;
+        syncedSettingsRef.current = next;
+        setStoreSettings(next);
+        applyStoreSettingsRef.current(DEFAULT_STORES, next);
+      },
+      onDelete: (storeId) => {
+        if (hasPendingRowWrite(`store:${storeId}`)) return;
+        const next = latestSettingsRef.current.filter(
+          (s) => s.store_id !== storeId,
+        );
+        latestSettingsRef.current = next;
+        syncedSettingsRef.current = next;
+        setStoreSettings(next);
+        applyStoreSettingsRef.current(DEFAULT_STORES, next);
+      },
+    });
+    return () => {
+      supabase.removeChannel(chItems);
+      supabase.removeChannel(chStores);
+    };
+  }, [householdId]);
 
   // ── Click outside to exit store reorder mode ───────────────────
   useEffect(() => {
@@ -3173,29 +3268,15 @@ export function EinkaufenScreen({
   // saveItems() now throws on failure (apiFetch already retried 5×). We keep
   // a "pending" flag so a concurrent reload won't revert the change, and we
   // re-attempt every 5 s with the LATEST items until it finally succeeds.
-  const flushItemsSave = useCallback(
-    async (hhId: string) => {
-      const gen = ++itemsSaveGenRef.current;
-      pendingItemsSaveRef.current = true;
-      const attempt = async (): Promise<void> => {
-        if (gen !== itemsSaveGenRef.current) return; // superseded by a newer save
-        try {
-          await saveItems(hhId, latestItemsRef.current);
-          if (gen === itemsSaveGenRef.current)
-            pendingItemsSaveRef.current = false;
-        } catch (err) {
-          if (gen !== itemsSaveGenRef.current) return;
-          console.log(
-            "[Einkaufen] saveItems endgültig fehlgeschlagen — retry in 5s:",
-            err,
-          );
-          setTimeout(attempt, 5000);
-        }
-      };
-      await attempt();
-    },
-    [],
-  );
+  // ── Item-Save: zeilenweiser Diff statt ganzer Liste ────────────
+  // Berechnet den Unterschied zum zuletzt synchronisierten Stand und schreibt
+  // nur die betroffenen Artikel (INSERT/PATCH/DELETE). Jede Zeile wird intern
+  // serialisiert + mit Backoff erneut versucht (offline-tolerant) — daher keine
+  // Gesamtlisten-Retry-/Generation-Logik mehr nötig.
+  const flushItemsSave = useCallback((hhId: string) => {
+    syncItemsDiff(hhId, syncedItemsRef.current, latestItemsRef.current);
+    syncedItemsRef.current = latestItemsRef.current;
+  }, []);
 
   // ── Debounced save for items ───────────────────────────────────
   const debouncedSave = useCallback(
@@ -3205,7 +3286,6 @@ export function EinkaufenScreen({
         clearTimeout(saveTimeout.current);
       saveTimeout.current = setTimeout(() => {
         if (!householdId) return;
-        broadcastChange([`shopping:${householdId}`]);
         flushItemsSave(householdId);
       }, 300);
     },
@@ -3225,30 +3305,15 @@ export function EinkaufenScreen({
     [debouncedSave],
   );
 
-  // ── Robust store-settings save (mirrors flushItemsSave) ────────
-  const flushSettingsSave = useCallback(
-    async (hhId: string) => {
-      const gen = ++settingsSaveGenRef.current;
-      pendingSettingsSaveRef.current = true;
-      const attempt = async (): Promise<void> => {
-        if (gen !== settingsSaveGenRef.current) return;
-        try {
-          await saveStoreSettings(hhId, latestSettingsRef.current);
-          if (gen === settingsSaveGenRef.current)
-            pendingSettingsSaveRef.current = false;
-        } catch (err) {
-          if (gen !== settingsSaveGenRef.current) return;
-          console.log(
-            "[Einkaufen] saveStoreSettings endgültig fehlgeschlagen — retry in 5s:",
-            err,
-          );
-          setTimeout(attempt, 5000);
-        }
-      };
-      await attempt();
-    },
-    [],
-  );
+  // ── Store-Settings-Save: zeilenweiser Diff pro Laden ───────────
+  const flushSettingsSave = useCallback((hhId: string) => {
+    syncStoreSettingsDiff(
+      hhId,
+      syncedSettingsRef.current,
+      latestSettingsRef.current,
+    );
+    syncedSettingsRef.current = latestSettingsRef.current;
+  }, []);
 
   // ── Debounced save for store settings ──────────────────────────
   const debouncedSaveSettings = useCallback(
@@ -3258,7 +3323,6 @@ export function EinkaufenScreen({
         clearTimeout(settingsSaveTimeout.current);
       settingsSaveTimeout.current = setTimeout(() => {
         if (!householdId) return;
-        broadcastChange([`store_settings:${householdId}`]);
         flushSettingsSave(householdId);
       }, 300);
     },
@@ -3723,10 +3787,9 @@ export function EinkaufenScreen({
       clearTimeout(saveTimeout.current);
       saveTimeout.current = undefined;
     }
-    // 2. Robust persistieren: gleiche Retry-/Pending-Logik wie jeder andere
-    //    Item-Save, damit ein fehlgeschlagenes Leeren nicht still verloren geht
-    //    und ein Reload die geleerte Liste nicht wieder befüllt.
-    broadcastChange([`shopping:${householdId}`]);
+    // 2. Robust persistieren: der zeilenweise Diff löscht die entfernten
+    //    Artikel (DELETE pro Zeile, mit Retry). Andere Geräte bekommen das
+    //    Löschen über die Realtime-Subscription.
     flushItemsSave(householdId);
   }, [householdId, selectedStore, flushItemsSave]);
 
@@ -3743,7 +3806,6 @@ export function EinkaufenScreen({
       clearTimeout(saveTimeout.current);
       saveTimeout.current = undefined;
     }
-    broadcastChange([`shopping:${householdId}`]);
     flushItemsSave(householdId);
   }, [householdId, selectedStore, flushItemsSave]);
 
