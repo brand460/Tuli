@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { CookingPot, Notepad } from "phosphor-react";
 import { apiFetch } from "../supabase-client";
+import { fetchNotePagesMeta } from "../listen/notes-sync";
 import { ImageWithFallback } from "../figma/ImageWithFallback";
 import { useKvRealtime, broadcastChange } from "../use-kv-realtime";
 import { useBackHandler } from "../ui/use-back-handler";
@@ -2413,7 +2414,7 @@ function EventEditorSheet({
     (async () => {
       try {
         const [pagesRes, recipesRes] = await Promise.all([
-          apiFetch(`/custom-pages?household_id=${householdId}`),
+          fetchNotePagesMeta(householdId!).then((pages) => ({ pages })),
           apiFetch(`/recipes?household_id=${householdId}`),
         ]);
         setAvailablePages(pagesRes.pages || []);

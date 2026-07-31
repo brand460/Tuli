@@ -61,6 +61,17 @@ export async function fetchNotes(householdId: string): Promise<NotesSnapshot> {
   return { pages, contents };
 }
 
+/** Nur die Seiten-Metadaten (ohne Inhalt) — z. B. für die Seiten-Verknüpfung
+ *  im Kalender. Spart das Übertragen der (potenziell großen) content-Spalte. */
+export async function fetchNotePagesMeta(householdId: string): Promise<NotePage[]> {
+  const { data, error } = await supabase
+    .from("notes_pages")
+    .select("id, title, icon, parent_id, position")
+    .eq("household_id", householdId);
+  if (error) throw new Error(error.message);
+  return (data as NoteRow[]).map(rowToPage);
+}
+
 // ── Metadaten (Titel/Icon/Reihenfolge/Parent) einer Seite ───────────────────
 export async function upsertPageMeta(
   householdId: string,

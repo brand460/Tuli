@@ -24,6 +24,12 @@ import { useAuth, type HouseholdMember } from "../auth-context";
 import { useKeyboardOffset } from "../ui/use-keyboard-offset";
 import { INGREDIENT_UNITS } from "./ingredient-units";
 import { GROCERY_DATABASE, DEFAULT_STORES, buildMergedItems, buildExcludeSet, getCategoryChipColor, getLogoUrl, getItemCategoryDot, getAllCategories, setCategoryColorOverrides } from "../einkaufen/shopping-data";
+import {
+  fetchShoppingItems,
+  fetchStoreSettings,
+  insertShoppingItem,
+  patchShoppingItem,
+} from "../einkaufen/shopping-sync";
 
 const DRAWER_SPRING = { type: "spring" as const, damping: 25, stiffness: 300 };
 
@@ -358,7 +364,7 @@ export function KochenScreen({ openRecipeId, sharedText, onSharedTextConsumed, o
       const [recipeRes, mealRes, storeRes, customCatRes, catColorRes] = await Promise.all([
         apiFetch(`/recipes?household_id=${householdId}`),
         apiFetch(`/meal-plan?household_id=${householdId}`),
-        apiFetch(`/store-settings?household_id=${householdId}`),
+        fetchStoreSettings(householdId).then((settings) => ({ settings })),
         apiFetch(`/custom-recipe-categories?household_id=${householdId}`).catch(() => ({ categories: [] })),
         apiFetch(`/category-colors?household_id=${householdId}`).catch(() => ({ colors: {} })),
       ]);
@@ -944,18 +950,25 @@ Extraktionsregeln:
 
   const addIngredientsToShopping = async () => {
     if (!ingredientsRecipe) return;
+    if (!householdId) return;
     const UNITS_NAME_ONLY = ["tl", "el", "päckchen", "pck", "pk"];
     try {
-      const shoppingRes = await apiFetch(`/shopping?household_id=${householdId}`);
-      const existingItems: any[] = shoppingRes.items || [];
+      // Zeilenbasiert aus shopping_items lesen (statt Blob).
+      const existingItems = await fetchShoppingItems(householdId);
       const chosen = ingredientsRecipe.ingredients.filter((_, i) => selectedIngredients[i]);
 
+      // Ausgangszustand pro Zeile merken (für gezielte PATCHes).
+      const origById = new Map<string, { position: number; quantity: number }>(
+        existingItems.map((i) => [i.id, { position: i.position, quantity: i.quantity }]),
+      );
       // Build lookup map for merge-by-name
       const existingMap = new Map<string, any>();
       existingItems.forEach((item) => existingMap.set(item.name.toLowerCase(), item));
 
       let addedCount = 0;
-      const updatedItems = [...existingItems];
+      const working: any[] = existingItems.map((i) => ({ ...i }));
+      const insertedIds = new Set<string>();
+      const quantityChanged = new Set<string>();
 
       for (const ing of chosen) {
         const dbMatch = GROCERY_DATABASE.find(
@@ -976,21 +989,25 @@ Extraktionsregeln:
 
         if (existingEntry) {
           existingEntry.quantity = (existingEntry.quantity || 1) + itemQty;
+          quantityChanged.add(existingEntry.id);
         } else {
-          const storeVal = ingredientStore === "alle" ? null : ingredientStore;
+          // Neue Zeile: "alle" statt null (Spalte ist NOT NULL, Default 'alle').
+          const storeVal = ingredientStore === "alle" ? "alle" : ingredientStore;
           const newItem = {
             id: genId(),
             name: itemName,
             store: storeVal,
             category,
             is_checked: false,
-            position: updatedItems.length,
+            position: working.length,
             quantity: itemQty,
             unit: itemUnit,
             household_id: householdId || "",
+            manually_positioned: false,
           };
-          updatedItems.push(newItem);
+          working.push(newItem);
           existingMap.set(existingKey, newItem);
+          insertedIds.add(newItem.id);
           addedCount++;
         }
       }
@@ -999,13 +1016,10 @@ Extraktionsregeln:
       // ingredients follow the store's category order instead of piling up at
       // the bottom (mirrors the shopping screen's category-based ordering).
       const targetStoreValue =
-        ingredientStore === "alle" ? null : ingredientStore;
+        ingredientStore === "alle" ? "alle" : ingredientStore;
       let categoryOrder: string[] = getAllCategories();
       try {
-        const settingsRes = await apiFetch(
-          `/store-settings?household_id=${householdId}`
-        );
-        const settings: any[] = settingsRes.settings || [];
+        const settings = await fetchStoreSettings(householdId);
         const entry = settings.find(
           (s) => s.store_id === ingredientStore
         );
@@ -1023,7 +1037,7 @@ Extraktionsregeln:
         const i = categoryOrder.indexOf(cat);
         return i < 0 ? Number.MAX_SAFE_INTEGER : i;
       };
-      const targetUnchecked = updatedItems
+      const targetUnchecked = working
         .filter((i) => i.store === targetStoreValue && !i.is_checked)
         .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
       const resorted = [...targetUnchecked].sort((a, b) => {
@@ -1032,18 +1046,24 @@ Extraktionsregeln:
       });
       const posMap = new Map<string, number>();
       resorted.forEach((item, idx) => posMap.set(item.id, idx));
-      for (const item of updatedItems) {
+      for (const item of working) {
         const np = posMap.get(item.id);
         if (np !== undefined) item.position = np;
       }
 
-      await apiFetch("/shopping", {
-        method: "PUT",
-        body: JSON.stringify({
-          household_id: householdId,
-          items: updatedItems,
-        }),
-      });
+      // Zeilenweise persistieren: neue Artikel INSERT, geänderte Felder PATCH.
+      for (const item of working) {
+        if (insertedIds.has(item.id)) {
+          await insertShoppingItem(item, householdId);
+          continue;
+        }
+        const orig = origById.get(item.id);
+        const patch: any = {};
+        if (quantityChanged.has(item.id) && orig && item.quantity !== orig.quantity)
+          patch.quantity = item.quantity;
+        if (orig && item.position !== orig.position) patch.position = item.position;
+        if (Object.keys(patch).length) await patchShoppingItem(item.id, patch);
+      }
       toast.success(`${addedCount} Zutaten hinzugefügt`);
     } catch (err) {
       console.error("Fehler beim Hinzufügen zur Einkaufsliste:", err);
@@ -2540,10 +2560,14 @@ function RecipeDetailView({
   const handleAddToShopping = async () => {
     const chosen = recipe.ingredients.filter((_, i) => checkedIngredients[i]);
     if (chosen.length === 0) return;
+    if (!householdId) return;
     setAddingToShopping(true);
     try {
-      const shoppingRes = await apiFetch(`/shopping?household_id=${householdId}`);
-      const existingItems: any[] = shoppingRes.items || [];
+      // Zeilenbasiert aus shopping_items lesen (statt Blob).
+      const existingItems = await fetchShoppingItems(householdId);
+      const origQtyById = new Map<string, number>(
+        existingItems.map((i) => [i.id, i.quantity]),
+      );
 
       // Build a lookup map for existing items (by lowercased name)
       const existingMap = new Map<string, any>();
@@ -2561,7 +2585,8 @@ function RecipeDetailView({
       });
 
       let addedCount = 0;
-      const updatedItems = [...existingItems];
+      const inserts: any[] = [];
+      const quantityChanged = new Set<string>();
 
       for (const ing of scaledChosen) {
         // Category lookup: GROCERY_DATABASE first, fallback "Sonstiges"
@@ -2596,32 +2621,35 @@ function RecipeDetailView({
         if (existingEntry) {
           // Merge: add the actual ingredient quantity instead of a flat +1
           existingEntry.quantity = (existingEntry.quantity || 1) + itemQty;
+          quantityChanged.add(existingEntry.id);
         } else {
-          const storeVal = selectedStore === "alle" ? null : selectedStore;
+          // Neue Zeile: "alle" statt null (Spalte ist NOT NULL, Default 'alle').
+          const storeVal = selectedStore === "alle" ? "alle" : selectedStore;
           const newItem = {
             id: genId(),
             name: itemName,
             store: storeVal,
             category,
             is_checked: false,
-            position: updatedItems.length,
+            position: existingItems.length + inserts.length,
             quantity: itemQty,
             unit: itemUnit,
             household_id: householdId || "",
+            manually_positioned: false,
           };
-          updatedItems.push(newItem);
+          inserts.push(newItem);
           existingMap.set(existingKey, newItem);
           addedCount++;
         }
       }
 
-      await apiFetch("/shopping", {
-        method: "PUT",
-        body: JSON.stringify({
-          household_id: householdId,
-          items: updatedItems,
-        }),
-      });
+      // Zeilenweise persistieren: neue Artikel INSERT, gemergte Mengen PATCH.
+      for (const item of inserts) await insertShoppingItem(item, householdId);
+      for (const item of existingItems) {
+        if (quantityChanged.has(item.id) && item.quantity !== origQtyById.get(item.id)) {
+          await patchShoppingItem(item.id, { quantity: item.quantity });
+        }
+      }
 
       setShowShoppingDrawer(false);
       toast.success(`${addedCount} Zutaten hinzugefügt ✅`);

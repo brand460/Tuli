@@ -11,6 +11,7 @@ import {
   getCategoryColorOverrides,
   setCategoryColorOverrides,
 } from "./einkaufen/shopping-data";
+import { fetchShoppingItems as fetchShoppingItemsRows } from "./einkaufen/shopping-sync";
 import { useKeyboardOffset } from "./ui/use-keyboard-offset";
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -54,12 +55,8 @@ async function fetchGlobalItems(hhId: string): Promise<GlobalItem[]> {
 
 async function fetchShoppingItems(hhId: string): Promise<ShoppingItem[]> {
   try {
-    const res = await fetch(
-      `${API_BASE}/shopping?household_id=${hhId}`,
-      { headers: { Authorization: `Bearer ${publicAnonKey}` } },
-    );
-    const json = await res.json();
-    return json.items || [];
+    // Zeilenbasiert aus shopping_items lesen (statt Blob-Route).
+    return await fetchShoppingItemsRows(hhId);
   } catch (err) {
     console.log("fetchShoppingItems error:", err);
     return [];
