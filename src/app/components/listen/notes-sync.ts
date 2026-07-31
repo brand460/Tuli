@@ -11,7 +11,7 @@
  * aktuellsten Stand nachgespeichert (nie zwei parallele Requests für dieselbe
  * Seite).
  */
-import { supabase } from "../supabase-client";
+import { supabase, projectId, publicAnonKey } from "../supabase-client";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
 export interface NotePage {
@@ -186,6 +186,66 @@ export function hasPendingContentWrite(pageId: string): boolean {
 /** Läuft für IRGENDEINE Seite gerade noch ein ungespeicherter Content-Save? */
 export function hasPendingContentWrites(): boolean {
   return pageChains.size > 0;
+}
+
+// ── Keepalive-Notfall-Save für das tatsächliche App-Schließen (pagehide) ────
+// Beim echten Teardown (Tab/PWA schließen) wird der JS-Kontext verworfen, bevor
+// ein normaler supabase-js-Request fertig ist — und supabase-js unterstützt
+// `keepalive` auf seinen internen fetch-Calls nicht. Daher hier ein direkter
+// fetch() mit keepalive:true gegen den PostgREST-Endpunkt notes_pages, mit dem
+// aktuellen Access-Token als Bearer (RLS greift also weiterhin: es lässt sich
+// nur der eigene Haushalt ändern). Best-effort — das localStorage-Backup bleibt
+// als eigentliches Sicherheitsnetz bestehen.
+
+// Access-Token synchron aus dem localStorage lesen (kein await beim pagehide
+// möglich). Schlüssel = storageKey des Supabase-Clients ('tuli-supabase-auth').
+function readAccessTokenSync(): string | null {
+  try {
+    const raw = localStorage.getItem("tuli-supabase-auth");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return (
+      parsed?.access_token ??
+      parsed?.currentSession?.access_token ??
+      parsed?.session?.access_token ??
+      null
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Persistiert die übergebenen Seiten-Inhalte per keepalive-fetch, sodass sie das
+ * Schließen der App überleben. Nur für den pagehide-Fall gedacht.
+ * `contents`: Map pageId -> HTML (nur die tatsächlich geänderten Seiten).
+ */
+export function flushContentsKeepalive(contents: Record<string, string>): void {
+  const token = readAccessTokenSync();
+  // Ohne gültiges User-Token würde RLS den Update verwerfen — dann lieber gar
+  // nicht senden und auf das localStorage-Backup + Retry beim nächsten Start
+  // vertrauen.
+  if (!token) return;
+  const baseUrl = `https://${projectId}.supabase.co/rest/v1/notes_pages`;
+  for (const [pageId, content] of Object.entries(contents)) {
+    try {
+      void fetch(`${baseUrl}?id=eq.${encodeURIComponent(pageId)}`, {
+        method: "PATCH",
+        keepalive: true,
+        headers: {
+          "Content-Type": "application/json",
+          apikey: publicAnonKey,
+          Authorization: `Bearer ${token}`,
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify({ content }),
+      }).catch(() => {
+        /* best-effort — Backup greift beim nächsten Start */
+      });
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 // ── Realtime: postgres_changes ──────────────────────────────────────────────

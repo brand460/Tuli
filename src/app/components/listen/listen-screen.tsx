@@ -26,6 +26,7 @@ import {
   deletePages,
   savePageContent,
   hasPendingContentWrite,
+  flushContentsKeepalive,
   subscribeNotes,
 } from "./notes-sync";
 import { useBackHandler, pushBack, removeBack } from "../ui/use-back-handler";
@@ -336,7 +337,7 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
 
   const loadListenData = useCallback(async (isInitial = false) => {
     try {
-      const snapshot = await fetchNotes(householdId);
+      const snapshot = await fetchNotes(householdId!);
       // Skip remote updates if we just wrote locally
       if (!isInitial && Date.now() - lastLocalListenWrite.current < 2000) return;
 
@@ -512,9 +513,29 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
       loadListenData(false);
     };
     // pagehide fires on real page teardown (tab close / PWA close / navigation)
-    // where the JS context will be discarded — use keepalive so the request
-    // can outlive the page.
-    const handlePageHide = () => flushSave(true);
+    // where the JS context will be discarded. supabase-js unterstützt hier kein
+    // keepalive → für die ausstehenden Seiten-INHALTE einen direkten
+    // keepalive-fetch gegen PostgREST feuern, damit sie das Schließen überleben.
+    // Metadaten/Backup laufen weiter über das localStorage-Netz (Recovery beim
+    // nächsten Start). Der visibilitychange=hidden-Pfad bleibt unverändert.
+    const handlePageHide = () => {
+      const pending = pendingSaveRef.current;
+      if (pending && householdId) {
+        const changed: Record<string, string> = {};
+        for (const pg of pending.p) {
+          const c = pending.c[pg.id];
+          if (c !== undefined && c !== syncedContentsRef.current[pg.id]) {
+            changed[pg.id] = c;
+          }
+        }
+        if (Object.keys(changed).length > 0) flushContentsKeepalive(changed);
+      }
+      // Offenen Debounce-Timer stoppen; das Backup bleibt als Netz bestehen.
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+    };
     document.addEventListener("visibilitychange", handleVisibility);
     window.addEventListener("focus", handleFocus);
     window.addEventListener("pagehide", handlePageHide);

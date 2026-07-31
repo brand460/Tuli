@@ -1,6 +1,11 @@
 import { createClient } from "@supabase/supabase-js";
 import { projectId, publicAnonKey } from "/utils/supabase/info";
 
+// Re-export so andere Module (z. B. notes-sync) diese Werte über einen
+// auflösbaren relativen Pfad importieren können, statt über den absoluten
+// "/utils/..."-Pfad (den der TS-Language-Service ohne tsconfig nicht auflöst).
+export { projectId, publicAnonKey };
+
 const supabaseUrl = `https://${projectId}.supabase.co`;
 
 // Singleton: prevent duplicate GoTrueClient instances during HMR.
