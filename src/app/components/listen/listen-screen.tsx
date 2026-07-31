@@ -19,8 +19,15 @@ import {
 } from "lucide-react";
 import { ArrowCounterClockwise } from "phosphor-react";
 import { toast } from "sonner";
-import { apiFetch } from "../supabase-client";
-import { useKvRealtime, broadcastChange } from "../use-kv-realtime";
+import { supabase } from "../supabase-client";
+import {
+  fetchNotes,
+  upsertPagesMeta,
+  deletePages,
+  savePageContent,
+  hasPendingContentWrite,
+  subscribeNotes,
+} from "./notes-sync";
 import { useBackHandler, pushBack, removeBack } from "../ui/use-back-handler";
 import { useAuth } from "../auth-context";
 import {
@@ -217,6 +224,10 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
   // the 500 ms timer never fires (iOS freezes the JS context) and the last edits
   // are lost. This is the core data-loss fix for the notes editor.
   const pendingSaveRef = useRef<{ p: Page[]; c: PageContents } | null>(null);
+  // Zuletzt mit der DB synchronisierter Stand — Basis dafür, welche
+  // Seiten-INHALTE sich geändert haben und welche Seiten gelöscht wurden.
+  const syncedContentsRef = useRef<PageContents>({});
+  const syncedPageIdsRef = useRef<string[]>([]);
 
   // ── Local backup (survives crash / logout / failed network / JS freeze) ──
   // Every edit is mirrored synchronously to localStorage. The backup is only
@@ -238,27 +249,37 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
     try { localStorage.removeItem(backupKey); } catch (_) { /* ignore */ }
   }, [backupKey]);
 
-  const saveData = useCallback(async (p: Page[], c: PageContents, keepalive = false) => {
+  const saveData = useCallback(async (p: Page[], c: PageContents, _keepalive = false) => {
+    if (!householdId) return;
     try {
-      broadcastChange([`custom_pages:${householdId}`, `custom_blocks:${householdId}`]);
-      await Promise.all([
-        apiFetch("/custom-pages", {
-          method: "PUT",
-          body: JSON.stringify({ household_id: householdId, pages: p }),
-          keepalive,
-        }),
-        apiFetch("/custom-blocks", {
-          method: "PUT",
-          body: JSON.stringify({ household_id: householdId, blocks: c }),
-          keepalive,
-        }),
-      ]);
-      // Server confirmed → this snapshot is safe, drop the pending state + backup.
+      // 1. Seiten-Metadaten (Titel/Icon/Reihenfolge/Parent) als kleine, seltene
+      //    Gesamtliste upserten — legt zugleich neue Seiten-Zeilen an.
+      await upsertPagesMeta(householdId, p);
+      // 2. Gelöschte Seiten entfernen (waren zuletzt synchronisiert, jetzt weg).
+      const currentIds = new Set(p.map((pg) => pg.id));
+      const removed = syncedPageIdsRef.current.filter((id) => !currentIds.has(id));
+      if (removed.length) await deletePages(removed);
+      // 3. NUR die geänderten Seiten-INHALTE einzeln speichern (serialisiert pro
+      //    Seite). So überschreibt eine Aktion auf Seite A nie den Inhalt von B.
+      const contentSaves: Promise<void>[] = [];
+      for (const pg of p) {
+        const nextContent = c[pg.id];
+        if (
+          nextContent !== undefined &&
+          nextContent !== syncedContentsRef.current[pg.id]
+        ) {
+          contentSaves.push(savePageContent(householdId, pg.id, nextContent));
+        }
+      }
+      await Promise.all(contentSaves);
+      // Server bestätigt → Diff-Basis + Backup aktualisieren.
+      syncedContentsRef.current = { ...c };
+      syncedPageIdsRef.current = p.map((pg) => pg.id);
       pendingSaveRef.current = null;
       clearLocalBackup();
     } catch (err) {
-      // Keep pendingSaveRef + localStorage backup intact so the data can be
-      // retried (on next edit / visibility change) or recovered on next load.
+      // pendingSaveRef + localStorage-Backup bleiben erhalten → Retry bei
+      // nächster Bearbeitung / Sichtbarkeit oder Wiederherstellung beim Laden.
       console.error("Fehler beim Speichern:", err);
     }
   }, [householdId, clearLocalBackup]);
@@ -315,10 +336,7 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
 
   const loadListenData = useCallback(async (isInitial = false) => {
     try {
-      const [pRes, bRes] = await Promise.all([
-        apiFetch(`/custom-pages?household_id=${householdId}`),
-        apiFetch(`/custom-blocks?household_id=${householdId}`),
-      ]);
+      const snapshot = await fetchNotes(householdId);
       // Skip remote updates if we just wrote locally
       if (!isInitial && Date.now() - lastLocalListenWrite.current < 2000) return;
 
@@ -358,8 +376,7 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
         }
       }
 
-      const loadedPages: Page[] = pRes.pages || [];
-      const rawBlocks = bRes.blocks;
+      const loadedPages: Page[] = snapshot.pages;
 
       if (loadedPages.length === 0 && isInitial) {
         setPages(DEFAULT_PAGES);
@@ -369,16 +386,11 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
         setActivePageId(initialId);
         saveData(DEFAULT_PAGES, DEFAULT_CONTENTS);
       } else if (loadedPages.length > 0) {
-        let contents: PageContents;
-        if (Array.isArray(rawBlocks)) {
-          contents = migrateOldBlocks(rawBlocks);
-        } else if (rawBlocks && typeof rawBlocks === "object") {
-          contents = rawBlocks as PageContents;
-        } else {
-          contents = {};
-        }
+        const contents: PageContents = snapshot.contents;
         setPages(loadedPages);
         setPageContents(contents);
+        syncedPageIdsRef.current = loadedPages.map((p) => p.id);
+        syncedContentsRef.current = { ...contents };
         if (isInitial) {
           const savedId = sessionStorage.getItem("listen_active_page");
           const restoredId = (savedId && loadedPages.some(p => p.id === savedId)) ? savedId : loadedPages[0]?.id || null;
@@ -417,11 +429,62 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
     }
   }, [openPageId, loaded, pages]);
 
-  // ── Supabase Realtime subscription for live sync ──
-  useKvRealtime(
-    [`custom_pages:${householdId}`, `custom_blocks:${householdId}`],
-    useCallback(() => loadListenData(false), [loadListenData]),
-  );
+  // ── Realtime (postgres_changes) für Notizseiten ──
+  // Eingehende Änderungen werden INKREMENTELL angewendet: ein UPDATE für Seite X
+  // aktualisiert nur pageContents[X], nie die ganze Map. Der Inhalt der gerade
+  // aktiv bearbeiteten (fokussierten) Seite wird NICHT überschrieben.
+  const activePageIdRef = useRef(activePageId);
+  activePageIdRef.current = activePageId;
+  useEffect(() => {
+    if (!householdId) return;
+    const ch = subscribeNotes(householdId, {
+      onUpsert: (page, content) => {
+        // Metadaten (Titel/Icon/Reihenfolge/Parent) immer übernehmen.
+        setPages((prev) => {
+          const idx = prev.findIndex((p) => p.id === page.id);
+          if (idx === -1) return [...prev, page as Page];
+          const copy = [...prev];
+          copy[idx] = { ...copy[idx], ...page };
+          return copy;
+        });
+        if (!syncedPageIdsRef.current.includes(page.id)) {
+          syncedPageIdsRef.current = [...syncedPageIdsRef.current, page.id];
+        }
+        // Inhalt nur übernehmen, wenn wir DIESE Seite nicht gerade selbst
+        // bearbeiten und kein eigener Save für sie läuft (Echo-/Clobber-Schutz).
+        const editingThisPage =
+          page.id === activePageIdRef.current &&
+          !!document.activeElement &&
+          (document.activeElement as HTMLElement).isContentEditable;
+        if (!editingThisPage && !hasPendingContentWrite(page.id)) {
+          syncedContentsRef.current = {
+            ...syncedContentsRef.current,
+            [page.id]: content,
+          };
+          setPageContents((prev) =>
+            prev[page.id] === content ? prev : { ...prev, [page.id]: content },
+          );
+        }
+      },
+      onDelete: (id) => {
+        const copy = { ...syncedContentsRef.current };
+        delete copy[id];
+        syncedContentsRef.current = copy;
+        syncedPageIdsRef.current = syncedPageIdsRef.current.filter((x) => x !== id);
+        setPages((prev) => prev.filter((p) => p.id !== id));
+        setPageContents((prev) => {
+          if (!(id in prev)) return prev;
+          const c2 = { ...prev };
+          delete c2[id];
+          return c2;
+        });
+        if (activePageIdRef.current === id) setActivePageId(null);
+      },
+    });
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [householdId]);
 
   // ── Visibility / focus handlers for reconnection ──
   useEffect(() => {
