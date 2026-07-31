@@ -27,6 +27,7 @@ import {
   savePageContent,
   hasPendingContentWrite,
   flushContentsKeepalive,
+  fetchPageContent,
   subscribeNotes,
 } from "./notes-sync";
 import { useBackHandler, pushBack, removeBack } from "../ui/use-back-handler";
@@ -436,6 +437,34 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
   // aktiv bearbeiteten (fokussierten) Seite wird NICHT überschrieben.
   const activePageIdRef = useRef(activePageId);
   activePageIdRef.current = activePageId;
+  const pageContentsRef = useRef(pageContents);
+  pageContentsRef.current = pageContents;
+
+  // Beim Verlassen des Editors (Blur) den aktuellen Serverstand DIESER Seite
+  // nachladen — so „holt“ der Sync auf, nachdem Remote-Updates während der
+  // Fokussierung bewusst nicht übernommen wurden. Nur anwenden, wenn wir für
+  // die Seite keine ungespeicherte lokale Änderung haben (sonst gewinnt unser
+  // eigener Save — „letzter Speichervorgang gewinnt“ pro Seite).
+  const reconcileActivePage = useCallback(async () => {
+    const pid = activePageIdRef.current;
+    if (!pid || !householdId) return;
+    if (hasPendingContentWrite(pid)) return;
+    const local = pageContentsRef.current[pid];
+    if (local !== undefined && local !== syncedContentsRef.current[pid]) return;
+    try {
+      const remote = await fetchPageContent(pid);
+      if (remote == null) return;
+      // Editor darf nicht (wieder) fokussiert sein.
+      const active = document.activeElement as HTMLElement | null;
+      if (active && active.isContentEditable && activePageIdRef.current === pid) return;
+      if (remote !== syncedContentsRef.current[pid]) {
+        syncedContentsRef.current = { ...syncedContentsRef.current, [pid]: remote };
+        setPageContents((prev) => (prev[pid] === remote ? prev : { ...prev, [pid]: remote }));
+      }
+    } catch {
+      /* transient — nächster Focus/Visibility gleicht ab */
+    }
+  }, [householdId]);
   useEffect(() => {
     if (!householdId) return;
     const ch = subscribeNotes(householdId, {
@@ -922,6 +951,7 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
                 onOpenEmojiPicker={() => setEmojiPickerPageId(activePage.id)}
                 hasCheckboxes={activePageHasCheckboxes}
                 onResetCheckboxes={resetCheckboxes}
+                onEditorBlur={reconcileActivePage}
               />
             ) : (
               /* Desktop-Fallback — sollte durch Auto-Select nie erreicht werden */
@@ -1992,6 +2022,7 @@ interface PageEditorProps {
   onOpenEmojiPicker: () => void;
   hasCheckboxes?: boolean;
   onResetCheckboxes?: () => void;
+  onEditorBlur?: () => void;
 }
 
 // ── Slash-command menu items ──
@@ -2006,7 +2037,7 @@ const SLASH_ITEMS = [
   { id: "table", label: "Tabelle", icon: "\ud83d\udcca" },
 ];
 
-function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage, onContentChange, onOpenEmojiPicker, hasCheckboxes, onResetCheckboxes }: PageEditorProps) {
+function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage, onContentChange, onOpenEmojiPicker, hasCheckboxes, onResetCheckboxes, onEditorBlur }: PageEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -4200,6 +4231,9 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
               if (slashOpen) closeSlashMenu();
               ensureNotEmpty();
               syncContent();
+              // Nach dem Verlassen: Serverstand dieser Seite nachladen, damit der
+              // Sync aufholt (Remote-Updates während Fokus wurden übersprungen).
+              onEditorBlur?.();
             }}
           />
 

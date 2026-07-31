@@ -72,6 +72,19 @@ export async function fetchNotePagesMeta(householdId: string): Promise<NotePage[
   return (data as NoteRow[]).map(rowToPage);
 }
 
+/** Aktuellen Inhalt EINER Seite laden — für das Nachladen beim Verlassen des
+ *  Editors (Blur), damit der Sync „aufholt", nachdem man die Seite fokussiert
+ *  hatte und Remote-Updates währenddessen bewusst nicht übernommen wurden. */
+export async function fetchPageContent(pageId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("notes_pages")
+    .select("content")
+    .eq("id", pageId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as { content: string } | null)?.content ?? null;
+}
+
 // ── Metadaten (Titel/Icon/Reihenfolge/Parent) einer Seite ───────────────────
 export async function upsertPageMeta(
   householdId: string,

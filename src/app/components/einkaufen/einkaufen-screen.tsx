@@ -3182,6 +3182,40 @@ export function EinkaufenScreen({
   activeDragIdRef.current = activeDragId;
   useEffect(() => {
     if (!householdId) return;
+    // Sicherheitsnetz gegen von Supabase gedrosselte/verschluckte Events bei
+    // sehr schnellen Änderungen (viele Artikel in Folge abhaken/hinzufügen):
+    // kurz nach der letzten Realtime-Aktivität einmal komplett nachladen und
+    // dabei eigene, noch nicht bestätigte Zeilen bewahren (mergeServer*).
+    let reconcileTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleReconcile = () => {
+      if (reconcileTimer) clearTimeout(reconcileTimer);
+      reconcileTimer = setTimeout(async () => {
+        try {
+          const [serverItems, serverSettings] = await Promise.all([
+            fetchItems(householdId),
+            fetchStoreSettings(householdId),
+          ]);
+          const mergedItems = mergeServerItems(
+            serverItems,
+            latestItemsRef.current,
+          );
+          latestItemsRef.current = mergedItems;
+          syncedItemsRef.current = serverItems;
+          setItems(mergedItems);
+          const dedup = dedupeStoreSettings(serverSettings);
+          const mergedSettings = mergeServerSettings(
+            dedup,
+            latestSettingsRef.current,
+          );
+          latestSettingsRef.current = mergedSettings;
+          syncedSettingsRef.current = dedup;
+          setStoreSettings(mergedSettings);
+          applyStoreSettingsRef.current(DEFAULT_STORES, mergedSettings);
+        } catch {
+          /* transient — nächster Event/Focus gleicht ab */
+        }
+      }, 700);
+    };
     const chItems = subscribeShoppingItems(householdId, {
       onInsert: (item) => {
         if (activeDragIdRef.current) return;
@@ -3193,6 +3227,7 @@ export function EinkaufenScreen({
         latestItemsRef.current = next;
         syncedItemsRef.current = next;
         setItems(next);
+        scheduleReconcile();
       },
       onUpdate: (item) => {
         if (activeDragIdRef.current) return;
@@ -3204,6 +3239,7 @@ export function EinkaufenScreen({
         latestItemsRef.current = next;
         syncedItemsRef.current = next;
         setItems(next);
+        scheduleReconcile();
       },
       onDelete: (id) => {
         if (hasPendingRowWrite(`item:${id}`)) return;
@@ -3211,6 +3247,7 @@ export function EinkaufenScreen({
         latestItemsRef.current = next;
         syncedItemsRef.current = next;
         setItems(next);
+        scheduleReconcile();
       },
     });
     const chStores = subscribeStoreSettings(householdId, {
@@ -3238,6 +3275,7 @@ export function EinkaufenScreen({
       },
     });
     return () => {
+      if (reconcileTimer) clearTimeout(reconcileTimer);
       supabase.removeChannel(chItems);
       supabase.removeChannel(chStores);
     };
