@@ -28,6 +28,47 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 3, delayMs = 300): P
   throw new Error("withRetry: exhausted retries");
 }
 
+// ── Gemini (Google) API helper ──────────────────────────────────
+// EIN zentraler Ort für den Modellnamen. "gemini-flash-latest" ist ein stabiler
+// Alias auf das jeweils aktuelle, günstige Flash-Modell — so bricht der Import
+// nicht mehr, wenn eine einzelne datierte Modellversion abgeschaltet wird.
+const GEMINI_MODEL = "gemini-flash-latest";
+
+type GeminiPart = { text: string } | { inline_data: { mime_type: string; data: string } };
+
+async function callGemini(opts: {
+  apiKey: string;
+  parts: GeminiPart[];
+  system?: string;
+  maxOutputTokens?: number;
+}): Promise<{ ok: true; text: string } | { ok: false; status: number; error: string }> {
+  const body: any = {
+    contents: [{ role: "user", parts: opts.parts }],
+    generationConfig: {
+      temperature: 0,
+      maxOutputTokens: opts.maxOutputTokens ?? 2048,
+      responseMimeType: "application/json",
+    },
+  };
+  if (opts.system) body.system_instruction = { parts: [{ text: opts.system }] };
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": opts.apiKey },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!res.ok) {
+    const errText = await res.text();
+    return { ok: false, status: res.status, error: errText.substring(0, 200) };
+  }
+  const data = await res.json();
+  const text =
+    data?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text ?? "").join("") || "";
+  return { ok: true, text };
+}
+
 const app = new Hono();
 
 app.use("*", logger(console.log));
@@ -985,61 +1026,36 @@ app.post("/make-server-2a26506b/backfill-profiles", async (c) => {
 
 app.post("/make-server-2a26506b/scan-shopping-list", async (c) => {
   try {
-    const { image_base64, media_type, anthropic_api_key } = await c.req.json();
+    const { image_base64, media_type, gemini_api_key } = await c.req.json();
     if (!image_base64) {
       return c.json({ error: "Kein Bild übermittelt." }, 400);
     }
-    const apiKey = anthropic_api_key;
+    const apiKey = gemini_api_key;
     if (!apiKey) {
-      return c.json({ error: "ANTHROPIC_API_KEY wurde nicht übergeben. Bitte in Vercel unter Environment Variables als VITE_ANTHROPIC_API_KEY hinterlegen." }, 400);
+      return c.json({ error: "GEMINI_API_KEY wurde nicht übergeben. Bitte in Vercel unter Environment Variables als VITE_GEMINI_API_KEY hinterlegen." }, 400);
     }
 
-    const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 2048,
-        system: `Du bist ein Assistent der handgeschriebene Einkaufslisten erkennt. 
+    const gemini = await callGemini({
+      apiKey,
+      maxOutputTokens: 2048,
+      system: `Du bist ein Assistent der handgeschriebene Einkaufslisten erkennt. 
 Antworte NUR mit einem JSON-Array, kein weiterer Text, keine Markdown-Backticks.
 Format: [{"name": "Artikelname", "quantity": 1}]
 Bereinige Rechtschreibfehler, normalisiere Groß-/Kleinschreibung (ersten Buchstaben groß).
 Ignoriere durchgestrichene oder unleserliche Einträge.
 Extrahiere Mengenangaben wenn vorhanden (z.B. "3x Äpfel" → quantity: 3).`,
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "image",
-                source: {
-                  type: "base64",
-                  media_type: media_type || "image/jpeg",
-                  data: image_base64,
-                },
-              },
-              {
-                type: "text",
-                text: "Bitte erkenne alle Artikel auf dieser Einkaufsliste.",
-              },
-            ],
-          },
-        ],
-      }),
+      parts: [
+        { inline_data: { mime_type: media_type || "image/jpeg", data: image_base64 } },
+        { text: "Bitte erkenne alle Artikel auf dieser Einkaufsliste." },
+      ],
     });
 
-    if (!claudeRes.ok) {
-      const errText = await claudeRes.text();
-      console.log("Claude Vision API error:", errText);
-      return c.json({ error: `Claude API Fehler: ${claudeRes.status} ${errText.substring(0, 200)}` }, 500);
+    if (!gemini.ok) {
+      console.log("Gemini Vision API error:", gemini.error);
+      return c.json({ error: `Gemini API Fehler: ${gemini.status} ${gemini.error}` }, 500);
     }
 
-    const claudeData = await claudeRes.json();
-    const text = claudeData?.content?.[0]?.text || "";
+    const text = gemini.text;
 
     let items: any[];
     try {
@@ -1069,14 +1085,14 @@ Extrahiere Mengenangaben wenn vorhanden (z.B. "3x Äpfel" → quantity: 3).`,
 
 app.post("/make-server-2a26506b/import-recipe", async (c) => {
   try {
-    const { url, anthropic_api_key } = await c.req.json();
+    const { url, gemini_api_key } = await c.req.json();
     if (!url) {
       return c.json({ error: "URL ist erforderlich." }, 400);
     }
 
-    const apiKey = anthropic_api_key;
+    const apiKey = gemini_api_key;
     if (!apiKey) {
-      return c.json({ error: "ANTHROPIC_API_KEY wurde nicht übergeben. Bitte in Vercel unter Environment Variables als VITE_ANTHROPIC_API_KEY hinterlegen." }, 400);
+      return c.json({ error: "GEMINI_API_KEY wurde nicht übergeben. Bitte in Vercel unter Environment Variables als VITE_GEMINI_API_KEY hinterlegen." }, 400);
     }
 
     // Fetch the webpage content
@@ -1211,30 +1227,17 @@ app.post("/make-server-2a26506b/import-recipe", async (c) => {
       "",
       "Felder die du nicht finden kannst setzt du auf null. Antworte NUR mit dem JSON.",
     ].join("\n");
-    const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 2048,
-        system: recipeSystemPrompt,
-        messages: [
-          { role: "user", content: `URL: ${url}\n\nInhalt:\n${pageContent}` },
-        ],
-      }),
+    const gemini = await callGemini({
+      apiKey,
+      maxOutputTokens: 2048,
+      system: recipeSystemPrompt,
+      parts: [{ text: `URL: ${url}\n\nInhalt:\n${pageContent}` }],
     });
-    if (!claudeRes.ok) {
-      const errText = await claudeRes.text();
-      console.log("Claude API error:", errText);
-      return c.json({ error: `Claude API Fehler: ${claudeRes.status} ${errText.substring(0, 200)}` }, 500);
+    if (!gemini.ok) {
+      console.log("Gemini API error:", gemini.error);
+      return c.json({ error: `Gemini API Fehler: ${gemini.status} ${gemini.error}` }, 500);
     }
-
-    const claudeData = await claudeRes.json();
-    const text = claudeData?.content?.[0]?.text || "";
+    const text = gemini.text;
 
     // Extract JSON from response
     let recipe: any;
@@ -1243,8 +1246,8 @@ app.post("/make-server-2a26506b/import-recipe", async (c) => {
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       recipe = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(text);
     } catch (parseErr) {
-      console.log("Claude response parse error:", parseErr, "Text:", text.substring(0, 500));
-      return c.json({ error: `Fehler beim Parsen der Claude-Antwort: ${parseErr}` }, 500);
+      console.log("Recipe response parse error:", parseErr, "Text:", text.substring(0, 500));
+      return c.json({ error: `Fehler beim Parsen der KI-Antwort: ${parseErr}` }, 500);
     }
 
     // Ensure source_url is set

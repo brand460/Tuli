@@ -76,6 +76,51 @@ function genId() {
   return crypto.randomUUID?.() || Math.random().toString(36).slice(2, 12);
 }
 
+// ── Gemini (Google) API ──────────────────────────────────────
+// EIN zentraler Ort für den Modellnamen. "gemini-flash-latest" ist ein stabiler
+// Alias auf das jeweils aktuelle, günstige Flash-Modell — bricht nicht, wenn
+// eine einzelne datierte Modellversion abgeschaltet wird.
+const GEMINI_MODEL = "gemini-flash-latest";
+
+type GeminiPart =
+  | { text: string }
+  | { inline_data: { mime_type: string; data: string } };
+
+async function callGemini(opts: {
+  apiKey: string;
+  parts: GeminiPart[];
+  system?: string;
+  maxOutputTokens?: number;
+  signal?: AbortSignal;
+}): Promise<string> {
+  const body: any = {
+    contents: [{ role: "user", parts: opts.parts }],
+    generationConfig: {
+      temperature: 0,
+      maxOutputTokens: opts.maxOutputTokens ?? 2048,
+      responseMimeType: "application/json",
+    },
+  };
+  if (opts.system) body.system_instruction = { parts: [{ text: opts.system }] };
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": opts.apiKey },
+      body: JSON.stringify(body),
+      signal: opts.signal,
+    },
+  );
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Gemini API: ${res.status} ${errText.substring(0, 200)}`);
+  }
+  const data = await res.json();
+  return (
+    data?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text ?? "").join("") || ""
+  );
+}
+
 // WICHTIG: toISOString() liefert UTC → Off-by-one in lokalen Zeitzonen.
 // Immer lokale Zeitzone verwenden:
 function fmtLocalDate(d: Date): string {
@@ -751,16 +796,16 @@ export function KochenScreen({ openRecipeId, sharedText, onSharedTextConsumed, o
 
   const handleUrlImport = async () => {
     if (!urlInput.trim()) return;
-    const anthropicKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
-    if (!anthropicKey) {
-      toast.error("VITE_ANTHROPIC_API_KEY ist nicht gesetzt. Bitte in Vercel unter Environment Variables hinterlegen.");
+    const geminiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    if (!geminiKey) {
+      toast.error("VITE_GEMINI_API_KEY ist nicht gesetzt. Bitte in Vercel unter Environment Variables hinterlegen.");
       return;
     }
     setImporting(true);
     try {
       const res = await apiFetch("/import-recipe", {
         method: "POST",
-        body: JSON.stringify({ url: urlInput.trim(), anthropic_api_key: anthropicKey }),
+        body: JSON.stringify({ url: urlInput.trim(), gemini_api_key: geminiKey }),
       });
       if (res.recipe) {
         const capitalizeFirst = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -804,29 +849,20 @@ export function KochenScreen({ openRecipeId, sharedText, onSharedTextConsumed, o
 
   const handleTextImport = async () => {
     if (!textInput.trim()) return;
-    const anthropicKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
-    if (!anthropicKey) {
-      toast.error("VITE_ANTHROPIC_API_KEY ist nicht gesetzt. Bitte in Vercel unter Environment Variables hinterlegen.");
+    const geminiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    if (!geminiKey) {
+      toast.error("VITE_GEMINI_API_KEY ist nicht gesetzt. Bitte in Vercel unter Environment Variables hinterlegen.");
       return;
     }
     setTextExtracting(true);
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 30000);
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": anthropicKey,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true",
-        },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 2000,
-          messages: [{
-            role: "user",
-            content: `Extrahiere das Rezept aus diesem Text. Antworte NUR mit einem JSON-Objekt, kein weiterer Text, keine Markdown-Backticks.
+      const rawText = await callGemini({
+        apiKey: geminiKey,
+        maxOutputTokens: 2000,
+        signal: controller.signal,
+        parts: [{ text: `Extrahiere das Rezept aus diesem Text. Antworte NUR mit einem JSON-Objekt, kein weiterer Text, keine Markdown-Backticks.
 Format: { "title": "...", "prep_time_minutes": null, "cook_time_minutes": null, "servings": 4, "categories": [], "ingredients": [{"name": "...", "quantity": "...", "unit": "...", "category": "..."}], "steps": [{"position": 1, "description": "..."}] }
 
 SPRACHE & ÜBERSETZUNG (PFLICHT):
@@ -844,15 +880,9 @@ Extraktionsregeln:
 - Falls kein Rezept erkennbar: { "error": "Kein Rezept gefunden" }
 
 Text:
-${textInput}`,
-          }],
-        }),
-        signal: controller.signal,
+${textInput}` }],
       });
       clearTimeout(timeout);
-      if (!response.ok) throw new Error(`Claude API: ${response.status}`);
-      const result = await response.json();
-      const rawText = result.content?.[0]?.text || "";
       const jsonMatch = rawText.match(/\{[\s\S]*\}/);
       if (!jsonMatch) throw new Error("Kein JSON in der Antwort");
       const parsed = JSON.parse(jsonMatch[0]);
@@ -2223,9 +2253,9 @@ Extraktionsregeln:
             showRotation={true}
             onCancel={() => setPhotoCropSrc(null)}
             onConfirm={async (blob) => {
-              const anthropicKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
-              if (!anthropicKey) {
-                toast.error("VITE_ANTHROPIC_API_KEY nicht gesetzt");
+              const geminiKey = import.meta.env.VITE_GEMINI_API_KEY;
+              if (!geminiKey) {
+                toast.error("VITE_GEMINI_API_KEY nicht gesetzt");
                 setPhotoCropSrc(null);
                 return;
               }
@@ -2246,31 +2276,16 @@ Extraktionsregeln:
                 // Call Claude Vision API
                 const controller = new AbortController();
                 const timeout = setTimeout(() => controller.abort(), 30000);
-                const response = await fetch("https://api.anthropic.com/v1/messages", {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    "x-api-key": anthropicKey,
-                    "anthropic-version": "2023-06-01",
-                    "anthropic-dangerous-direct-browser-access": "true",
-                  },
-                  body: JSON.stringify({
-                    model: "claude-sonnet-4-20250514",
-                    max_tokens: 2000,
-                    messages: [{
-                      role: "user",
-                      content: [
-                        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64Image } },
-                        { type: "text", text: photoExtractionPrompt },
-                      ],
-                    }],
-                  }),
+                const text = await callGemini({
+                  apiKey: geminiKey,
+                  maxOutputTokens: 2000,
                   signal: controller.signal,
+                  parts: [
+                    { inline_data: { mime_type: "image/jpeg", data: base64Image } },
+                    { text: photoExtractionPrompt },
+                  ],
                 });
                 clearTimeout(timeout);
-                if (!response.ok) throw new Error(`Claude API: ${response.status}`);
-                const result = await response.json();
-                const text = result.content?.[0]?.text || "";
                 const jsonMatch = text.match(/\{[\s\S]*\}/);
                 if (!jsonMatch) throw new Error("Kein JSON in der Antwort");
                 const parsed = JSON.parse(jsonMatch[0]);
