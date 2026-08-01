@@ -3894,30 +3894,41 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
   );
 
   // ── Click handler for to-do checkboxes ──
+  // Checkbox abhaken, OHNE den Editor zu fokussieren (keine Tastatur, kein
+  // Cursor-Sprung): auf pointerdown den Default-Fokus verhindern und direkt
+  // umschalten. Der spätere Klick wird in handleClick nur noch abgefangen.
+  const handleTodoPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.classList.contains("editor-todo-check")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const todoDiv = target.closest(".editor-todo");
+      if (!todoDiv) return;
+      const scrollEl = containerRef.current;
+      const scrollTop = scrollEl?.scrollTop ?? 0;
+      const isChecked = todoDiv.getAttribute("data-checked") === "true";
+      todoDiv.setAttribute("data-checked", String(!isChecked));
+      syncContent();
+      requestAnimationFrame(() => {
+        if (scrollEl) scrollEl.scrollTop = scrollTop;
+      });
+    },
+    [syncContent]
+  );
+
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
       const target = e.target as HTMLElement;
       if (target.classList.contains("editor-todo-check")) {
+        // Umschalten passiert bereits in onPointerDown (dort wird Fokus/Tastatur
+        // verhindert). Hier nur den Klick abfangen — kein Cursor, kein
+        // doppeltes Umschalten.
         e.preventDefault();
         e.stopPropagation();
-        const todoDiv = target.closest(".editor-todo");
-        if (todoDiv) {
-          // Bug 2 fix: capture scroll position before the state update that
-          // triggers re-render, then restore it in the next animation frame.
-          const scrollEl = containerRef.current;
-          const scrollTop = scrollEl?.scrollTop ?? 0;
-
-          const isChecked = todoDiv.getAttribute("data-checked") === "true";
-          todoDiv.setAttribute("data-checked", String(!isChecked));
-          syncContent();
-
-          requestAnimationFrame(() => {
-            if (scrollEl) scrollEl.scrollTop = scrollTop;
-          });
-        }
       }
     },
-    [syncContent]
+    []
   );
 
   // ── Paste handler: plain text only (no execCommand) ──
@@ -4251,6 +4262,7 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
             style={{ caretColor: "var(--text-1)" }}
             onInput={handleInput}
             onKeyDown={handleKeyDown}
+            onPointerDown={handleTodoPointerDown}
             onClick={(e) => {
               handleClick(e);
               // Close slash menu on click outside it
