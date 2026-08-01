@@ -1,0 +1,11 @@
+# Supabase-Konfiguration — nur fürs Deployen der Edge Function via CLI.
+project_id = "uunniiuixkznhocyuwmz"
+
+# Die Server-Funktion wird unter dem Namen "make-server-2a26506b" deployt
+# (das Frontend ruft sie als /functions/v1/make-server-2a26506b/... auf),
+# der Code liegt aber im Ordner "server" → entrypoint zeigt dorthin.
+# verify_jwt = true: die Funktion verlangt einen gültigen Bearer-Token
+# (User-JWT ODER anon key) — beides schickt apiFetch ohnehin mit.
+[functions.make-server-2a26506b]
+verify_jwt = true
+entrypoint = "./functions/server/index.tsx"
