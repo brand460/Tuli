@@ -1037,7 +1037,7 @@ app.post("/make-server-2a26506b/scan-shopping-list", async (c) => {
 
     const gemini = await callGemini({
       apiKey,
-      maxOutputTokens: 2048,
+      maxOutputTokens: 8192,
       system: `Du bist ein Assistent der handgeschriebene Einkaufslisten erkennt. 
 Antworte NUR mit einem JSON-Array, kein weiterer Text, keine Markdown-Backticks.
 Format: [{"name": "Artikelname", "quantity": 1}]
@@ -1229,7 +1229,7 @@ app.post("/make-server-2a26506b/import-recipe", async (c) => {
     ].join("\n");
     const gemini = await callGemini({
       apiKey,
-      maxOutputTokens: 2048,
+      maxOutputTokens: 8192,
       system: recipeSystemPrompt,
       parts: [{ text: `URL: ${url}\n\nInhalt:\n${pageContent}` }],
     });

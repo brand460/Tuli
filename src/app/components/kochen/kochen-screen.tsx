@@ -121,6 +121,17 @@ async function callGemini(opts: {
   );
 }
 
+// Holt sauberes JSON aus einer KI-Antwort: entfernt ```-Codeblöcke und schneidet
+// auf das erste {...} bzw. [...] zu. Bei aktivem JSON-Modus ist die Antwort meist
+// schon sauber; das hier ist die Absicherung.
+function cleanJson(text: string): string {
+  let t = (text || "").trim();
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) t = fence[1].trim();
+  const obj = t.match(/[{[][\s\S]*[}\]]/);
+  return obj ? obj[0] : t;
+}
+
 // WICHTIG: toISOString() liefert UTC → Off-by-one in lokalen Zeitzonen.
 // Immer lokale Zeitzone verwenden:
 function fmtLocalDate(d: Date): string {
@@ -860,9 +871,10 @@ export function KochenScreen({ openRecipeId, sharedText, onSharedTextConsumed, o
       const timeout = setTimeout(() => controller.abort(), 30000);
       const rawText = await callGemini({
         apiKey: geminiKey,
-        maxOutputTokens: 2000,
+        maxOutputTokens: 8192,
         signal: controller.signal,
         parts: [{ text: `Extrahiere das Rezept aus diesem Text. Antworte NUR mit einem JSON-Objekt, kein weiterer Text, keine Markdown-Backticks.
+Gib IMMER echte, vollständige Werte aus — verwende NIEMALS Auslassungspunkte ("...") oder Platzhalter im JSON.
 Format: { "title": "...", "prep_time_minutes": null, "cook_time_minutes": null, "servings": 4, "categories": [], "ingredients": [{"name": "...", "quantity": "...", "unit": "...", "category": "..."}], "steps": [{"position": 1, "description": "..."}] }
 
 SPRACHE & ÜBERSETZUNG (PFLICHT):
@@ -883,9 +895,7 @@ Text:
 ${textInput}` }],
       });
       clearTimeout(timeout);
-      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error("Kein JSON in der Antwort");
-      const parsed = JSON.parse(jsonMatch[0]);
+      const parsed = JSON.parse(cleanJson(rawText));
       if (parsed.error) {
         toast.error("Kein Rezept erkannt — bitte nochmal versuchen");
         return;
@@ -2278,7 +2288,7 @@ Extraktionsregeln:
                 const timeout = setTimeout(() => controller.abort(), 30000);
                 const text = await callGemini({
                   apiKey: geminiKey,
-                  maxOutputTokens: 2000,
+                  maxOutputTokens: 8192,
                   signal: controller.signal,
                   parts: [
                     { inline_data: { mime_type: "image/jpeg", data: base64Image } },
@@ -2286,9 +2296,7 @@ Extraktionsregeln:
                   ],
                 });
                 clearTimeout(timeout);
-                const jsonMatch = text.match(/\{[\s\S]*\}/);
-                if (!jsonMatch) throw new Error("Kein JSON in der Antwort");
-                const parsed = JSON.parse(jsonMatch[0]);
+                const parsed = JSON.parse(cleanJson(text));
                 const capitalizeFirst = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
                 const newRecipe: Recipe = {
                   ...emptyRecipe(),
