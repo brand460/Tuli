@@ -201,6 +201,18 @@ export function hasPendingContentWrites(): boolean {
   return pageChains.size > 0;
 }
 
+// ── "Kürzlich lokal bearbeitet"-Fenster ─────────────────────────────────────
+// Schützt eine frisch getippte Seite davor, dass ein (oft eigenes, leicht
+// veraltetes) Realtime-Echo sie überschreibt. Wird bei JEDER lokalen Änderung
+// SOFORT aktualisiert (nicht erst beim Start des debounced Saves).
+const lastLocalEditAt = new Map<string, number>();
+export function markLocalEdit(pageId: string): void {
+  lastLocalEditAt.set(pageId, Date.now());
+}
+export function getLastLocalEditAt(pageId: string): number {
+  return lastLocalEditAt.get(pageId) ?? 0;
+}
+
 // ── Keepalive-Notfall-Save für das tatsächliche App-Schließen (pagehide) ────
 // Beim echten Teardown (Tab/PWA schließen) wird der JS-Kontext verworfen, bevor
 // ein normaler supabase-js-Request fertig ist — und supabase-js unterstützt

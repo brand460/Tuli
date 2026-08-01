@@ -80,6 +80,8 @@ import {
   syncStoreSettingsDiff,
   hasPendingRowWrite,
   hasAnyPendingRowWrite,
+  markLocalEdit,
+  getLastLocalEditAt,
 } from "./shopping-sync";
 import { useBackHandler } from "../ui/use-back-handler";
 import { useAuth } from "../auth-context";
@@ -3229,6 +3231,12 @@ export function EinkaufenScreen({
       onInsert: (item) => {
         if (activeDragIdRef.current) return;
         if (hasPendingRowWrite(`item:${item.id}`)) return;
+        // Frisch lokal geänderte Zeile: Echo ~1,5s zurückstellen — der Reconcile
+        // gleicht danach vom Server ab (kein Datenverlust, nur Verzögerung).
+        if (Date.now() - getLastLocalEditAt(`item:${item.id}`) < 1500) {
+          scheduleReconcile();
+          return;
+        }
         const base = latestItemsRef.current;
         const next = base.some((i) => i.id === item.id)
           ? base.map((i) => (i.id === item.id ? item : i))
@@ -3241,6 +3249,12 @@ export function EinkaufenScreen({
       onUpdate: (item) => {
         if (activeDragIdRef.current) return;
         if (hasPendingRowWrite(`item:${item.id}`)) return;
+        // Frisch lokal geänderte Zeile: Echo ~1,5s zurückstellen — der Reconcile
+        // gleicht danach vom Server ab (kein Datenverlust, nur Verzögerung).
+        if (Date.now() - getLastLocalEditAt(`item:${item.id}`) < 1500) {
+          scheduleReconcile();
+          return;
+        }
         const base = latestItemsRef.current;
         const next = base.some((i) => i.id === item.id)
           ? base.map((i) => (i.id === item.id ? item : i))
@@ -3263,6 +3277,10 @@ export function EinkaufenScreen({
       onUpsert: (entryRaw) => {
         const entry = entryRaw as unknown as StoreSettingEntry;
         if (hasPendingRowWrite(`store:${entry.store_id}`)) return;
+        if (Date.now() - getLastLocalEditAt(`store:${entry.store_id}`) < 1500) {
+          scheduleReconcile();
+          return;
+        }
         const others = latestSettingsRef.current.filter(
           (s) => s.store_id !== entry.store_id,
         );
@@ -3344,6 +3362,25 @@ export function EinkaufenScreen({
       lastLocalChangeRef.current = Date.now();
       setItems((prev) => {
         const next = updater(prev);
+        // Jede tatsächlich geänderte/neue Zeile SOFORT als lokal bearbeitet
+        // markieren, damit eingehende Echos für diese Zeilen ~1,5s warten.
+        const prevMap = new Map(prev.map((i) => [i.id, i]));
+        for (const it of next) {
+          const p = prevMap.get(it.id);
+          if (
+            !p ||
+            p.is_checked !== it.is_checked ||
+            p.quantity !== it.quantity ||
+            p.name !== it.name ||
+            p.position !== it.position ||
+            p.category !== it.category ||
+            p.store !== it.store ||
+            p.unit !== it.unit ||
+            p.manually_positioned !== it.manually_positioned
+          ) {
+            markLocalEdit(`item:${it.id}`);
+          }
+        }
         latestItemsRef.current = next;
         debouncedSave(next);
         return next;
@@ -3387,6 +3424,14 @@ export function EinkaufenScreen({
       lastLocalChangeRef.current = Date.now();
       setStoreSettings((prev) => {
         const next = updater(prev);
+        // Jeden tatsächlich geänderten Laden SOFORT als lokal bearbeitet markieren.
+        const prevMap = new Map(prev.map((s) => [s.store_id, s]));
+        for (const s of next) {
+          const p = prevMap.get(s.store_id);
+          if (!p || JSON.stringify(p) !== JSON.stringify(s)) {
+            markLocalEdit(`store:${s.store_id}`);
+          }
+        }
         latestSettingsRef.current = next;
         debouncedSaveSettings(next);
         return next;

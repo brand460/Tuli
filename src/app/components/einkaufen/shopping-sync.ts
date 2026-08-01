@@ -154,6 +154,18 @@ export function hasAnyPendingRowWrite(): boolean {
   return writeChains.size > 0;
 }
 
+// ── "Kürzlich lokal bearbeitet"-Fenster (pro item:/store:-Key) ──────────────
+// Schützt eine frisch geänderte Zeile davor, dass ein (oft eigenes, leicht
+// veraltetes) Realtime-Echo sie überschreibt. Wird bei JEDER lokalen Änderung
+// SOFORT aktualisiert (nicht erst beim Start des debounced Saves).
+const lastLocalEditAt = new Map<string, number>();
+export function markLocalEdit(key: string): void {
+  lastLocalEditAt.set(key, Date.now());
+}
+export function getLastLocalEditAt(key: string): number {
+  return lastLocalEditAt.get(key) ?? 0;
+}
+
 // ── Shopping items: CRUD ────────────────────────────────────────────────────
 export async function fetchShoppingItems(householdId: string): Promise<ShoppingItem[]> {
   const { data, error } = await supabase

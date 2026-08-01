@@ -27,6 +27,8 @@ import {
   savePageContent,
   hasPendingContentWrite,
   flushContentsKeepalive,
+  markLocalEdit,
+  getLastLocalEditAt,
   subscribeNotes,
 } from "./notes-sync";
 import { useBackHandler, pushBack, removeBack } from "../ui/use-back-handler";
@@ -436,6 +438,37 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
   // aktiv bearbeiteten (fokussierten) Seite wird NICHT überschrieben.
   const activePageIdRef = useRef(activePageId);
   activePageIdRef.current = activePageId;
+
+  // Verzögertes Anwenden von Remote-Updates: Während für eine Seite gerade
+  // getippt wird, wird das jeweils NEUESTE eingehende Update nur gemerkt und
+  // erst angewendet, wenn ~1,5 s lang keine lokale Änderung mehr kam. Nichts
+  // geht verloren, es wird nur verzögert (Cursor-Jump beim späteren Anwenden ok).
+  const REMOTE_DEFER_MS = 1500;
+  const pendingRemoteContentRef = useRef<Record<string, string>>({});
+  const remoteFlushTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const applyRemoteContent = useCallback((pid: string, content: string) => {
+    syncedContentsRef.current = { ...syncedContentsRef.current, [pid]: content };
+    setPageContents((prev) => (prev[pid] === content ? prev : { ...prev, [pid]: content }));
+  }, []);
+  const scheduleRemoteFlush = useCallback((pid: string) => {
+    if (remoteFlushTimersRef.current[pid]) clearTimeout(remoteFlushTimersRef.current[pid]);
+    remoteFlushTimersRef.current[pid] = setTimeout(function run() {
+      const content = pendingRemoteContentRef.current[pid];
+      if (content === undefined) {
+        delete remoteFlushTimersRef.current[pid];
+        return;
+      }
+      if (!hasPendingContentWrite(pid) && Date.now() - getLastLocalEditAt(pid) >= REMOTE_DEFER_MS) {
+        delete pendingRemoteContentRef.current[pid];
+        delete remoteFlushTimersRef.current[pid];
+        applyRemoteContent(pid, content);
+      } else {
+        // Noch aktiv / Save läuft — kurz später erneut prüfen.
+        remoteFlushTimersRef.current[pid] = setTimeout(run, 500);
+      }
+    }, REMOTE_DEFER_MS + 100);
+  }, [applyRemoteContent]);
+
   useEffect(() => {
     if (!householdId) return;
     const ch = subscribeNotes(householdId, {
@@ -451,22 +484,32 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
         if (!syncedPageIdsRef.current.includes(page.id)) {
           syncedPageIdsRef.current = [...syncedPageIdsRef.current, page.id];
         }
-        // Inhalt IMMER übernehmen (auch bei fokussiertem Editor), damit beide
-        // Geräte denselben Stand sehen und keine Eingabe still verloren geht.
-        // AUSNAHME (Echo-Schutz): läuft für diese Seite gerade ein eigener Save,
-        // NICHT anwenden — sonst überschreibt der eigene Echo unsere noch nicht
-        // bestätigte Änderung. Cursor-Jumps sind bewusst akzeptiert.
-        if (!hasPendingContentWrite(page.id)) {
-          syncedContentsRef.current = {
-            ...syncedContentsRef.current,
-            [page.id]: content,
-          };
-          setPageContents((prev) =>
-            prev[page.id] === content ? prev : { ...prev, [page.id]: content },
-          );
+        // Inhalt anwenden — ABER nur, wenn wir diese Seite nicht gerade selbst
+        // speichern (Echo-Schutz) UND seit der letzten lokalen Änderung
+        // mindestens ~1,5 s vergangen sind. Sonst: den neuesten Remote-Stand
+        // merken und anwenden, sobald die lokale Aktivität kurz pausiert — so
+        // überschreibt ein (oft eigenes, veraltetes) Echo keine frische Eingabe.
+        if (
+          !hasPendingContentWrite(page.id) &&
+          Date.now() - getLastLocalEditAt(page.id) >= REMOTE_DEFER_MS
+        ) {
+          delete pendingRemoteContentRef.current[page.id];
+          if (remoteFlushTimersRef.current[page.id]) {
+            clearTimeout(remoteFlushTimersRef.current[page.id]);
+            delete remoteFlushTimersRef.current[page.id];
+          }
+          applyRemoteContent(page.id, content);
+        } else {
+          pendingRemoteContentRef.current[page.id] = content;
+          scheduleRemoteFlush(page.id);
         }
       },
       onDelete: (id) => {
+        delete pendingRemoteContentRef.current[id];
+        if (remoteFlushTimersRef.current[id]) {
+          clearTimeout(remoteFlushTimersRef.current[id]);
+          delete remoteFlushTimersRef.current[id];
+        }
         const copy = { ...syncedContentsRef.current };
         delete copy[id];
         syncedContentsRef.current = copy;
@@ -559,6 +602,10 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
 
   const updatePageContent = useCallback(
     (pageId: string, html: string) => {
+      // SOFORT (bei jedem Tastenanschlag) als lokale Änderung markieren, damit
+      // eingehende Remote-Echos für diese Seite ~1,5 s zurückgestellt werden.
+      markLocalEdit(pageId);
+      scheduleRemoteFlush(pageId);
       setPageContents((prev) => {
         const next = { ...prev, [pageId]: html };
         setPages((pp) => {
@@ -568,7 +615,7 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
         return next;
       });
     },
-    [scheduleSave]
+    [scheduleSave, scheduleRemoteFlush]
   );
 
   const createPage = useCallback(
