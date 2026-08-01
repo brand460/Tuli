@@ -146,6 +146,14 @@ export function hasPendingRowWrite(key: string): boolean {
   return writeChains.has(key);
 }
 
+/** True, solange für IRGENDEINE Zeile (Item oder Store) noch ein Schreibvorgang
+ *  läuft/ansteht. Genutzt, um einen Reconcile-Reload erst dann zuzulassen, wenn
+ *  die Schreib-Queue komplett leer ist (sonst würde ein noch unvollständiger
+ *  Serverstand die eigenen optimistischen Änderungen zurücksetzen). */
+export function hasAnyPendingRowWrite(): boolean {
+  return writeChains.size > 0;
+}
+
 // ── Shopping items: CRUD ────────────────────────────────────────────────────
 export async function fetchShoppingItems(householdId: string): Promise<ShoppingItem[]> {
   const { data, error } = await supabase

@@ -27,7 +27,6 @@ import {
   savePageContent,
   hasPendingContentWrite,
   flushContentsKeepalive,
-  fetchPageContent,
   subscribeNotes,
 } from "./notes-sync";
 import { useBackHandler, pushBack, removeBack } from "../ui/use-back-handler";
@@ -437,34 +436,6 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
   // aktiv bearbeiteten (fokussierten) Seite wird NICHT überschrieben.
   const activePageIdRef = useRef(activePageId);
   activePageIdRef.current = activePageId;
-  const pageContentsRef = useRef(pageContents);
-  pageContentsRef.current = pageContents;
-
-  // Beim Verlassen des Editors (Blur) den aktuellen Serverstand DIESER Seite
-  // nachladen — so „holt“ der Sync auf, nachdem Remote-Updates während der
-  // Fokussierung bewusst nicht übernommen wurden. Nur anwenden, wenn wir für
-  // die Seite keine ungespeicherte lokale Änderung haben (sonst gewinnt unser
-  // eigener Save — „letzter Speichervorgang gewinnt“ pro Seite).
-  const reconcileActivePage = useCallback(async () => {
-    const pid = activePageIdRef.current;
-    if (!pid || !householdId) return;
-    if (hasPendingContentWrite(pid)) return;
-    const local = pageContentsRef.current[pid];
-    if (local !== undefined && local !== syncedContentsRef.current[pid]) return;
-    try {
-      const remote = await fetchPageContent(pid);
-      if (remote == null) return;
-      // Editor darf nicht (wieder) fokussiert sein.
-      const active = document.activeElement as HTMLElement | null;
-      if (active && active.isContentEditable && activePageIdRef.current === pid) return;
-      if (remote !== syncedContentsRef.current[pid]) {
-        syncedContentsRef.current = { ...syncedContentsRef.current, [pid]: remote };
-        setPageContents((prev) => (prev[pid] === remote ? prev : { ...prev, [pid]: remote }));
-      }
-    } catch {
-      /* transient — nächster Focus/Visibility gleicht ab */
-    }
-  }, [householdId]);
   useEffect(() => {
     if (!householdId) return;
     const ch = subscribeNotes(householdId, {
@@ -480,13 +451,12 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
         if (!syncedPageIdsRef.current.includes(page.id)) {
           syncedPageIdsRef.current = [...syncedPageIdsRef.current, page.id];
         }
-        // Inhalt nur übernehmen, wenn wir DIESE Seite nicht gerade selbst
-        // bearbeiten und kein eigener Save für sie läuft (Echo-/Clobber-Schutz).
-        const editingThisPage =
-          page.id === activePageIdRef.current &&
-          !!document.activeElement &&
-          (document.activeElement as HTMLElement).isContentEditable;
-        if (!editingThisPage && !hasPendingContentWrite(page.id)) {
+        // Inhalt IMMER übernehmen (auch bei fokussiertem Editor), damit beide
+        // Geräte denselben Stand sehen und keine Eingabe still verloren geht.
+        // AUSNAHME (Echo-Schutz): läuft für diese Seite gerade ein eigener Save,
+        // NICHT anwenden — sonst überschreibt der eigene Echo unsere noch nicht
+        // bestätigte Änderung. Cursor-Jumps sind bewusst akzeptiert.
+        if (!hasPendingContentWrite(page.id)) {
           syncedContentsRef.current = {
             ...syncedContentsRef.current,
             [page.id]: content,
@@ -951,7 +921,6 @@ export function ListenScreen({ openPageId, onRegisterReset }: { openPageId?: str
                 onOpenEmojiPicker={() => setEmojiPickerPageId(activePage.id)}
                 hasCheckboxes={activePageHasCheckboxes}
                 onResetCheckboxes={resetCheckboxes}
-                onEditorBlur={reconcileActivePage}
               />
             ) : (
               /* Desktop-Fallback — sollte durch Auto-Select nie erreicht werden */
@@ -2012,6 +1981,23 @@ function EmojiPicker({ onSelect, onClose }: { onSelect: (emoji: string) => void;
 
 // ── Page Editor (single contentEditable) ─────────────────────────────
 
+// Setzt den Cursor ans Ende des Editor-Inhalts (nach dem Anwenden eines
+// Remote-Updates bei fokussiertem Editor — verhindert einen "verlorenen" Cursor).
+function placeCaretAtEnd(el: HTMLElement) {
+  try {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    const sel = window.getSelection();
+    if (sel) {
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+  } catch {
+    /* ignore — Cursor-Position ist nicht kritisch */
+  }
+}
+
 interface PageEditorProps {
   page: Page;
   content: string;
@@ -2022,7 +2008,6 @@ interface PageEditorProps {
   onOpenEmojiPicker: () => void;
   hasCheckboxes?: boolean;
   onResetCheckboxes?: () => void;
-  onEditorBlur?: () => void;
 }
 
 // ── Slash-command menu items ──
@@ -2037,7 +2022,7 @@ const SLASH_ITEMS = [
   { id: "table", label: "Tabelle", icon: "\ud83d\udcca" },
 ];
 
-function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage, onContentChange, onOpenEmojiPicker, hasCheckboxes, onResetCheckboxes, onEditorBlur }: PageEditorProps) {
+function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage, onContentChange, onOpenEmojiPicker, hasCheckboxes, onResetCheckboxes }: PageEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -2180,16 +2165,18 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
       return;
     }
 
-    // Remote update: content prop changed but NOT from our own editing
+    // Remote update: content prop changed but NOT from our own editing.
+    // Den Remote-Stand IMMER anwenden (auch bei fokussiertem Editor), damit
+    // beide Geräte denselben Stand sehen und keine Eingabe still verloren geht.
+    // Cursor-Jumps sind bewusst akzeptiert; war der Editor fokussiert, setzen
+    // wir den Cursor ans Textende (einfachste sichere Option).
     if (content !== lastKnownContentRef.current) {
       const currentHtml = editorRef.current.innerHTML;
       if (content !== currentHtml) {
-        // Only update DOM if editor is not focused (avoids cursor jump while typing)
-        const editorHasFocus = editorRef.current === document.activeElement
+        const hadFocus = editorRef.current === document.activeElement
           || editorRef.current.contains(document.activeElement);
-        if (!editorHasFocus) {
-          editorRef.current.innerHTML = content || "<p><br></p>";
-        }
+        editorRef.current.innerHTML = content || "<p><br></p>";
+        if (hadFocus) placeCaretAtEnd(editorRef.current);
       }
       lastKnownContentRef.current = content;
     }
@@ -4231,9 +4218,6 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
               if (slashOpen) closeSlashMenu();
               ensureNotEmpty();
               syncContent();
-              // Nach dem Verlassen: Serverstand dieser Seite nachladen, damit der
-              // Sync aufholt (Remote-Updates während Fokus wurden übersprungen).
-              onEditorBlur?.();
             }}
           />
 

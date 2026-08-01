@@ -79,6 +79,7 @@ import {
   syncItemsDiff,
   syncStoreSettingsDiff,
   hasPendingRowWrite,
+  hasAnyPendingRowWrite,
 } from "./shopping-sync";
 import { useBackHandler } from "../ui/use-back-handler";
 import { useAuth } from "../auth-context";
@@ -3190,6 +3191,14 @@ export function EinkaufenScreen({
     const scheduleReconcile = () => {
       if (reconcileTimer) clearTimeout(reconcileTimer);
       reconcileTimer = setTimeout(async () => {
+        // Nie nachladen, solange noch EIGENE Schreibvorgänge in der Queue sind —
+        // sonst überschreibt ein noch unvollständiger Serverstand die
+        // optimistischen lokalen Änderungen (schnell abgehakte Items kämen
+        // zurück). Stattdessen erneut versuchen, bis die Queue leer ist.
+        if (hasAnyPendingRowWrite()) {
+          scheduleReconcile();
+          return;
+        }
         try {
           const [serverItems, serverSettings] = await Promise.all([
             fetchItems(householdId),
