@@ -29,19 +29,86 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 3, delayMs = 300): P
 }
 
 // ── Gemini (Google) API helper ──────────────────────────────────
-// EIN zentraler Ort für den Modellnamen. "gemini-flash-latest" ist ein stabiler
-// Alias auf das jeweils aktuelle, günstige Flash-Modell — so bricht der Import
-// nicht mehr, wenn eine einzelne datierte Modellversion abgeschaltet wird.
-const GEMINI_MODEL = "gemini-flash-latest";
+// Modell-UNABHÄNGIG: statt einen fixen Modellnamen zu verdrahten, fragen wir
+// zur Laufzeit die Gemini-ListModels-API ab und wählen automatisch die
+// günstigsten & verfügbarsten Modelle, die generateContent können. So findet
+// der Import auch in Zukunft ein Modell, ohne dass Code angepasst werden muss.
 
 type GeminiPart = { text: string } | { inline_data: { mime_type: string; data: string } };
 
-async function callGemini(opts: {
-  apiKey: string;
-  parts: GeminiPart[];
-  system?: string;
-  maxOutputTokens?: number;
-}): Promise<{ ok: true; text: string } | { ok: false; status: number; error: string }> {
+// Reine Namens-Heuristik zur Priorisierung (kein hartkodiertes Modell):
+// günstigste Stufe zuerst (flash-lite > flash > pro), stabile "latest"-Aliase
+// bevorzugt, Preview/Experimental abgewertet (schlechter verfügbar), neuere
+// Versionen leicht bevorzugt.
+function scoreGeminiModel(name: string): number {
+  let s = 0;
+  if (name.includes("flash-lite")) s += 1000;
+  else if (name.includes("flash")) s += 800;
+  else if (name.includes("pro")) s += 300;
+  else s += 100;
+  if (name.includes("8b")) s += 150; // besonders günstig
+  if (/preview|exp|experimental/.test(name)) s -= 400; // oft überlastet/limitiert
+  if (name.includes("latest")) s += 60; // stabiler, mitwachsender Alias
+  const v = name.match(/(\d+)\.(\d+)/);
+  if (v) s += parseInt(v[1]) * 12 + parseInt(v[2]);
+  return s;
+}
+
+// Fällt nur, wenn ListModels nicht erreichbar ist. "gemini-flash-latest" ist ein
+// stabiler, mitwachsender Alias und war bisher zuverlässig verfügbar.
+const FALLBACK_GEMINI_MODELS = [
+  "gemini-flash-lite-latest",
+  "gemini-flash-latest",
+  "gemini-pro-latest",
+];
+
+let cachedGeminiModels: { list: string[]; ts: number } | null = null;
+const GEMINI_MODELS_TTL_MS = 30 * 60 * 1000;
+
+async function getRankedGeminiModels(apiKey: string): Promise<string[]> {
+  if (cachedGeminiModels && Date.now() - cachedGeminiModels.ts < GEMINI_MODELS_TTL_MS) {
+    return cachedGeminiModels.list;
+  }
+  try {
+    const res = await fetch(
+      "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000",
+      { headers: { "x-goog-api-key": apiKey } },
+    );
+    if (!res.ok) throw new Error(`ListModels ${res.status}`);
+    const data = await res.json();
+    const models: any[] = data?.models ?? [];
+    const ranked = models
+      .filter(
+        (m) =>
+          Array.isArray(m.supportedGenerationMethods) &&
+          m.supportedGenerationMethods.includes("generateContent"),
+      )
+      .map((m) => String(m.name || "").replace(/^models\//, ""))
+      // Nur textfähige Gemini-Modelle; Spezialmodelle (Embeddings, Bild-/Audio-/
+      // Video-Generierung, TTS, Live) können unsere JSON-Extraktion nicht.
+      .filter(
+        (n) =>
+          n.startsWith("gemini") &&
+          !/embedding|aqa|imagen|veo|-tts|audio|-live|-image|learnlm|gemma/i.test(n),
+      )
+      .sort((a, b) => scoreGeminiModel(b) - scoreGeminiModel(a));
+    if (ranked.length > 0) {
+      const list = ranked.slice(0, 5);
+      cachedGeminiModels = { list, ts: Date.now() };
+      return list;
+    }
+  } catch (e) {
+    console.log("Gemini ListModels fehlgeschlagen, nutze Fallback:", String(e));
+  }
+  return FALLBACK_GEMINI_MODELS;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function callGeminiOnce(
+  model: string,
+  opts: { apiKey: string; parts: GeminiPart[]; system?: string; maxOutputTokens?: number },
+): Promise<{ ok: true; text: string } | { ok: false; status: number; error: string }> {
   const body: any = {
     contents: [{ role: "user", parts: opts.parts }],
     generationConfig: {
@@ -51,14 +118,19 @@ async function callGemini(opts: {
     },
   };
   if (opts.system) body.system_instruction = { parts: [{ text: opts.system }] };
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": opts.apiKey },
-      body: JSON.stringify(body),
-    },
-  );
+  let res: Response;
+  try {
+    res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": opts.apiKey },
+        body: JSON.stringify(body),
+      },
+    );
+  } catch (e) {
+    return { ok: false, status: 0, error: String(e).substring(0, 200) }; // Netzwerkfehler → transient
+  }
   if (!res.ok) {
     const errText = await res.text();
     return { ok: false, status: res.status, error: errText.substring(0, 200) };
@@ -66,8 +138,51 @@ async function callGemini(opts: {
   const data = await res.json();
   const text =
     data?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text ?? "").join("") || "";
+  if (!text) {
+    // Leere Antwort (z.B. Safety-Block auf diesem Modell) → anderes Modell versuchen
+    const reason = data?.candidates?.[0]?.finishReason || "EMPTY";
+    return { ok: false, status: 599, error: `Leere Antwort (${reason})` };
+  }
   return { ok: true, text };
 }
+
+// Öffentliche Helper-Signatur bleibt unverändert. Wählt automatisch das
+// günstigste/verfügbarste Modell und versucht es mehrfach (mit Backoff und
+// Modell-Wechsel) — gesund begrenzt, damit Anfragen durchkommen ohne minutenlange
+// Wartezeit (Worst Case ~5s Wartezeit über alle Versuche).
+async function callGemini(opts: {
+  apiKey: string;
+  parts: GeminiPart[];
+  system?: string;
+  maxOutputTokens?: number;
+}): Promise<{ ok: true; text: string } | { ok: false; status: number; error: string }> {
+  const models = await getRankedGeminiModels(opts.apiKey);
+  const maxAttempts = 5;
+  const backoffs = [400, 900, 1600, 2500]; // ms, mit Jitter
+  let last: { ok: false; status: number; error: string } = {
+    ok: false,
+    status: 0,
+    error: "kein Versuch",
+  };
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const model = models[attempt % models.length];
+    const result = await callGeminiOnce(model, opts);
+    if (result.ok) return result;
+    last = result;
+    // 400 (falsche Eingabe) und 401/403 (Auth) → sofort abbrechen, Retry hilft nicht.
+    const hardFail =
+      result.status === 400 || result.status === 401 || result.status === 403;
+    if (hardFail) return result;
+    // 404 (Modell nicht vorhanden) → direkt nächstes Modell, kein Backoff.
+    // 429/500/503/0/599 (überlastet/limitiert/transient) → Backoff + nächstes Modell.
+    if (attempt < maxAttempts - 1 && result.status !== 404) {
+      const base = backoffs[Math.min(attempt, backoffs.length - 1)];
+      await sleep(base + Math.floor(Math.random() * 250));
+    }
+  }
+  return last;
+}
+
 
 const app = new Hono();
 

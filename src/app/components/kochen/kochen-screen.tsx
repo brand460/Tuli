@@ -77,22 +77,99 @@ function genId() {
 }
 
 // ── Gemini (Google) API ──────────────────────────────────────
-// EIN zentraler Ort für den Modellnamen. "gemini-flash-latest" ist ein stabiler
-// Alias auf das jeweils aktuelle, günstige Flash-Modell — bricht nicht, wenn
-// eine einzelne datierte Modellversion abgeschaltet wird.
-const GEMINI_MODEL = "gemini-flash-latest";
-
+// Modell-UNABHÄNGIG: statt einen fixen Modellnamen zu verdrahten, fragen wir
+// zur Laufzeit die Gemini-ListModels-API ab und wählen automatisch die
+// günstigsten & verfügbarsten Modelle, die generateContent können. Plus
+// begrenzte Retry-Logik (Backoff + Modell-Wechsel) gegen überlastete Server.
 type GeminiPart =
   | { text: string }
   | { inline_data: { mime_type: string; data: string } };
 
-async function callGemini(opts: {
-  apiKey: string;
-  parts: GeminiPart[];
-  system?: string;
-  maxOutputTokens?: number;
-  signal?: AbortSignal;
-}): Promise<string> {
+// Reine Namens-Heuristik: günstigste Stufe zuerst (flash-lite > flash > pro),
+// stabile "latest"-Aliase bevorzugt, Preview/Experimental abgewertet.
+function scoreGeminiModel(name: string): number {
+  let s = 0;
+  if (name.includes("flash-lite")) s += 1000;
+  else if (name.includes("flash")) s += 800;
+  else if (name.includes("pro")) s += 300;
+  else s += 100;
+  if (name.includes("8b")) s += 150;
+  if (/preview|exp|experimental/.test(name)) s -= 400;
+  if (name.includes("latest")) s += 60;
+  const v = name.match(/(\d+)\.(\d+)/);
+  if (v) s += parseInt(v[1]) * 12 + parseInt(v[2]);
+  return s;
+}
+
+const FALLBACK_GEMINI_MODELS = [
+  "gemini-flash-lite-latest",
+  "gemini-flash-latest",
+  "gemini-pro-latest",
+];
+
+let cachedGeminiModels: { list: string[]; ts: number } | null = null;
+const GEMINI_MODELS_TTL_MS = 30 * 60 * 1000;
+
+async function getRankedGeminiModels(apiKey: string, signal?: AbortSignal): Promise<string[]> {
+  if (cachedGeminiModels && Date.now() - cachedGeminiModels.ts < GEMINI_MODELS_TTL_MS) {
+    return cachedGeminiModels.list;
+  }
+  try {
+    const res = await fetch(
+      "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000",
+      { headers: { "x-goog-api-key": apiKey }, signal },
+    );
+    if (!res.ok) throw new Error(`ListModels ${res.status}`);
+    const data = await res.json();
+    const models: any[] = data?.models ?? [];
+    const ranked = models
+      .filter(
+        (m) =>
+          Array.isArray(m.supportedGenerationMethods) &&
+          m.supportedGenerationMethods.includes("generateContent"),
+      )
+      .map((m) => String(m.name || "").replace(/^models\//, ""))
+      .filter(
+        (n) =>
+          n.startsWith("gemini") &&
+          !/embedding|aqa|imagen|veo|-tts|audio|-live|-image|learnlm|gemma/i.test(n),
+      )
+      .sort((a, b) => scoreGeminiModel(b) - scoreGeminiModel(a));
+    if (ranked.length > 0) {
+      const list = ranked.slice(0, 5);
+      cachedGeminiModels = { list, ts: Date.now() };
+      return list;
+    }
+  } catch (e: any) {
+    if (e?.name === "AbortError") throw e;
+    console.log("Gemini ListModels fehlgeschlagen, nutze Fallback:", String(e));
+  }
+  return FALLBACK_GEMINI_MODELS;
+}
+
+const geminiSleep = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(t);
+        reject(new DOMException("Aborted", "AbortError"));
+      },
+      { once: true },
+    );
+  });
+
+async function callGeminiOnce(
+  model: string,
+  opts: {
+    apiKey: string;
+    parts: GeminiPart[];
+    system?: string;
+    maxOutputTokens?: number;
+    signal?: AbortSignal;
+  },
+): Promise<{ ok: true; text: string } | { ok: false; status: number; error: string }> {
   const body: any = {
     contents: [{ role: "user", parts: opts.parts }],
     generationConfig: {
@@ -102,23 +179,63 @@ async function callGemini(opts: {
     },
   };
   if (opts.system) body.system_instruction = { parts: [{ text: opts.system }] };
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": opts.apiKey },
-      body: JSON.stringify(body),
-      signal: opts.signal,
-    },
-  );
+  let res: Response;
+  try {
+    res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": opts.apiKey },
+        body: JSON.stringify(body),
+        signal: opts.signal,
+      },
+    );
+  } catch (e: any) {
+    if (e?.name === "AbortError") throw e;
+    return { ok: false, status: 0, error: String(e).substring(0, 200) };
+  }
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Gemini API: ${res.status} ${errText.substring(0, 200)}`);
+    return { ok: false, status: res.status, error: errText.substring(0, 200) };
   }
   const data = await res.json();
-  return (
-    data?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text ?? "").join("") || ""
-  );
+  const text =
+    data?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text ?? "").join("") || "";
+  if (!text) {
+    const reason = data?.candidates?.[0]?.finishReason || "EMPTY";
+    return { ok: false, status: 599, error: `Leere Antwort (${reason})` };
+  }
+  return { ok: true, text };
+}
+
+// Wählt automatisch das günstigste/verfügbarste Modell und versucht es mehrfach
+// (Backoff + Modell-Wechsel), gesund begrenzt. Die 45s-AbortController der Aufrufer
+// deckeln die Gesamtdauer zusätzlich. Wirft bei endgültigem Fehler (Signatur bleibt).
+async function callGemini(opts: {
+  apiKey: string;
+  parts: GeminiPart[];
+  system?: string;
+  maxOutputTokens?: number;
+  signal?: AbortSignal;
+}): Promise<string> {
+  const models = await getRankedGeminiModels(opts.apiKey, opts.signal);
+  const maxAttempts = 5;
+  const backoffs = [400, 900, 1600, 2500];
+  let lastErr = "unbekannter Fehler";
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (opts.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    const model = models[attempt % models.length];
+    const r = await callGeminiOnce(model, opts);
+    if (r.ok) return r.text;
+    lastErr = `${r.status} ${r.error}`;
+    const hardFail = r.status === 400 || r.status === 401 || r.status === 403;
+    if (hardFail) throw new Error(`Gemini API: ${lastErr}`);
+    if (attempt < maxAttempts - 1 && r.status !== 404) {
+      const base = backoffs[Math.min(attempt, backoffs.length - 1)];
+      await geminiSleep(base + Math.floor(Math.random() * 250), opts.signal);
+    }
+  }
+  throw new Error(`Gemini API: ${lastErr}`);
 }
 
 // Holt sauberes JSON aus einer KI-Antwort: entfernt ```-Codeblöcke und schneidet
@@ -868,7 +985,7 @@ export function KochenScreen({ openRecipeId, sharedText, onSharedTextConsumed, o
     setTextExtracting(true);
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30000);
+      const timeout = setTimeout(() => controller.abort(), 45000);
       const rawText = await callGemini({
         apiKey: geminiKey,
         maxOutputTokens: 8192,
@@ -2285,7 +2402,7 @@ Extraktionsregeln:
                 });
                 // Call Claude Vision API
                 const controller = new AbortController();
-                const timeout = setTimeout(() => controller.abort(), 30000);
+                const timeout = setTimeout(() => controller.abort(), 45000);
                 const text = await callGemini({
                   apiKey: geminiKey,
                   maxOutputTokens: 8192,
