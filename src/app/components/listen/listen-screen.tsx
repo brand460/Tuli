@@ -2080,6 +2080,9 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
   const dragSrcRef = useRef<HTMLElement | null>(null);
   const [dropIdx, setDropIdx] = useState<number | null>(null);
   const isConvertingRef = useRef(false);
+  // Guards the beforeinput fallback against running when a real keydown for the
+  // same key was just handled (desktop). See beforeinput effect below.
+  const lastKeydownRef = useRef<{ key: string; time: number }>({ key: "", time: 0 });
 
   // ── Li drag handles ──────────────────────────────────────────────
   const editorWrapperRef = useRef<HTMLDivElement>(null);
@@ -2773,10 +2776,24 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
       setSlashOpen(false);
       setSlashFilter("");
 
+      // Strip the "/<filter>" the user typed at the start of the line; keep any
+      // remaining content so an existing word can be formatted in place.
+      const prefixLen = 1 + slashFilter.length;
+      const firstNode = blockEl.firstChild;
+      if (firstNode && firstNode.nodeType === Node.TEXT_NODE) {
+        (firstNode as Text).deleteData(0, Math.min(prefixLen, (firstNode as Text).length));
+      }
+      const hasContent = !!(blockEl.textContent || "").trim();
+      // Move the block's remaining children into a new element of the given tag.
+      const moveInto = (el: HTMLElement) => {
+        while (blockEl.firstChild) el.appendChild(blockEl.firstChild);
+        if (!hasContent) el.innerHTML = "<br>";
+      };
+
       switch (id) {
         case "bullet": {
           const li = document.createElement("li");
-          li.innerHTML = "<br>";
+          moveInto(li);
           const ul = document.createElement("ul");
           ul.appendChild(li);
           blockEl.replaceWith(ul);
@@ -2785,7 +2802,7 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
         }
         case "numbered": {
           const li = document.createElement("li");
-          li.innerHTML = "<br>";
+          moveInto(li);
           const ol = document.createElement("ol");
           ol.appendChild(li);
           blockEl.replaceWith(ol);
@@ -2802,7 +2819,7 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
           todoDiv.appendChild(checkbox);
           const textSpan = document.createElement("span");
           textSpan.className = "editor-todo-text";
-          textSpan.innerHTML = "<br>";
+          moveInto(textSpan);
           todoDiv.appendChild(textSpan);
           blockEl.replaceWith(todoDiv);
           placeCursorAtStart(textSpan);
@@ -2810,21 +2827,21 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
         }
         case "h1": {
           const h = document.createElement("h1");
-          h.innerHTML = "<br>";
+          moveInto(h);
           blockEl.replaceWith(h);
           placeCursorAtStart(h);
           break;
         }
         case "h2": {
           const h = document.createElement("h2");
-          h.innerHTML = "<br>";
+          moveInto(h);
           blockEl.replaceWith(h);
           placeCursorAtStart(h);
           break;
         }
         case "h3": {
           const h = document.createElement("h3");
-          h.innerHTML = "<br>";
+          moveInto(h);
           blockEl.replaceWith(h);
           placeCursorAtStart(h);
           break;
@@ -2855,7 +2872,7 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
       }
       syncContent();
     },
-    [placeCursorAtStart, syncContent, createTable]
+    [placeCursorAtStart, syncContent, createTable, slashFilter]
   );
 
   // ── Open slash menu at current cursor position ──
@@ -3111,7 +3128,14 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
           if (!slashOpen) {
             openSlashMenu(blockEl);
           }
-          setSlashFilter(text.slice(1));
+          // Filter = only what is typed between the "/" and the caret. Text that
+          // sits AFTER the caret (e.g. an existing word the user put the cursor
+          // in front of) is kept as line content, not treated as filter.
+          const pre = document.createRange();
+          pre.selectNodeContents(blockEl);
+          pre.setEnd(range.startContainer, range.startOffset);
+          const caretOffset = pre.toString().length;
+          setSlashFilter(text.slice(1, caretOffset));
           syncContent();
           return;
         }
@@ -3698,16 +3722,30 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
 
         const blockEl = getBlockElement(range.startContainer);
 
-        // Backspace on empty heading → convert to <p>
-        if (blockEl && /^H[1-3]$/.test(blockEl.tagName)) {
-          if (range.startOffset === 0 && (!blockEl.textContent || blockEl.textContent.length === 0)) {
-            e.preventDefault();
-            const newP = document.createElement("p");
-            newP.innerHTML = "<br>";
-            blockEl.replaceWith(newP);
-            placeCursorAtStart(newP);
-            syncContent();
-            return;
+        // Backspace at start of heading with an empty line directly above →
+        // remove that empty line so the heading moves up one row and KEEPS its
+        // formatting (like Word/Docs). Otherwise fall through to native merge.
+        if (blockEl && /^H[1-3]$/.test(blockEl.tagName) && range.startOffset === 0) {
+          let atStart = true;
+          let n: Node | null = range.startContainer;
+          while (n && n !== blockEl) {
+            if (n.previousSibling) { atStart = false; break; }
+            n = n.parentNode;
+          }
+          if (atStart) {
+            const prev = blockEl.previousElementSibling as HTMLElement | null;
+            if (
+              prev &&
+              prev.tagName !== "HR" &&
+              !prev.querySelector("table") &&
+              !(prev.textContent || "").trim()
+            ) {
+              e.preventDefault();
+              prev.remove();
+              placeCursorAtStart(blockEl);
+              syncContent();
+              return;
+            }
           }
         }
 
@@ -3892,6 +3930,38 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
     },
     [getBlockElement, findClosestTag, syncContent, placeCursorAtStart, scrollCursorIntoView, slashOpen, slashFiltered, slashIdx, closeSlashMenu, executeSlashCommand]
   );
+
+  // ── beforeinput: reliable Enter/Backspace on mobile keyboards ──
+  // Mobile soft-keyboards (iOS/Android) often fire keydown with keyCode 229 /
+  // key "Unidentified" instead of "Enter"/"Backspace", so the keydown handler
+  // above never runs and the browser mangles the checklist structure natively.
+  // The native 'beforeinput' event DOES report the intent via inputType, so we
+  // re-route it through the exact same handleKeyDown logic. On desktop, keydown
+  // already calls preventDefault (which suppresses beforeinput), so there is no
+  // double handling.
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const onBeforeInput = (ie: InputEvent) => {
+      let key: string | null = null;
+      if (ie.inputType === "insertParagraph") key = "Enter";
+      else if (ie.inputType === "deleteContentBackward") key = "Backspace";
+      if (!key) return;
+      // A real keydown for this key was just handled → don't run twice (desktop).
+      if (Date.now() - lastKeydownRef.current.time < 100 && lastKeydownRef.current.key === key) {
+        return;
+      }
+      const fakeEvent = {
+        key,
+        shiftKey: false,
+        preventDefault: () => ie.preventDefault(),
+        stopPropagation: () => ie.stopPropagation(),
+      } as unknown as React.KeyboardEvent;
+      handleKeyDown(fakeEvent);
+    };
+    editor.addEventListener("beforeinput", onBeforeInput);
+    return () => editor.removeEventListener("beforeinput", onBeforeInput);
+  }, [handleKeyDown]);
 
   // ── Click handler for to-do checkboxes ──
   // Checkbox abhaken, OHNE den Editor zu fokussieren (keine Tastatur, kein
@@ -4261,7 +4331,12 @@ function PageEditor({ page, content, focusTitle, onClearFocusTitle, onUpdatePage
             className="editor-content outline-none min-h-[200px]"
             style={{ caretColor: "var(--text-1)" }}
             onInput={handleInput}
-            onKeyDown={handleKeyDown}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === "Backspace") {
+                lastKeydownRef.current = { key: e.key, time: Date.now() };
+              }
+              handleKeyDown(e);
+            }}
             onPointerDown={handleTodoPointerDown}
             onClick={(e) => {
               handleClick(e);

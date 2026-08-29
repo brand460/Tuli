@@ -383,6 +383,10 @@
   pointer-events: auto;
   user-select: text;
   -webkit-user-select: text;
+  /* Fill the remaining row width so an empty text span still has a line box —
+     otherwise the caret is invisible until the first character is typed. */
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .editor-content .editor-todo-check:hover {
